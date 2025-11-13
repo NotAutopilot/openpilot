@@ -2,7 +2,7 @@ import pyray as rl
 import time
 import threading
 
-from openpilot.common.api import Api, api_get
+from openpilot.common.api import api_get
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -11,7 +11,7 @@ from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.scroll_panel import GuiScrollPanel
 from openpilot.system.ui.lib.wrap_text import wrap_text
 from openpilot.system.ui.widgets import Widget
-
+from openpilot.selfdrive.ui.lib.api_helpers import get_token
 
 TITLE = "Firehose Mode"
 DESCRIPTION = (
@@ -71,7 +71,7 @@ class FirehoseLayout(Widget):
     content_rect = rl.Rectangle(rect.x, rect.y, rect.width, content_height)
 
     # Handle scrolling and render with clipping
-    scroll_offset = self.scroll_panel.handle_scroll(rect, content_rect)
+    scroll_offset = self.scroll_panel.update(rect, content_rect)
     rl.begin_scissor_mode(int(rect.x), int(rect.y), int(rect.width), int(rect.height))
     self._render_content(rect, scroll_offset)
     rl.end_scissor_mode()
@@ -106,9 +106,9 @@ class FirehoseLayout(Widget):
 
     return height
 
-  def _render_content(self, rect: rl.Rectangle, scroll_offset: rl.Vector2):
+  def _render_content(self, rect: rl.Rectangle, scroll_offset: float):
     x = int(rect.x + 40)
-    y = int(rect.y + 40 + scroll_offset.y)
+    y = int(rect.y + 40 + scroll_offset)
     w = int(rect.width - 80)
 
     # Title
@@ -163,7 +163,7 @@ class FirehoseLayout(Widget):
       dongle_id = self.params.get("DongleId")
       if not dongle_id or dongle_id == UNREGISTERED_DONGLE_ID:
         return
-      identity_token = Api(dongle_id).get_token()
+      identity_token = get_token(dongle_id)
       response = api_get(f"v1/devices/{dongle_id}/firehose_stats", access_token=identity_token)
       if response.status_code == 200:
         data = response.json()

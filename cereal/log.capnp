@@ -585,7 +585,6 @@ struct PandaState @0xa7649e2575e4591e {
   heartbeatLost @22 :Bool;
   interruptLoad @25 :Float32;
   fanPower @28 :UInt8;
-  fanStallCount @34 :UInt8;
 
   spiErrorCount @33 :UInt16;
 
@@ -714,6 +713,7 @@ struct PandaState @0xa7649e2575e4591e {
   usbPowerModeDEPRECATED @12 :PeripheralState.UsbPowerModeDEPRECATED;
   safetyParamDEPRECATED @20 :Int16;
   safetyParam2DEPRECATED @26 :UInt32;
+  fanStallCountDEPRECATED @34 :UInt8;
 }
 
 struct PeripheralState {
@@ -2146,13 +2146,10 @@ struct Joystick {
 struct DriverStateV2 {
   frameId @0 :UInt32;
   modelExecutionTime @1 :Float32;
-  dspExecutionTimeDEPRECATED @2 :Float32;
   gpuExecutionTime @8 :Float32;
   rawPredictions @3 :Data;
 
-  poorVisionProb @4 :Float32;
   wheelOnRightProb @5 :Float32;
-
   leftDriverData @6 :DriverData;
   rightDriverData @7 :DriverData;
 
@@ -2167,10 +2164,13 @@ struct DriverStateV2 {
     leftBlinkProb @7 :Float32;
     rightBlinkProb @8 :Float32;
     sunglassesProb @9 :Float32;
-    occludedProb @10 :Float32;
-    readyProb @11 :List(Float32);
     notReadyProb @12 :List(Float32);
+    occludedProbDEPRECATED @10 :Float32;
+    readyProbDEPRECATED @11 :List(Float32);
   }
+
+  dspExecutionTimeDEPRECATED @2 :Float32;
+  poorVisionProbDEPRECATED @4 :Float32;
 }
 
 struct DriverStateDEPRECATED @0xb83c6cc593ed0a00 {

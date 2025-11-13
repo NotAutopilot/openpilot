@@ -4,14 +4,13 @@ import time
 import threading
 from collections.abc import Callable
 from enum import Enum
-from cereal import messaging, log
+from cereal import messaging, car, log
 from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.common.params import Params, UnknownKeyName
+from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.lib.prime_state import PrimeState
-from openpilot.system.ui.lib.application import DEFAULT_FPS
-from openpilot.system.hardware import HARDWARE
 from openpilot.system.ui.lib.application import gui_app
+from openpilot.system.hardware import HARDWARE
 
 UI_BORDER_SIZE = 30
 BACKLIGHT_OFFROAD = 50
@@ -51,6 +50,7 @@ class UIState:
         "managerState",
         "selfdriveState",
         "longitudinalPlan",
+        "rawAudioData",
       ]
     )
 
@@ -59,6 +59,7 @@ class UIState:
     # UI Status tracking
     self.status: UIStatus = UIStatus.DISENGAGED
     self.started_frame: int = 0
+    self.started_time: float = 0.0
     self._engaged_prev: bool = False
     self._started_prev: bool = False
 
@@ -68,7 +69,10 @@ class UIState:
     self.ignition: bool = False
     self.panda_type: log.PandaState.PandaType = log.PandaState.PandaType.unknown
     self.personality: log.LongitudinalPersonality = log.LongitudinalPersonality.standard
+    self.has_longitudinal_control: bool = False
+    self.CP: car.CarParams | None = None
     self.light_sensor: float = -1.0
+    self._param_update_time: float = 0.0
 
     self._update_params()
 
@@ -86,6 +90,9 @@ class UIState:
     self.sm.update(0)
     self._update_state()
     self._update_status()
+    if time.monotonic() - self._param_update_time > 5.0:
+      self._update_params()
+      self._param_update_time = time.monotonic()
     device.update()
 
   def _update_state(self) -> None:
@@ -105,10 +112,7 @@ class UIState:
     # Handle wide road camera state updates
     if self.sm.updated["wideRoadCameraState"]:
       cam_state = self.sm["wideRoadCameraState"]
-
-      # Scale factor based on sensor type
-      scale = 6.0 if cam_state.sensor == 'ar0231' else 1.0
-      self.light_sensor = max(100.0 - scale * cam_state.exposureValPercent, 0.0)
+      self.light_sensor = max(100.0 - cam_state.exposureValPercent, 0.0)
     elif not self.sm.alive["wideRoadCameraState"] or not self.sm.valid["wideRoadCameraState"]:
       self.light_sensor = -1
 
@@ -134,14 +138,21 @@ class UIState:
       if self.started:
         self.status = UIStatus.DISENGAGED
         self.started_frame = self.sm.frame
+        self.started_time = time.monotonic()
 
       self._started_prev = self.started
 
   def _update_params(self) -> None:
-    try:
-      self.is_metric = self.params.get_bool("IsMetric")
-    except UnknownKeyName:
-      self.is_metric = False
+    self.is_metric = self.params.get_bool("IsMetric")
+
+    # Update longitudinal control state
+    CP_bytes = self.params.get("CarParams")
+    if CP_bytes is not None:
+      self.CP = messaging.log_from_bytes(CP_bytes, car.CarParams)
+      if self.CP.alphaLongitudinalAvailable:
+        self.has_longitudinal_control = self.params.get_bool("AlphaLongitudinalEnabled")
+      else:
+        self.has_longitudinal_control = self.CP.openpilotLongitudinalControl
 
 
 class Device:
@@ -154,7 +165,7 @@ class Device:
 
     self._offroad_brightness: int = BACKLIGHT_OFFROAD
     self._last_brightness: int = 0
-    self._brightness_filter = FirstOrderFilter(BACKLIGHT_OFFROAD, 10.00, 1 / DEFAULT_FPS)
+    self._brightness_filter = FirstOrderFilter(BACKLIGHT_OFFROAD, 10.00, 1 / gui_app.target_fps)
     self._brightness_thread: threading.Thread | None = None
 
   def reset_interactive_timeout(self, timeout: int = -1) -> None:
