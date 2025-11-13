@@ -18,7 +18,7 @@ class LineSeparator(Widget):
 
   def _render(self, _):
     rl.draw_line(int(self._rect.x) + LINE_PADDING, int(self._rect.y),
-                 int(self._rect.x + self._rect.width) - LINE_PADDING * 2, int(self._rect.y),
+                 int(self._rect.x + self._rect.width) - LINE_PADDING, int(self._rect.y),
                  LINE_COLOR)
 
 
@@ -76,3 +76,15 @@ class Scroller(Widget):
       item.render()
 
     rl.end_scissor_mode()
+
+  def show_event(self):
+    super().show_event()
+    # Reset to top
+    self.scroll_panel.set_offset(0)
+    for item in self._items:
+      item.show_event()
+
+  def hide_event(self):
+    super().hide_event()
+    for item in self._items:
+      item.hide_event()

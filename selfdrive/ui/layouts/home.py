@@ -9,6 +9,7 @@ from openpilot.selfdrive.ui.widgets.prime import PrimeWidget
 from openpilot.selfdrive.ui.widgets.setup import SetupWidget
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos
+from openpilot.system.ui.lib.multilang import tr, trn
 from openpilot.system.ui.widgets.label import gui_label
 from openpilot.system.ui.widgets import Widget
 
@@ -36,12 +37,15 @@ class HomeLayout(Widget):
     self.update_alert = UpdateAlert()
     self.offroad_alert = OffroadAlert()
 
+    self._layout_widgets = {HomeLayoutState.UPDATE: self.update_alert, HomeLayoutState.ALERTS: self.offroad_alert}
+
     self.current_state = HomeLayoutState.HOME
     self.last_refresh = 0
     self.settings_callback: callable | None = None
 
     self.update_available = False
     self.alert_count = 0
+    self._version_text = ""
     self._prev_update_available = False
     self._prev_alerts_present = False
 
@@ -60,17 +64,29 @@ class HomeLayout(Widget):
     self._setup_callbacks()
 
   def show_event(self):
+    self._exp_mode_button.show_event()
     self.last_refresh = time.monotonic()
     self._refresh()
 
   def _setup_callbacks(self):
     self.update_alert.set_dismiss_callback(lambda: self._set_state(HomeLayoutState.HOME))
     self.offroad_alert.set_dismiss_callback(lambda: self._set_state(HomeLayoutState.HOME))
+    self._exp_mode_button.set_click_callback(lambda: self.settings_callback() if self.settings_callback else None)
 
   def set_settings_callback(self, callback: Callable):
     self.settings_callback = callback
 
   def _set_state(self, state: HomeLayoutState):
+    # propagate show/hide events
+    if state != self.current_state:
+      if state == HomeLayoutState.HOME:
+        self._exp_mode_button.show_event()
+
+      if state in self._layout_widgets:
+        self._layout_widgets[state].show_event()
+      if self.current_state in self._layout_widgets:
+        self._layout_widgets[self.current_state].hide_event()
+
     self.current_state = state
 
   def _render(self, rect: rl.Rectangle):
@@ -137,10 +153,10 @@ class HomeLayout(Widget):
       highlight_color = rl.Color(75, 95, 255, 255) if self.current_state == HomeLayoutState.UPDATE else rl.Color(54, 77, 239, 255)
       rl.draw_rectangle_rounded(self.update_notif_rect, 0.3, 10, highlight_color)
 
-      text = "UPDATE"
-      text_width = measure_text_cached(font, text, HEAD_BUTTON_FONT_SIZE).x
-      text_x = self.update_notif_rect.x + (self.update_notif_rect.width - text_width) // 2
-      text_y = self.update_notif_rect.y + (self.update_notif_rect.height - HEAD_BUTTON_FONT_SIZE) // 2
+      text = tr("UPDATE")
+      text_size = measure_text_cached(font, text, HEAD_BUTTON_FONT_SIZE)
+      text_x = self.update_notif_rect.x + (self.update_notif_rect.width - text_size.x) // 2
+      text_y = self.update_notif_rect.y + (self.update_notif_rect.height - text_size.y) // 2
       rl.draw_text_ex(font, text, rl.Vector2(int(text_x), int(text_y)), HEAD_BUTTON_FONT_SIZE, 0, rl.WHITE)
 
     # Alert notification button
@@ -151,10 +167,10 @@ class HomeLayout(Widget):
       highlight_color = rl.Color(255, 70, 70, 255) if self.current_state == HomeLayoutState.ALERTS else rl.Color(226, 44, 44, 255)
       rl.draw_rectangle_rounded(self.alert_notif_rect, 0.3, 10, highlight_color)
 
-      alert_text = f"{self.alert_count} ALERT{'S' if self.alert_count > 1 else ''}"
-      text_width = measure_text_cached(font, alert_text, HEAD_BUTTON_FONT_SIZE).x
-      text_x = self.alert_notif_rect.x + (self.alert_notif_rect.width - text_width) // 2
-      text_y = self.alert_notif_rect.y + (self.alert_notif_rect.height - HEAD_BUTTON_FONT_SIZE) // 2
+      alert_text = trn("{} ALERT", "{} ALERTS", self.alert_count).format(self.alert_count)
+      text_size = measure_text_cached(font, alert_text, HEAD_BUTTON_FONT_SIZE)
+      text_x = self.alert_notif_rect.x + (self.alert_notif_rect.width - text_size.x) // 2
+      text_y = self.alert_notif_rect.y + (self.alert_notif_rect.height - text_size.y) // 2
       rl.draw_text_ex(font, alert_text, rl.Vector2(int(text_x), int(text_y)), HEAD_BUTTON_FONT_SIZE, 0, rl.WHITE)
 
     # Version text (right aligned)
@@ -163,7 +179,7 @@ class HomeLayout(Widget):
 
     version_rect = rl.Rectangle(self.header_rect.x + self.header_rect.width - version_text_width, self.header_rect.y,
                                 version_text_width, self.header_rect.height)
-    gui_label(version_rect, self._get_version_text(), 48, rl.WHITE, alignment=rl.GuiTextAlignment.TEXT_ALIGN_RIGHT)
+    gui_label(version_rect, self._version_text, 48, rl.WHITE, alignment=rl.GuiTextAlignment.TEXT_ALIGN_RIGHT)
 
   def _render_home_content(self):
     self._render_left_column()
@@ -194,18 +210,18 @@ class HomeLayout(Widget):
     self._setup_widget.render(setup_rect)
 
   def _refresh(self):
-    # TODO: implement _update_state with a timer
+    self._version_text = self._get_version_text()
     update_available = self.update_alert.refresh()
     alert_count = self.offroad_alert.refresh()
     alerts_present = alert_count > 0
 
     # Show panels on transition from no alert/update to any alerts/update
     if not update_available and not alerts_present:
-      self.current_state = HomeLayoutState.HOME
+      self._set_state(HomeLayoutState.HOME)
     elif update_available and ((not self._prev_update_available) or (not alerts_present and self.current_state == HomeLayoutState.ALERTS)):
-      self.current_state = HomeLayoutState.UPDATE
+      self._set_state(HomeLayoutState.UPDATE)
     elif alerts_present and ((not self._prev_alerts_present) or (not update_available and self.current_state == HomeLayoutState.UPDATE)):
-      self.current_state = HomeLayoutState.ALERTS
+      self._set_state(HomeLayoutState.ALERTS)
 
     self.update_available = update_available
     self.alert_count = alert_count

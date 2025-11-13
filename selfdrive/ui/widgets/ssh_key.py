@@ -7,6 +7,7 @@ from enum import Enum
 
 from openpilot.common.params import Params
 from openpilot.system.ui.lib.application import gui_app, FontWeight
+from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import DialogResult
 from openpilot.system.ui.widgets.button import Button, ButtonStyle
@@ -21,11 +22,13 @@ from openpilot.system.ui.widgets.list_view import (
   BUTTON_WIDTH,
 )
 
+VALUE_FONT_SIZE = 48
+
 
 class SshKeyActionState(Enum):
-  LOADING = "LOADING"
-  ADD = "ADD"
-  REMOVE = "REMOVE"
+  LOADING = tr_noop("LOADING")
+  ADD = tr_noop("ADD")
+  REMOVE = tr_noop("REMOVE")
 
 
 class SshKeyAction(ItemAction):
@@ -38,7 +41,7 @@ class SshKeyAction(ItemAction):
     self._keyboard = Keyboard(min_text_size=1)
     self._params = Params()
     self._error_message: str = ""
-    self._text_font = gui_app.font(FontWeight.MEDIUM)
+    self._text_font = gui_app.font(FontWeight.NORMAL)
     self._button = Button("", click_callback=self._handle_button_click, button_style=ButtonStyle.LIST_ACTION,
                           border_radius=BUTTON_BORDER_RADIUS, font_size=BUTTON_FONT_SIZE)
 
@@ -62,20 +65,20 @@ class SshKeyAction(ItemAction):
 
     # Draw username if exists
     if self._username:
-      text_size = measure_text_cached(self._text_font, self._username, BUTTON_FONT_SIZE)
+      text_size = measure_text_cached(self._text_font, self._username, VALUE_FONT_SIZE)
       rl.draw_text_ex(
         self._text_font,
         self._username,
         (rect.x + rect.width - BUTTON_WIDTH - text_size.x - 30, rect.y + (rect.height - text_size.y) / 2),
-        BUTTON_FONT_SIZE,
+        VALUE_FONT_SIZE,
         1.0,
-        rl.WHITE,
+        rl.Color(170, 170, 170, 255),
       )
 
     # Draw button
     button_rect = rl.Rectangle(rect.x + rect.width - BUTTON_WIDTH, rect.y + (rect.height - BUTTON_HEIGHT) / 2, BUTTON_WIDTH, BUTTON_HEIGHT)
     self._button.set_rect(button_rect)
-    self._button.set_text(self._state.value)
+    self._button.set_text(tr(self._state.value))
     self._button.set_enabled(self._state != SshKeyActionState.LOADING)
     self._button.render(button_rect)
     return False
@@ -83,7 +86,7 @@ class SshKeyAction(ItemAction):
   def _handle_button_click(self):
     if self._state == SshKeyActionState.ADD:
       self._keyboard.reset()
-      self._keyboard.set_title("Enter your GitHub username")
+      self._keyboard.set_title(tr("Enter your GitHub username"))
       gui_app.set_modal_overlay(self._keyboard, callback=self._on_username_submit)
     elif self._state == SshKeyActionState.REMOVE:
       self._params.remove("GithubUsername")
@@ -108,7 +111,7 @@ class SshKeyAction(ItemAction):
       response.raise_for_status()
       keys = response.text.strip()
       if not keys:
-        raise requests.exceptions.HTTPError("No SSH keys found")
+        raise requests.exceptions.HTTPError(tr("No SSH keys found"))
 
       # Success - save keys
       self._params.put("GithubUsername", username)
@@ -117,12 +120,12 @@ class SshKeyAction(ItemAction):
       self._username = username
 
     except requests.exceptions.Timeout:
-      self._error_message = "Request timed out"
+      self._error_message = tr("Request timed out")
       self._state = SshKeyActionState.ADD
     except Exception:
-      self._error_message = f"No SSH keys found for user '{username}'"
+      self._error_message = tr("No SSH keys found for user '{}'").format(username)
       self._state = SshKeyActionState.ADD
 
 
-def ssh_key_item(title: str, description: str):
+def ssh_key_item(title: str | Callable[[], str], description: str | Callable[[], str]) -> ListItem:
   return ListItem(title=title, description=description, action_item=SshKeyAction())

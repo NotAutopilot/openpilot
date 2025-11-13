@@ -3,11 +3,13 @@ import pyray as rl
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
-from openpilot.system.ui.lib.application import gui_app, FontWeight
+from openpilot.system.ui.lib.application import gui_app, FontWeight, FONT_SCALE
+from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.scroll_panel import GuiScrollPanel
 from openpilot.system.ui.lib.wrap_text import wrap_text
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.button import Button, ButtonStyle
+from openpilot.system.ui.lib.text_measure import measure_text_cached
 
 LIST_INDENT_PX = 40
 
@@ -20,6 +22,7 @@ class ElementType(Enum):
   H5 = "h5"
   H6 = "h6"
   P = "p"
+  B = "b"
   UL = "ul"
   LI = "li"
   BR = "br"
@@ -28,6 +31,10 @@ class ElementType(Enum):
 TAG_NAMES = '|'.join([t.value for t in ElementType])
 START_TAG_RE = re.compile(f'<({TAG_NAMES})>')
 END_TAG_RE = re.compile(f'</({TAG_NAMES})>')
+COMMENT_RE = re.compile(r'<!--.*?-->', flags=re.DOTALL)
+DOCTYPE_RE = re.compile(r'<!DOCTYPE[^>]*>')
+HTML_BODY_TAGS_RE = re.compile(r'</?(?:html|head|body)[^>]*>')
+TOKEN_RE = re.compile(r'</[^>]+>|<[^>]+>|[^<\s]+')
 
 
 def is_tag(token: str) -> tuple[bool, bool, ElementType | None]:
@@ -45,15 +52,16 @@ class HtmlElement:
   font_weight: FontWeight
   margin_top: int
   margin_bottom: int
-  line_height: float = 1.2
+  line_height: float = 0.9  # matches Qt visually, unsure why not default 1.2
   indent_level: int = 0
 
 
 class HtmlRenderer(Widget):
   def __init__(self, file_path: str | None = None, text: str | None = None,
-               text_size: dict | None = None, text_color: rl.Color = rl.WHITE):
+               text_size: dict | None = None, text_color: rl.Color = rl.WHITE, center_text: bool = False):
     super().__init__()
     self._text_color = text_color
+    self._center_text = center_text
     self._normal_font = gui_app.font(FontWeight.NORMAL)
     self._bold_font = gui_app.font(FontWeight.BOLD)
     self._indent_level = 0
@@ -61,16 +69,23 @@ class HtmlRenderer(Widget):
     if text_size is None:
       text_size = {}
 
+    self._cached_height: float | None = None
+    self._cached_width: int = -1
+
+    # Base paragraph size (Qt stylesheet default is 48px in offroad alerts)
+    base_p_size = int(text_size.get(ElementType.P, 48))
+
     # Untagged text defaults to <p>
     self.styles: dict[ElementType, dict[str, Any]] = {
-      ElementType.H1: {"size": 68, "weight": FontWeight.BOLD, "margin_top": 20, "margin_bottom": 16},
-      ElementType.H2: {"size": 60, "weight": FontWeight.BOLD, "margin_top": 24, "margin_bottom": 12},
-      ElementType.H3: {"size": 52, "weight": FontWeight.BOLD, "margin_top": 20, "margin_bottom": 10},
-      ElementType.H4: {"size": 48, "weight": FontWeight.BOLD, "margin_top": 16, "margin_bottom": 8},
-      ElementType.H5: {"size": 44, "weight": FontWeight.BOLD, "margin_top": 12, "margin_bottom": 6},
-      ElementType.H6: {"size": 40, "weight": FontWeight.BOLD, "margin_top": 10, "margin_bottom": 4},
-      ElementType.P: {"size": text_size.get(ElementType.P, 38), "weight": FontWeight.NORMAL, "margin_top": 8, "margin_bottom": 12},
-      ElementType.LI: {"size": 38, "weight": FontWeight.NORMAL, "color": rl.Color(40, 40, 40, 255), "margin_top": 6, "margin_bottom": 6},
+      ElementType.H1: {"size": round(base_p_size * 2), "weight": FontWeight.BOLD, "margin_top": 20, "margin_bottom": 16},
+      ElementType.H2: {"size": round(base_p_size * 1.50), "weight": FontWeight.BOLD, "margin_top": 24, "margin_bottom": 12},
+      ElementType.H3: {"size": round(base_p_size * 1.17), "weight": FontWeight.BOLD, "margin_top": 20, "margin_bottom": 10},
+      ElementType.H4: {"size": round(base_p_size * 1.00), "weight": FontWeight.BOLD, "margin_top": 16, "margin_bottom": 8},
+      ElementType.H5: {"size": round(base_p_size * 0.83), "weight": FontWeight.BOLD, "margin_top": 12, "margin_bottom": 6},
+      ElementType.H6: {"size": round(base_p_size * 0.67), "weight": FontWeight.BOLD, "margin_top": 10, "margin_bottom": 4},
+      ElementType.P: {"size": base_p_size, "weight": FontWeight.NORMAL, "margin_top": 8, "margin_bottom": 12},
+      ElementType.B: {"size": base_p_size, "weight": FontWeight.BOLD, "margin_top": 8, "margin_bottom": 12},
+      ElementType.LI: {"size": base_p_size, "weight": FontWeight.NORMAL, "color": rl.Color(40, 40, 40, 255), "margin_top": 6, "margin_bottom": 6},
       ElementType.BR: {"size": 0, "weight": FontWeight.NORMAL, "margin_top": 0, "margin_bottom": 12},
     }
 
@@ -89,16 +104,18 @@ class HtmlRenderer(Widget):
 
   def parse_html_content(self, html_content: str) -> None:
     self.elements.clear()
+    self._cached_height = None
+    self._cached_width = -1
 
     # Remove HTML comments
-    html_content = re.sub(r'<!--.*?-->', '', html_content, flags=re.DOTALL)
+    html_content = COMMENT_RE.sub('', html_content)
 
     # Remove DOCTYPE, html, head, body tags but keep their content
-    html_content = re.sub(r'<!DOCTYPE[^>]*>', '', html_content)
-    html_content = re.sub(r'</?(?:html|head|body)[^>]*>', '', html_content)
+    html_content = DOCTYPE_RE.sub('', html_content)
+    html_content = HTML_BODY_TAGS_RE.sub('', html_content)
 
     # Parse HTML
-    tokens = re.findall(r'</[^>]+>|<[^>]+>|[^<\s]+', html_content)
+    tokens = TOKEN_RE.findall(html_content)
 
     def close_tag():
       nonlocal current_content
@@ -121,6 +138,8 @@ class HtmlRenderer(Widget):
       is_start_tag, is_end_tag, tag = is_tag(token)
       if tag is not None:
         if tag == ElementType.BR:
+          # Close current tag and add a line break
+          close_tag()
           self._add_element(ElementType.BR, "")
 
         elif is_start_tag or is_end_tag:
@@ -177,17 +196,23 @@ class HtmlRenderer(Widget):
         wrapped_lines = wrap_text(font, element.content, element.font_size, int(content_width))
 
         for line in wrapped_lines:
-          if current_y < rect.y - element.font_size:
-            current_y += element.font_size * element.line_height
+          # Use FONT_SCALE from wrapped raylib text functions to match what is drawn
+          if current_y < rect.y - element.font_size * FONT_SCALE:
+            current_y += element.font_size * FONT_SCALE * element.line_height
             continue
 
           if current_y > rect.y + rect.height:
             break
 
-          text_x = rect.x + (max(element.indent_level - 1, 0) * LIST_INDENT_PX)
+          if self._center_text:
+            text_width = measure_text_cached(font, line, element.font_size).x
+            text_x = rect.x + (rect.width - text_width) / 2
+          else:  # left align
+            text_x = rect.x + (max(element.indent_level - 1, 0) * LIST_INDENT_PX)
+
           rl.draw_text_ex(font, line, rl.Vector2(text_x + padding, current_y), element.font_size, 0, self._text_color)
 
-          current_y += element.font_size * element.line_height
+          current_y += element.font_size * FONT_SCALE * element.line_height
 
       # Apply bottom margin
       current_y += element.margin_bottom
@@ -195,6 +220,9 @@ class HtmlRenderer(Widget):
     return current_y - rect.y
 
   def get_total_height(self, content_width: int) -> float:
+    if self._cached_height is not None and self._cached_width == content_width:
+      return self._cached_height
+
     total_height = 0.0
     padding = 20
     usable_width = content_width - (padding * 2)
@@ -211,9 +239,13 @@ class HtmlRenderer(Widget):
         wrapped_lines = wrap_text(font, element.content, element.font_size, int(usable_width))
 
         for _ in wrapped_lines:
-          total_height += element.font_size * element.line_height
+          total_height += element.font_size * FONT_SCALE * element.line_height
 
       total_height += element.margin_bottom
+
+    # Store result in cache
+    self._cached_height = total_height
+    self._cached_width = content_width
 
     return total_height
 
@@ -228,7 +260,7 @@ class HtmlModal(Widget):
     super().__init__()
     self._content = HtmlRenderer(file_path=file_path, text=text)
     self._scroll_panel = GuiScrollPanel()
-    self._ok_button = Button("OK", click_callback=lambda: gui_app.set_modal_overlay(None), button_style=ButtonStyle.PRIMARY)
+    self._ok_button = Button(tr("OK"), click_callback=lambda: gui_app.set_modal_overlay(None), button_style=ButtonStyle.PRIMARY)
 
   def _render(self, rect: rl.Rectangle):
     margin = 50
