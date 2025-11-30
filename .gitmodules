@@ -1,9 +1,11 @@
 [submodule "panda"]
   path = panda
-  url = https://github.com/xnor-tech/panda.git
+  url = https://github.com/NotAutopilot/panda.git
+  branch = master-nap
 [submodule "opendbc"]
   path = opendbc_repo
-  url = https://github.com/xnor-tech/opendbc.git
+  url = https://github.com/NotAutopilot/opendbc.git
+  branch = master-nap
 [submodule "msgq"]
   path = msgq_repo
   url = ../../commaai/msgq.git
