@@ -61,6 +61,7 @@ private:
   void paintCompass(QPainter &p);
   void paintCurveSpeedControl(QPainter &p);
   void paintCurveSpeedControlTraining(QPainter &p);
+  void paintLateralPaused(QPainter &p);
   void paintLongitudinalPaused(QPainter &p);
   void paintPedalIcons(QPainter &p);
   void paintRadarTracks(QPainter &p);
@@ -79,6 +80,7 @@ private:
   bool cscTraining;
   bool experimentalMode;
   bool forceCoast;
+  bool lateralPaused;
   bool longitudinalPaused;
   bool redLight;
 
@@ -118,9 +120,11 @@ private:
   QPixmap pausedIcon;
   QPixmap speedIcon;
   QPixmap stopSignImg;
+  QPixmap turnIcon;
 
   QPoint cemStatusPosition;
   QPoint compassPosition;
+  QPoint lateralPausedPosition;
 
   QSharedPointer<QMovie> cemCurveIcon;
   QSharedPointer<QMovie> cemLeadIcon;

@@ -93,7 +93,9 @@ class FrogPilotPlanner:
 
     self.lateral_acceleration = v_ego**2 * sm["controlsState"].curvature
 
+    self.lateral_check = v_ego >= frogpilot_toggles.pause_lateral_below_speed
     self.lateral_check |= sm["carState"].standstill
+    self.lateral_check &= not sm["frogpilotCarState"].pauseLateral
 
     self.model_length = sm["modelV2"].position.x[-1]
 

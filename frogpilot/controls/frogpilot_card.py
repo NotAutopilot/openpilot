@@ -20,6 +20,7 @@ class FrogPilotCard:
     self.decel_pressed = False
     self.distancePressed_previously = False
     self.force_coast = False
+    self.pause_lateral = False
     self.pause_longitudinal = False
 
     self.gap_counter = 0
@@ -37,6 +38,8 @@ class FrogPilotCard:
       self.handle_experimental_mode(sm, frogpilot_toggles)
     elif sm["carControl"].longActive and getattr(frogpilot_toggles, f"force_coast_via_{key}"):
       self.force_coast = not self.force_coast
+    elif getattr(frogpilot_toggles, f"pause_lateral_via_{key}"):
+      self.pause_lateral = not self.pause_lateral
     elif sm["carControl"].longActive and getattr(frogpilot_toggles, f"pause_longitudinal_via_{key}"):
       self.pause_longitudinal = not self.pause_longitudinal
 
@@ -103,6 +106,7 @@ class FrogPilotCard:
     frogpilotCarState.distanceLongPressed = self.very_long_press_threshold > self.gap_counter >= self.long_press_threshold
     frogpilotCarState.distanceVeryLongPressed = self.gap_counter >= self.very_long_press_threshold
     frogpilotCarState.forceCoast = self.force_coast
+    frogpilotCarState.pauseLateral = self.pause_lateral
     frogpilotCarState.pauseLongitudinal = self.pause_longitudinal
 
     return frogpilotCarState

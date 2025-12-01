@@ -12,6 +12,7 @@ FrogPilotAnnotatedCameraWidget::FrogPilotAnnotatedCameraWidget(QWidget *parent) 
   pausedIcon = loadPixmap("../../frogpilot/assets/other_images/paused_icon.png", {widget_size, widget_size});
   speedIcon = loadPixmap("../../frogpilot/assets/other_images/speed_icon.png", {widget_size, widget_size});
   stopSignImg = loadPixmap("../../frogpilot/assets/other_images/stop_sign.png", {btn_size, btn_size});
+  turnIcon = loadPixmap("../../frogpilot/assets/other_images/turn_icon.png", {widget_size, widget_size});
 
   loadGif("../../frogpilot/assets/other_images/curve_icon.gif", cemCurveIcon, QSize(widget_size, widget_size), this);
   loadGif("../../frogpilot/assets/other_images/lead_icon.gif", cemLeadIcon, QSize(widget_size, widget_size), this);
@@ -159,6 +160,7 @@ void FrogPilotAnnotatedCameraWidget::updateState(const UIState &s, const FrogPil
   forceCoast = frogpilotCarState.getForceCoast();
   laneWidthLeft = frogpilotPlan.getLaneWidthLeft();
   laneWidthRight = frogpilotPlan.getLaneWidthRight();
+  lateralPaused = frogpilotCarState.getPauseLateral();
   longitudinalPaused = frogpilotCarState.getPauseLongitudinal();
   redLight = frogpilotPlan.getRedLight();
   roadCurvature = frogpilotPlan.getRoadCurvature();
@@ -229,6 +231,13 @@ void FrogPilotAnnotatedCameraWidget::paintFrogPilotWidgets(QPainter &p, UIState 
     } else if (isCruiseSet && cscControllingSpeed) {
       paintCurveSpeedControl(p);
     }
+  }
+
+  if (!hideBottomIcons && lateralPaused) {
+    paintLateralPaused(p);
+  } else {
+    lateralPausedPosition.setX(0);
+    lateralPausedPosition.setY(0);
   }
 
   if (!hideBottomIcons && (forceCoast || longitudinalPaused)) {
@@ -527,6 +536,35 @@ void FrogPilotAnnotatedCameraWidget::paintCurveSpeedControlTraining(QPainter &p)
   p.restore();
 }
 
+void FrogPilotAnnotatedCameraWidget::paintLateralPaused(QPainter &p) {
+  if (dmIconPosition == QPoint(0, 0)) {
+    return;
+  }
+
+  p.save();
+
+  if (cemStatusPosition != QPoint(0, 0)) {
+    lateralPausedPosition = cemStatusPosition;
+  } else {
+    lateralPausedPosition.rx() = dmIconPosition.x();
+    lateralPausedPosition.ry() = dmIconPosition.y() - widget_size / 2;
+  }
+  lateralPausedPosition.rx() += rightHandDM ? -UI_BORDER_SIZE - widget_size - UI_BORDER_SIZE : UI_BORDER_SIZE + widget_size + UI_BORDER_SIZE;
+
+  QRect lateralWidget(lateralPausedPosition, QSize(widget_size, widget_size));
+
+  p.setBrush(blackColor(166));
+  p.setPen(QPen(QColor(bg_colors[STATUS_TRAFFIC_MODE_ENABLED]), 10));
+  p.drawRoundedRect(lateralWidget, 24, 24);
+
+  p.setOpacity(0.5);
+  p.drawPixmap(lateralWidget, turnIcon);
+  p.setOpacity(0.75);
+  p.drawPixmap(lateralWidget, pausedIcon);
+
+  p.restore();
+}
+
 void FrogPilotAnnotatedCameraWidget::paintLeadMetrics(QPainter &p, bool adjacent, QPointF *chevron, const cereal::RadarState::LeadData::Reader &lead_data) {
   float leadDistance = lead_data.getDRel() + (adjacent ? std::abs(lead_data.getYRel()) : 0.0f);
   float leadSpeed = std::max(lead_data.getVLead(), 0.0f);
@@ -602,7 +640,9 @@ void FrogPilotAnnotatedCameraWidget::paintLongitudinalPaused(QPainter &p) {
   p.save();
 
   QPoint longitudinalIconPosition;
-  if (cemStatusPosition != QPoint(0, 0)) {
+  if (lateralPausedPosition != QPoint(0, 0)) {
+    longitudinalIconPosition = lateralPausedPosition;
+  } else if (cemStatusPosition != QPoint(0, 0)) {
     longitudinalIconPosition = cemStatusPosition;
   } else {
     longitudinalIconPosition.rx() = dmIconPosition.x();
