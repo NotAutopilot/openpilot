@@ -52,6 +52,7 @@ private:
   void paintCompass(QPainter &p);
   void paintCurveSpeedControl(QPainter &p);
   void paintCurveSpeedControlTraining(QPainter &p);
+  void paintLongitudinalPaused(QPainter &p);
   void paintRadarTracks(QPainter &p);
   void paintRoadName(QPainter &p);
   void paintStandstillTimer(QPainter &p);
@@ -66,6 +67,7 @@ private:
   bool cscControllingSpeed;
   bool cscTraining;
   bool experimentalMode;
+  bool forceCoast;
   bool redLight;
 
   int animationFrameIndex;
@@ -95,6 +97,8 @@ private:
 
   QPixmap curveSpeedIcon;
   QPixmap curveSpeedIconFlipped;
+  QPixmap pausedIcon;
+  QPixmap speedIcon;
   QPixmap stopSignImg;
 
   QPoint cemStatusPosition;
