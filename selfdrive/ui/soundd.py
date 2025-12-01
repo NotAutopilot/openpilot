@@ -52,6 +52,7 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   AudibleAlert.warningImmediate: ("warning_immediate.wav", None, MAX_VOLUME),
 
   # FrogPilot variables
+  FrogPilotAudibleAlert.goat: ("goat.wav", None, MAX_VOLUME),
 }
 if HARDWARE.get_device_type() in ("tici", "tizi"):
   sound_list.update({
