@@ -67,35 +67,37 @@ void HudRenderer::drawSetSpeed(QPainter &p, const QRect &surface_rect) {
 
   QRect set_speed_rect(QPoint(60 + (default_size.width() - set_speed_size.width()) / 2, 45), set_speed_size);
 
-  // Draw set speed box
-  p.setPen(QPen(QColor(255, 255, 255, 75), 6));
-  p.setBrush(QColor(0, 0, 0, 166));
-  p.drawRoundedRect(set_speed_rect, 32, 32);
+  if (!frogpilot_toggles.value("hide_max_speed").toBool()) {
+    // Draw set speed box
+    p.setPen(QPen(QColor(255, 255, 255, 75), 6));
+    p.setBrush(QColor(0, 0, 0, 166));
+    p.drawRoundedRect(set_speed_rect, 32, 32);
 
-  // Colors based on status
-  QColor max_color = QColor(0xa6, 0xa6, 0xa6, 0xff);
-  QColor set_speed_color = QColor(0x72, 0x72, 0x72, 0xff);
-  if (is_cruise_set) {
-    set_speed_color = QColor(255, 255, 255);
-    if (status == STATUS_DISENGAGED) {
-      max_color = QColor(255, 255, 255);
-    } else if (status == STATUS_OVERRIDE) {
-      max_color = QColor(0x91, 0x9b, 0x95, 0xff);
-    } else {
-      max_color = QColor(0x80, 0xd8, 0xa6, 0xff);
+    // Colors based on status
+    QColor max_color = QColor(0xa6, 0xa6, 0xa6, 0xff);
+    QColor set_speed_color = QColor(0x72, 0x72, 0x72, 0xff);
+    if (is_cruise_set) {
+      set_speed_color = QColor(255, 255, 255);
+      if (status == STATUS_DISENGAGED) {
+        max_color = QColor(255, 255, 255);
+      } else if (status == STATUS_OVERRIDE) {
+        max_color = QColor(0x91, 0x9b, 0x95, 0xff);
+      } else {
+        max_color = QColor(0x80, 0xd8, 0xa6, 0xff);
+      }
     }
+
+    // Draw "MAX" text
+    p.setFont(InterFont(40, QFont::DemiBold));
+    p.setPen(max_color);
+    p.drawText(set_speed_rect.adjusted(0, 27, 0, 0), Qt::AlignTop | Qt::AlignHCenter, tr("MAX"));
+
+    // Draw set speed
+    QString setSpeedStr = is_cruise_set ? QString::number(std::nearbyint(set_speed)) : "–";
+    p.setFont(InterFont(90, QFont::Bold));
+    p.setPen(set_speed_color);
+    p.drawText(set_speed_rect.adjusted(0, 77, 0, 0), Qt::AlignTop | Qt::AlignHCenter, setSpeedStr);
   }
-
-  // Draw "MAX" text
-  p.setFont(InterFont(40, QFont::DemiBold));
-  p.setPen(max_color);
-  p.drawText(set_speed_rect.adjusted(0, 27, 0, 0), Qt::AlignTop | Qt::AlignHCenter, tr("MAX"));
-
-  // Draw set speed
-  QString setSpeedStr = is_cruise_set ? QString::number(std::nearbyint(set_speed)) : "–";
-  p.setFont(InterFont(90, QFont::Bold));
-  p.setPen(set_speed_color);
-  p.drawText(set_speed_rect.adjusted(0, 77, 0, 0), Qt::AlignTop | Qt::AlignHCenter, setSpeedStr);
 
   // FrogPilot variables
   frogpilot_nvg->defaultSize = default_size;
