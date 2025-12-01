@@ -725,6 +725,27 @@ void FrogPilotAnnotatedCameraWidget::paintPedalIcons(QPainter &p) {
   p.restore();
 }
 
+void FrogPilotAnnotatedCameraWidget::paintRainbowPath(QPainter &p, QLinearGradient &bg, float lin_grad_point) {
+  p.save();
+
+  static float hueOffset = 0.0f;
+  if (speed > 0) {
+    hueOffset += speed / speedConversion * 0.02f;
+
+    if (hueOffset >= 360.0f) {
+      hueOffset = fmodf(hueOffset, 360.0f);
+    }
+  }
+
+  float alpha = util::map_val(lin_grad_point, 0.0f, 1.0f, 0.5f, 0.1f);
+  float pathHue = fmodf(lin_grad_point * 120.0f + hueOffset, 360.0f);
+
+  bg.setColorAt(lin_grad_point, QColor::fromHslF(pathHue / 360.0f, 1.0f, 0.5f, alpha));
+  bg.setSpread(QGradient::RepeatSpread);
+
+  p.restore();
+}
+
 void FrogPilotAnnotatedCameraWidget::paintRadarTracks(QPainter &p) {
   if (radar_tracks.empty()) {
     return;
