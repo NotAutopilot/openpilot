@@ -9,6 +9,37 @@ FrogPilotUtilitiesPanel::FrogPilotUtilitiesPanel(FrogPilotSettingsWindow *parent
   }
   addItem(debugModeToggle);
 
+  ButtonControl *flashPandaButton = new ButtonControl(tr("Flash Panda"), tr("FLASH"), tr("<b>Flash the latest, official firmware onto your Panda device</b> to restore core functionality, fix bugs, or ensure you have the most up-to-date software."));
+  QObject::connect(flashPandaButton, &ButtonControl::clicked, [parent, flashPandaButton, this]() {
+    if (ConfirmationDialog::confirm(tr("Are you sure you want to flash the Panda firmware?"), tr("Flash"), this)) {
+      std::thread([parent, flashPandaButton, this]() {
+        parent->keepScreenOn = true;
+
+        flashPandaButton->setEnabled(false);
+        flashPandaButton->setValue(tr("Flashing..."));
+
+        params_memory.putBool("FlashPanda", true);
+        while (params_memory.getBool("FlashPanda")) {
+          util::sleep_for(UI_FREQ);
+        }
+
+        flashPandaButton->setValue(tr("Flashed!"));
+
+        util::sleep_for(2500);
+
+        flashPandaButton->setValue(tr("Rebooting..."));
+
+        util::sleep_for(2500);
+
+        Hardware::reboot();
+      }).detach();
+    }
+  });
+  if (forceOpenDescriptions) {
+    flashPandaButton->showDescription();
+  }
+  addItem(flashPandaButton);
+
   ButtonControl *resetTogglesButton = new ButtonControl(tr("Reset Toggles to Default"), tr("RESET"), tr("<b>Reset all toggles to their default values.</b>"));
   QObject::connect(resetTogglesButton, &ButtonControl::clicked, [parent, resetTogglesButton, this]() {
     if (ConfirmationDialog::confirm(tr("Are you sure you want to reset all toggles to their default values?"), tr("Reset"), this)) {
