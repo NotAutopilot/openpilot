@@ -301,6 +301,8 @@ def hardware_thread(end_event, hw_queue) -> None:
       msg.deviceState.fanSpeedPercentDesired = fan_controller.update(all_comp_temp, onroad_conditions["ignition"])
 
     # FrogPilot variables
+    if frogpilot_toggles.increase_thermal_limits:
+      all_comp_temp -= (THERMAL_BANDS[ThermalStatus.danger].min_temp - THERMAL_BANDS[ThermalStatus.red].min_temp)
 
     is_offroad_for_5_min = (started_ts is None) and ((not started_seen) or (off_ts is None) or (time.monotonic() - off_ts > 60 * 5))
     if is_offroad_for_5_min and offroad_comp_temp > OFFROAD_DANGER_TEMP:
