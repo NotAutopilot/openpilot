@@ -55,6 +55,8 @@ class CarState(CarStateBase):
     self.secoc_synchronization = None
 
     # FrogPilot variables
+    self.has_can_filter = self.FPCP.flags & ToyotaFrogPilotFlags.RADAR_CAN_FILTER.value
+    self.has_SDSU = self.FPCP.flags & ToyotaFrogPilotFlags.SMART_DSU.value
 
   def update(self, can_parsers, frogpilot_toggles) -> structs.CarState:
     cp = can_parsers[Bus.pt]
@@ -203,6 +205,12 @@ class CarState(CarStateBase):
 
     # FrogPilot variables
     fp_ret = custom.FrogPilotCarState.new_message()
+
+    if self.has_SDSU and not self.has_can_filter:
+      prev_distance_button = self.distance_button
+      self.distance_button = cp.vl["SDSU"]["FD_BUTTON"]
+
+      buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
 
     buttonEvents += [
       *create_button_events(self.pcm_acc_status == 9, False, {1: ButtonType.accelCruise}),
