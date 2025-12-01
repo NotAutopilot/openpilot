@@ -21,6 +21,7 @@ from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
 from openpilot.frogpilot.common.frogpilot_variables import get_frogpilot_toggles
+from openpilot.frogpilot.controls.lib.neural_network_feedforward import LatControlNNFF
 
 State = log.SelfdriveState.OpenpilotState
 LaneChangeState = log.LaneChangeState
@@ -66,6 +67,9 @@ class Controls:
 
     self.frogpilot_toggles = get_frogpilot_toggles()
 
+    if self.CP.lateralTuning.which() == "torque" and (self.frogpilot_toggles.nnff or self.frogpilot_toggles.nnff_lite):
+      self.LaC = LatControlNNFF(self.CP, self.CI, DT_CTRL)
+
   def update(self):
     self.sm.update(15)
     if self.sm.updated["liveCalibration"]:
@@ -77,6 +81,9 @@ class Controls:
     # FrogPilot variables
     if hasattr(self.LaC, "pid") and self.CP.lateralTuning.which() != "pid":
       self.LaC.pid._k_p = self.frogpilot_toggles.steerKp
+
+    if self.sm.updated['liveDelay'] and hasattr(self.LaC, "update_live_delay"):
+      self.LaC.update_live_delay(self.sm['liveDelay'].lateralDelay)
 
     self.frogpilot_toggles = get_frogpilot_toggles(self.sm)
 
@@ -138,6 +145,8 @@ class Controls:
     steer, steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                        self.steer_limited_by_safety, self.desired_curvature,
                                                        curvature_limited, lat_delay,
+                                                       self.calibrated_pose,
+                                                       self.sm['modelV2'],
                                                        self.frogpilot_toggles)
     actuators.torque = float(steer)
     actuators.steeringAngleDeg = float(steeringAngleDeg)

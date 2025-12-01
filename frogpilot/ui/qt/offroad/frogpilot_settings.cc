@@ -13,6 +13,55 @@
 #include "frogpilot/ui/qt/offroad/visual_settings.h"
 #include "frogpilot/ui/qt/offroad/wheel_settings.h"
 
+bool nnffLogFileExists(const QString &carFingerprint) {
+  static QStringList models;
+  static QMap<QString, QString> substitutes;
+
+  if (models.isEmpty()) {
+    QFileInfoList fileInfoList = QDir(QStringLiteral("../../frogpilot/assets/nnff_models")).entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+    for (const QFileInfo &fileInfo : fileInfoList) {
+      models.append(fileInfo.completeBaseName());
+    }
+
+    QFile sub_file("../../opendbc/car/torque_data/substitute.toml");
+    if (sub_file.open(QIODevice::ReadOnly)) {
+      QTextStream in(&sub_file);
+      while (!in.atEnd()) {
+        QString line = in.readLine().trimmed();
+        if (line.startsWith("#") || line.startsWith("legend") || !line.contains("=")) {
+          continue;
+        }
+
+        QStringList parts = line.split("=");
+        if (parts.size() == 2) {
+          QString key = parts[0].trimmed().remove('"');
+          QString value = parts[1].trimmed().remove('"');
+          if (!key.isEmpty() && !value.isEmpty()) {
+            substitutes[key] = value;
+          }
+        }
+      }
+    }
+  }
+
+  QStringList fingerprintsToCheck;
+  fingerprintsToCheck.append(carFingerprint);
+  if (substitutes.contains(carFingerprint)) {
+    fingerprintsToCheck.append(substitutes.value(carFingerprint));
+  }
+
+  for (const QString &fingerprint : fingerprintsToCheck) {
+    for (const QString &match : models) {
+      if (match.startsWith(fingerprint)) {
+        std::cout << "NNFF model found for fingerprint: " << fingerprint.toStdString() << std::endl;
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 void FrogPilotSettingsWindow::createPanelButtons(FrogPilotListWidget *list) {
   FrogPilotDataPanel *frogpilotDataPanel = new FrogPilotDataPanel(this, !shownDescriptions.value("FrogPilotDataPanel").toBool(false));
   FrogPilotDevicePanel *frogpilotDevicePanel = new FrogPilotDevicePanel(this, !shownDescriptions.value("FrogPilotDevicePanel").toBool(false));
@@ -274,6 +323,7 @@ void FrogPilotSettingsWindow::updateVariables() {
     hasAlphaLongitudinal = CP.getAlphaLongitudinalAvailable();
     hasBSM = CP.getEnableBsm();
     hasDashSpeedLimits = carMake == "ford" || carMake == "hyundai" || carMake == "toyota";
+    hasNNFFLog = nnffLogFileExists(QString::fromStdString(carFingerprint));
     hasOpenpilotLongitudinal = hasLongitudinalControl(CP);
     hasPCMCruise = CP.getPcmCruise();
     hasPedal = CP.getEnableGasInterceptorDEPRECATED();

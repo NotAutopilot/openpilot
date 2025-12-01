@@ -445,6 +445,22 @@ def holiday_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, 
     Priority.LOWEST, VisualAlert.none, FrogPilotAudibleAlert.startup, 5.)
 
 
+def nnff_loaded_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality, frogpilot_toggles: SimpleNamespace) -> Alert:
+  model_name = Params().get("NNFFModelName")
+  if model_name is None:
+    return Alert(
+      "NNFF Torque Controller not available",
+      "Donate logs to Twilsonco to get your car supported!",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 10.0)
+  else:
+    return Alert(
+      "NNFF Torque Controller loaded with:",
+      model_name,
+      FrogPilotAlertStatus.frogpilot, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlert.engage, 5.0)
+
+
 
 EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   # ********** events with no alerts **********
@@ -1128,6 +1144,10 @@ FROGPILOT_EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "",
       FrogPilotAlertStatus.frogpilot, AlertSize.small,
       Priority.MID, VisualAlert.none, AudibleAlert.prompt, 3.),
+  },
+
+  FrogPilotEventName.nnffLoaded: {
+    ET.PERMANENT: nnff_loaded_alert,
   },
 
   FrogPilotEventName.openpilotCrashed: {
