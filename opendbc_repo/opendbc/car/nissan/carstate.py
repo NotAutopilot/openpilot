@@ -26,6 +26,7 @@ class CarState(CarStateBase):
     self.distance_button = 0
 
     # FrogPilot variables
+    self.lkas_button = 0
 
   def update(self, can_parsers, frogpilot_toggles) -> structs.CarState:
     cp = can_parsers[Bus.pt]
@@ -133,6 +134,13 @@ class CarState(CarStateBase):
 
     # FrogPilot variables
     fp_ret = custom.FrogPilotCarState.new_message()
+
+    self.prev_lkas_button = self.lkas_button
+    self.lkas_button = ret.invalidLkasSetting
+
+    buttonEvents += [
+      *create_button_events(self.lkas_button, self.prev_lkas_button, {1: ButtonType.lkas, 0: ButtonType.lkas}),
+    ]
 
     ret.buttonEvents = buttonEvents
 
