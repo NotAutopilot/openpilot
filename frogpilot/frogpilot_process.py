@@ -28,11 +28,14 @@ def check_assets(theme_manager, thread_manager, params_memory, frogpilot_toggles
   if params_memory.get_bool("FlashPanda"):
     thread_manager.run_with_lock(flash_panda, (params_memory))
 
-def transition_offroad(frogpilot_planner, thread_manager, time_validated, sm, params, frogpilot_toggles):
+def transition_offroad(frogpilot_planner, theme_manager, thread_manager, time_validated, sm, params, frogpilot_toggles):
   params.put("LastGPSPosition", json.dumps(frogpilot_planner.gps_position))
 
   if frogpilot_toggles.lock_doors_timer != 0:
     thread_manager.run_with_lock(lock_doors, (frogpilot_toggles.lock_doors_timer, sm, params), report=False)
+
+  if frogpilot_toggles.random_themes:
+    theme_manager.update_active_theme(time_validated, frogpilot_toggles, randomize_theme=True)
 
   if time_validated:
     thread_manager.run_with_lock(send_stats, (params, frogpilot_toggles))
@@ -54,12 +57,18 @@ def update_checks(now, theme_manager, thread_manager, params, params_memory, fro
 
   time.sleep(1)
 
-def update_toggles(frogpilot_variables, started, theme_manager, thread_manager, time_validated, params):
+def update_toggles(frogpilot_variables, started, theme_manager, thread_manager, time_validated, params, frogpilot_toggles):
+  previous_holiday_themes = frogpilot_toggles.holiday_themes
+  previous_random_themes = frogpilot_toggles.random_themes
+
   frogpilot_variables.update(theme_manager.holiday_theme, started)
   frogpilot_toggles = frogpilot_variables.frogpilot_toggles
 
+  randomize_theme = frogpilot_toggles.holiday_themes != previous_holiday_themes
+  randomize_theme |= frogpilot_toggles.random_themes != previous_random_themes
+
   theme_manager.theme_updated = False
-  theme_manager.update_active_theme(time_validated, frogpilot_toggles)
+  theme_manager.update_active_theme(time_validated, frogpilot_toggles, randomize_theme=randomize_theme)
 
   if time_validated:
     thread_manager.run_with_lock(backup_toggles, (params))
@@ -103,8 +112,8 @@ def frogpilot_thread():
     started = sm["deviceState"].started
 
     if not started and started_previously:
-      frogpilot_toggles = update_toggles(frogpilot_variables, started, theme_manager, thread_manager, time_validated, params)
-      transition_offroad(frogpilot_planner, thread_manager, time_validated, sm, params, frogpilot_toggles)
+      frogpilot_toggles = update_toggles(frogpilot_variables, started, theme_manager, thread_manager, time_validated, params, frogpilot_toggles)
+      transition_offroad(frogpilot_planner, theme_manager, thread_manager, time_validated, sm, params, frogpilot_toggles)
 
       run_update_checks = True
     elif started and not started_previously:
@@ -130,7 +139,7 @@ def frogpilot_thread():
       check_assets(theme_manager, thread_manager, params_memory, frogpilot_toggles)
 
     if params_memory.get_bool("FrogPilotTogglesUpdated") or theme_manager.theme_updated:
-      frogpilot_toggles = update_toggles(frogpilot_variables, started, theme_manager, thread_manager, time_validated, params)
+      frogpilot_toggles = update_toggles(frogpilot_variables, started, theme_manager, thread_manager, time_validated, params, frogpilot_toggles)
 
     run_update_checks |= params_memory.get_bool("ManualUpdateInitiated")
     run_update_checks |= now.second == 0 and (now.minute % 60 == 0 or (now.minute % 5 == 0 and frogpilot_variables.frogs_go_moo))

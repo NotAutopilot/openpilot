@@ -495,7 +495,12 @@ class FrogPilotVariables:
     toggle.icon_pack = self.get_value("IconPack", cast=None, condition=custom_themes, default="stock")
     toggle.signal_icons = self.get_value("SignalAnimation", cast=None, condition=custom_themes, default="stock")
     toggle.sound_pack = self.get_value("SoundPack", cast=None, condition=custom_themes, default="stock")
-    toggle.wheel_image = self.get_value("WheelIcon", cast=None, condition=custom_themes, default="stock")
+    toggle.random_themes = self.get_value("RandomThemes", condition=custom_themes)
+    toggle.random_themes_holidays = self.get_value("RandomThemesHolidays", condition=toggle.random_themes)
+    if toggle.random_themes:
+      toggle.wheel_image = random.choice([file.stem for file in (THEME_SAVE_PATH / "steering_wheels").iterdir() if file.is_file()] or ["stock"]) if (THEME_SAVE_PATH / "steering_wheels").exists() else "stock"
+    else:
+      toggle.wheel_image = self.get_value("WheelIcon", cast=None, condition=custom_themes, default="stock")
 
     custom_ui = self.get_value("CustomUI")
     toggle.acceleration_path = toggle.openpilot_longitudinal and (self.get_value("AccelerationPath", condition=custom_ui) or toggle.debug_mode)

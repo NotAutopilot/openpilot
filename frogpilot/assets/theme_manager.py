@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import glob
+import random
 import requests
 import shutil
 
@@ -371,7 +372,62 @@ class ThemeManager:
     start_of_week = target_date - timedelta(days=target_date.weekday())
     return start_of_week <= current_date < target_date
 
-  def update_active_theme(self, time_validated, frogpilot_toggles, boot_run=False):
+  @staticmethod
+  def randomize_distance_icons(available_themes, selected_theme):
+    theme_packs_path = THEME_SAVE_PATH / "theme_packs"
+    if not theme_packs_path.exists():
+      return "stock"
+
+    candidates = []
+    for theme_pack in theme_packs_path.iterdir():
+      if not theme_pack.is_dir():
+        continue
+
+      distance_icons_dir = theme_pack / "distance_icons"
+      if not distance_icons_dir.is_dir():
+        continue
+
+      icon_name = theme_pack.name.lower()
+
+      theme_association = [theme for theme in available_themes if theme.replace("-animated", "") in icon_name]
+      if theme_association and selected_theme not in icon_name:
+        continue
+
+      weight = 5 if selected_theme in icon_name else 1
+      candidates.extend([theme_pack.name] * weight)
+
+    return random.choice(candidates) if candidates else "stock"
+
+  @staticmethod
+  def randomize_theme_asset(available_themes):
+    if not available_themes:
+      return "stock"
+
+    return random.choice(available_themes)
+
+  @staticmethod
+  def randomize_wheel_image(available_themes, selected_theme):
+    steering_wheels_path = THEME_SAVE_PATH / "steering_wheels"
+    if not steering_wheels_path.exists():
+      return "stock"
+
+    candidates = []
+    for wheel_file in steering_wheels_path.iterdir():
+      if not wheel_file.is_file():
+        continue
+
+      name = wheel_file.stem.lower()
+
+      theme_association = [theme for theme in available_themes if theme.replace("-animated", "") in name]
+      if theme_association and selected_theme not in name:
+        continue
+
+      weight = 5 if selected_theme in name else 1
+      candidates.extend([wheel_file.stem] * weight)
+
+    return random.choice(candidates) if candidates else "stock"
+
+  def update_active_theme(self, time_validated, frogpilot_toggles, boot_run=False, randomize_theme=False):
     if time_validated and frogpilot_toggles.holiday_themes:
       self.holiday_theme = self.update_holiday()
     else:
@@ -385,6 +441,31 @@ class ThemeManager:
         "sound_pack": ("sounds", self.holiday_theme),
         "turn_signal_pack": ("signals", self.holiday_theme),
         "wheel_image": ("wheel_image", self.holiday_theme)
+      }
+    elif (boot_run or randomize_theme) and frogpilot_toggles.random_themes:
+      available_themes = self.get_full_themes()
+
+      if frogpilot_toggles.random_themes_holidays:
+        available_themes.extend(HOLIDAY_SLUGS.keys())
+
+      selected_theme = self.randomize_theme_asset(available_themes)
+
+      asset_mappings = {
+        "color_scheme": ("colors", selected_theme.replace("-animated", "")),
+        "distance_icons": ("distance_icons", self.randomize_distance_icons(available_themes, selected_theme.replace("-animated", ""))),
+        "icon_pack": ("icons", selected_theme),
+        "sound_pack": ("sounds", selected_theme.replace("-animated", "")),
+        "turn_signal_pack": ("signals", selected_theme.replace("-animated", "")),
+        "wheel_image": ("wheel_image", self.randomize_wheel_image(available_themes, selected_theme.replace("-animated", "")))
+      }
+    elif not frogpilot_toggles.random_themes:
+      asset_mappings = {
+        "color_scheme": ("colors", frogpilot_toggles.color_scheme),
+        "distance_icons": ("distance_icons", frogpilot_toggles.distance_icons),
+        "icon_pack": ("icons", frogpilot_toggles.icon_pack),
+        "sound_pack": ("sounds", frogpilot_toggles.sound_pack),
+        "turn_signal_pack": ("signals", frogpilot_toggles.signal_icons),
+        "wheel_image": ("wheel_image", frogpilot_toggles.wheel_image)
       }
     else:
       return
