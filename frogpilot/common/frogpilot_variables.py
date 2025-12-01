@@ -241,7 +241,9 @@ class FrogPilotVariables:
     msg_bytes = self.params.get("LiveTorqueParameters")
     if msg_bytes:
       LTP = messaging.log_from_bytes(msg_bytes, log.LiveTorqueParametersData)
+      toggle.liveValid = LTP.liveValid
     else:
+      toggle.liveValid = False
 
     toggle.debug_mode = self.params.get_bool("DebugMode")
 
