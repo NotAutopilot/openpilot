@@ -32,7 +32,7 @@ SoftwarePanel::SoftwarePanel(QWidget* parent) : ListWidget(parent) {
   // automatic updates toggle
   ParamControl *automaticUpdatesToggle = new ParamControl("AutomaticUpdates", tr("Automatically Update FrogPilot"),
                                                        tr("Automatically update FrogPilot when the vehicle is parked with an active internet connection."), "");
-  automaticUpdatesToggle->setVisible(params.getBool("IsReleaseBranch"));
+  automaticUpdatesToggle->setVisible(params.getBool("IsReleaseBranch") || isFrogsGoMoo());
   addItem(automaticUpdatesToggle);
 
   // download update btn
@@ -61,6 +61,15 @@ SoftwarePanel::SoftwarePanel(QWidget* parent) : ListWidget(parent) {
   connect(targetBranchBtn, &ButtonControl::clicked, [=]() {
     auto current = params.get("GitBranch");
     QStringList branches = QString::fromStdString(params.get("UpdaterAvailableBranches")).split(",");
+    if (!isFrogsGoMoo()) {
+      for (int i = branches.size() - 1; i >= 0; --i) {
+        if (branches[i].startsWith("FrogPilot-Development", Qt::CaseInsensitive)) {
+          branches.removeAt(i);
+        }
+      }
+      branches.removeAll("FrogPilot-Vetting");
+      branches.removeAll("MAKE-PRS-HERE");
+    }
     for (QString b : {current.c_str(), "devel-staging", "devel", "nightly", "nightly-dev", "master"}) {
       auto i = branches.indexOf(b);
       if (i >= 0) {
@@ -128,7 +137,7 @@ void SoftwarePanel::updateLabels() {
   FrogPilotUIState &fs = *frogpilotUIState();
   FrogPilotUIScene &frogpilot_scene = fs.frogpilot_scene;
 
-  bool parked = frogpilot_scene.parked;
+  bool parked = frogpilot_scene.parked || isFrogsGoMoo();
 
   // add these back in case the files got removed
   fs_watch->addParam("LastUpdateTime");

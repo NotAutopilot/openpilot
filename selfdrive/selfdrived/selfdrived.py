@@ -4,6 +4,7 @@ import time
 import threading
 
 import cereal.messaging as messaging
+import openpilot.system.sentry as sentry
 
 from cereal import car, custom, log
 from msgq.visionipc import VisionIpcClient, VisionStreamType
@@ -158,6 +159,10 @@ class SelfdriveD:
 
     self.FPCP = messaging.log_from_bytes(self.params.get("FrogPilotCarParams", block=True), custom.FrogPilotCarParams)
 
+    if self.frogpilot_toggles.block_user:
+      self.startup_event = FrogPilotEventName.blockUser
+      sentry.capture_block()
+
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
 
@@ -174,7 +179,7 @@ class SelfdriveD:
 
     # Add startup event
     if self.startup_event is not None:
-      if self.startup_event in (FrogPilotEventName.customStartupAlert):
+      if self.startup_event in (FrogPilotEventName.blockUser, FrogPilotEventName.customStartupAlert):
         self.frogpilot_events.add(self.startup_event)
       else:
         self.events.add(self.startup_event)

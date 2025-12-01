@@ -62,6 +62,8 @@ BACKUP_PATH = Path("/cache/on_backup")
 FROGPILOT_BACKUPS = Path("/data/backups")
 TOGGLE_BACKUPS = Path("/data/toggle_backups")
 
+FROGS_GO_MOO_PATH = Path("/persist/frogsgomoo.py")
+
 MAPD_PATH = Path("/data/media/0/osm/mapd")
 MAPS_PATH = Path("/data/media/0/osm/offline")
 
@@ -142,6 +144,9 @@ class FrogPilotVariables:
     self.staging_branch = branch == "FrogPilot-Staging"
     self.testing_branch = branch == "FrogPilot-Testing"
     self.vetting_branch = branch == "FrogPilot-Vetting"
+
+    self.frogs_go_moo = FROGS_GO_MOO_PATH.is_file()
+    toggle.block_user = (self.development_branch or branch == "MAKE-PRS-HERE" or self.vetting_branch) and not self.frogs_go_moo
 
     self.update()
 
@@ -273,7 +278,7 @@ class FrogPilotVariables:
     toggle.always_on_lateral_main = toggle.always_on_lateral and not prohibited_main_aol and not toggle.always_on_lateral_lkas
     toggle.always_on_lateral_pause_speed = self.get_value("PauseAOLOnBrake", cast=float, condition=toggle.always_on_lateral)
 
-    toggle.automatic_updates = self.get_value("AutomaticUpdates", condition=(self.release_branch or self.vetting_branch), default=True) and not BACKUP_PATH.is_file()
+    toggle.automatic_updates = self.get_value("AutomaticUpdates", condition=(self.release_branch or self.vetting_branch or self.frogs_go_moo), default=True) and not BACKUP_PATH.is_file()
 
     car_model = self.params.get("CarModel")
     toggle.force_fingerprint = self.get_value("ForceFingerprint", condition=car_model != self.default_values["CarModel"])

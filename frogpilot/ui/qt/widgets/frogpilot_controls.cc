@@ -12,6 +12,11 @@ bool FrogPilotConfirmationDialog::yesorno(const QString &prompt_text, QWidget *p
   return d.exec();
 }
 
+bool isFrogsGoMoo() {
+  static bool is_FrogsGoMoo = QFile::exists("/persist/frogsgomoo.py");
+  return is_FrogsGoMoo;
+}
+
 void clearMovie(QSharedPointer<QMovie> &movie, QWidget *parent) {
   if (!movie) {
     return;
