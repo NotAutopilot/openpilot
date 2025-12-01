@@ -168,6 +168,9 @@ void ModelRenderer::drawPath(QPainter &painter, const cereal::ModelDataV2::Reade
   painter.drawPolygon(track_vertices);
 
   // FrogPilot variables
+  if (frogpilot_toggles.value("blind_spot_path").toBool()) {
+    frogpilot_nvg->paintBlindSpotPath(painter);
+  }
 }
 
 void ModelRenderer::updatePathGradient(QLinearGradient &bg) {
