@@ -96,6 +96,43 @@ DEVELOPER_SIDEBAR_METRICS = {
   "LONGITUDINAL_MPC_JERK_SPEED_CONTROL": 15,
 }
 
+DEVICE_SHUTDOWN_TIMES = {
+  0: 300,      # 5 mins
+  1: 900,      # 15 mins
+  2: 1800,     # 30 mins
+  3: 2700,     # 45 mins
+  4: 3600,     # 1 hour
+  5: 7200,     # 2 hours
+  6: 10800,    # 3 hours
+  7: 14400,    # 4 hours
+  8: 18000,    # 5 hours
+  9: 21600,    # 6 hours
+  10: 25200,   # 7 hours
+  11: 28800,   # 8 hours
+  12: 32400,   # 9 hours
+  13: 36000,   # 10 hours
+  14: 39600,   # 11 hours
+  15: 43200,   # 12 hours
+  16: 46800,   # 13 hours
+  17: 50400,   # 14 hours
+  18: 54000,   # 15 hours
+  19: 57600,   # 16 hours
+  20: 61200,   # 17 hours
+  21: 64800,   # 18 hours
+  22: 68400,   # 19 hours
+  23: 72000,   # 20 hours
+  24: 75600,   # 21 hours
+  25: 79200,   # 22 hours
+  26: 82800,   # 23 hours
+  27: 86400,   # 24 hours
+  28: 90000,   # 25 hours
+  29: 93600,   # 26 hours
+  30: 97200,   # 27 hours
+  31: 100800,  # 28 hours
+  32: 104400,  # 29 hours
+  33: 108000,  # 30 hours
+}
+
 EXCLUDED_KEYS = {
   "AvailableModelNames",
   "AvailableModels",
@@ -429,6 +466,7 @@ class FrogPilotVariables:
     toggle.show_stopping_point_metrics = self.get_value("ShowStoppingPointMetrics", condition=toggle.show_stopping_point) or toggle.debug_mode
 
     device_management = self.get_value("DeviceManagement")
+    toggle.device_shutdown_time = DEVICE_SHUTDOWN_TIMES.get(self.get_value("DeviceShutdown", cast=int, condition=device_management))
     toggle.increase_thermal_limits = self.get_value("IncreaseThermalLimits", condition=device_management)
     toggle.low_voltage_shutdown = self.get_value("LowVoltageShutdown", cast=float, condition=device_management, min=VBATT_PAUSE_CHARGING, max=12.5)
     toggle.no_logging = self.get_value("NoLogging", condition=device_management and not self.vetting_branch)
