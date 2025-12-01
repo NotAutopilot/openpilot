@@ -10,7 +10,7 @@ from urllib.parse import quote_plus
 
 from openpilot.frogpilot.common.frogpilot_download_utilities import GITLAB_URL, download_file, get_repository_url, handle_error, verify_download
 from openpilot.frogpilot.common.frogpilot_utilities import delete_file, extract_zip, load_json_file, update_json_file
-from openpilot.frogpilot.common.frogpilot_variables import ACTIVE_THEME_PATH, RESOURCES_REPO, THEME_SAVE_PATH
+from openpilot.frogpilot.common.frogpilot_variables import ACTIVE_THEME_PATH, RANDOM_EVENTS_PATH, RESOURCES_REPO, THEME_SAVE_PATH
 
 CANCEL_DOWNLOAD_PARAM = "CancelThemeDownload"
 DOWNLOAD_PROGRESS_PARAM = "ThemeDownloadProgress"
@@ -542,11 +542,13 @@ class ThemeManager:
 
     self.update_theme_params(downloadable_colors, downloadable_distance_icons, downloadable_icons, downloadable_signals, downloadable_sounds, downloadable_wheels)
 
-  def update_wheel_image(self, image, boot_run=False):
+  def update_wheel_image(self, image, boot_run=False, random_event=False):
     wheel_save_location = ACTIVE_THEME_PATH / "steering_wheel"
 
     if self.holiday_theme != "stock":
       wheel_location = HOLIDAY_THEME_PATH / self.holiday_theme / "steering_wheel"
+    elif random_event:
+      wheel_location = RANDOM_EVENTS_PATH / "steering_wheels"
     elif image == "stock":
       wheel_location = STOCKOP_THEME_PATH / "steering_wheel"
     elif image in HOLIDAY_SLUGS:

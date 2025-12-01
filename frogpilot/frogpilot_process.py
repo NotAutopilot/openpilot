@@ -108,7 +108,7 @@ def frogpilot_thread():
 
       run_update_checks = True
     elif started and not started_previously:
-      frogpilot_planner = FrogPilotPlanner(error_log)
+      frogpilot_planner = FrogPilotPlanner(error_log, theme_manager)
       frogpilot_tracking = FrogPilotTracking(frogpilot_planner, frogpilot_toggles)
 
       transition_onroad(error_log)

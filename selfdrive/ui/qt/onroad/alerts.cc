@@ -38,11 +38,19 @@ OnroadAlerts::Alert OnroadAlerts::getAlert(const SubMaster &sm, const SubMaster 
   Alert a = {};
   static QString crash_log_path = "/data/error_logs/error.txt";
   if (QFile::exists(crash_log_path)) {
-    a = {tr("openpilot crashed"),
-         tr("Please post the \"Error Log\" in the FrogPilot Discord!"),
-         "openpilotCrashed",
-         cereal::SelfdriveState::AlertSize::MID,
-         cereal::SelfdriveState::AlertStatus::CRITICAL};
+    if (frogpilot_toggles.value("random_events").toBool()) {
+      a = {tr("openpilot crashed 💩"),
+           tr("Please post the \"Error Log\" in the FrogPilot Discord!"),
+           "openpilotCrashedRandomEvent",
+           cereal::SelfdriveState::AlertSize::MID,
+           cereal::SelfdriveState::AlertStatus::CRITICAL};
+    } else {
+      a = {tr("openpilot crashed"),
+           tr("Please post the \"Error Log\" in the FrogPilot Discord!"),
+           "openpilotCrashed",
+           cereal::SelfdriveState::AlertSize::MID,
+           cereal::SelfdriveState::AlertStatus::CRITICAL};
+    }
     return a;
   } else if (selfdrive_frame >= started_frame) {  // Don't get old alert.
     a = {ss.getAlertText1().cStr(), ss.getAlertText2().cStr(),
