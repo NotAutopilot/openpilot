@@ -121,7 +121,7 @@ void ModelRenderer::drawLaneLines(QPainter &painter) {
 
 void ModelRenderer::drawPath(QPainter &painter, const cereal::ModelDataV2::Reader &model, int height) {
   QLinearGradient bg(0, height, 0, 0);
-  if (experimental_mode) {
+  if (experimental_mode || frogpilot_toggles.value("acceleration_path").toBool()) {
     // The first half of track_vertices are the points for the right side of the path
     const auto &acceleration = model.getAcceleration().getX();
     const int max_len = std::min<int>(track_vertices.length() / 2, acceleration.size());
