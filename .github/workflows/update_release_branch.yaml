@@ -1,0 +1,107 @@
+name: Update FrogPilot Branch
+
+on:
+  schedule:
+    - cron: "0 18 * * 6"
+
+env:
+  BRANCH_FROGPILOT: FrogPilot
+  BRANCH_PREVIOUS: FrogPilot-Previous
+  BRANCH_STAGING: FrogPilot-Staging
+  GIT_EMAIL: "91348155+FrogAi@users.noreply.github.com"
+  GIT_NAME: "James"
+  GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+  TZ: America/Phoenix
+  UPDATE_FILE: .github/update_date
+
+jobs:
+  check_update:
+    runs-on: ubuntu-latest
+    outputs:
+      update_due: ${{ steps.check_update.outputs.update_due }}
+      scheduled_date: ${{ steps.check_update.outputs.scheduled_date }}
+    steps:
+      - name: Check Update Status
+        id: check_update
+        env:
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          URL="https://raw.githubusercontent.com/$REPO_NAME/$BRANCH_STAGING/$UPDATE_FILE"
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}\n" "$URL")
+
+          if [ "$STATUS" != "200" ]; then
+            echo "update_due=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          SCHEDULED_DATE=$(curl -s "$URL")
+          CURRENT_DATE=$(TZ="$TZ" date +%F)
+
+          if [ "$SCHEDULED_DATE" == "$CURRENT_DATE" ]; then
+            echo "update_due=true" >> "$GITHUB_OUTPUT"
+            echo "scheduled_date=$SCHEDULED_DATE" >> "$GITHUB_OUTPUT"
+          else
+            echo "update_due=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  update_branch:
+    needs: check_update
+    if: ${{ needs.check_update.outputs.update_due == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Staging
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BRANCH_STAGING }}
+          fetch-depth: 0
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+
+      - name: Configure Git Identity
+        run: |
+          git config --global user.name "$GIT_NAME"
+          git config --global user.email "$GIT_EMAIL"
+
+      - name: Update README and Cleanup
+        env:
+          SCHEDULED_DATE: ${{ needs.check_update.outputs.scheduled_date }}
+        run: |
+          DAY=$(TZ="$TZ" date +'%d' | sed 's/^0//')
+          case "$DAY" in
+            1|21|31) SUFFIX="st" ;;
+            2|22)    SUFFIX="nd" ;;
+            3|23)    SUFFIX="rd" ;;
+            *)       SUFFIX="th" ;;
+          esac
+
+          MONTH=$(TZ="$TZ" date +'%B')
+          YEAR=$(TZ="$TZ" date +'%Y')
+          DATE_FMT="${MONTH} ${DAY}${SUFFIX}, ${YEAR}"
+          DATE_ESCAPED=$(printf '%s' "$DATE_FMT" | sed -E 's/ /%20/g; s/,/%2C/g')
+
+          sed -i -E "s|(Last%20Updated-)[^-)]*|\1${DATE_ESCAPED}|g" README.md
+
+          git rm -f "$UPDATE_FILE"
+          git add README.md
+          git commit -m "Updated README date to ${DATE_FMT}"
+
+          git reset --soft HEAD~2
+          ORIGINAL_MSG=$(git log -1 --pretty=%B HEAD)
+
+          COMMIT_PHX=$(TZ="$TZ" date -d "$SCHEDULED_DATE 12:00" +"%Y-%m-%dT%H:%M:%S %z")
+          GIT_COMMITTER_DATE="$COMMIT_PHX" GIT_AUTHOR_DATE="$COMMIT_PHX" git commit -m "$ORIGINAL_MSG"
+
+      - name: Wait Until Noon ${{ env.TZ }}
+        run: |
+          NOW=$(TZ="$TZ" date +%s)
+          TARGET=$(TZ="$TZ" date -d "12:00" +%s)
+
+          if [ "$NOW" -lt "$TARGET" ]; then
+            sleep $((TARGET - NOW))
+          fi
+
+      - name: Push and Sync Branches
+        run: |
+          git push origin "$BRANCH_STAGING" --force
+          git fetch origin "$BRANCH_FROGPILOT:$BRANCH_FROGPILOT"
+          git push origin "$BRANCH_FROGPILOT:$BRANCH_PREVIOUS" --force
+          git push origin "$BRANCH_STAGING:$BRANCH_FROGPILOT" --force
