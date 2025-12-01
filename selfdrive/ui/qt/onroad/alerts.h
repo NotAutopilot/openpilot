@@ -35,10 +35,16 @@ protected:
   };
 
   void paintEvent(QPaintEvent*) override;
-  OnroadAlerts::Alert getAlert(const SubMaster &sm, uint64_t started_frame);
+  OnroadAlerts::Alert getAlert(const SubMaster &sm, const SubMaster &fpsm, uint64_t started_frame);
 
   QColor bg;
   Alert alert = {};
 
   // FrogPilot variables
+  const QMap<cereal::FrogPilotSelfdriveState::AlertStatus, QColor> frogpilot_alert_colors = {
+    {cereal::FrogPilotSelfdriveState::AlertStatus::NORMAL, QColor(0x15, 0x15, 0x15, 0xf1)},
+    {cereal::FrogPilotSelfdriveState::AlertStatus::USER_PROMPT, QColor(0xDA, 0x6F, 0x25, 0xf1)},
+    {cereal::FrogPilotSelfdriveState::AlertStatus::CRITICAL, QColor(0xC9, 0x22, 0x31, 0xf1)},
+    {cereal::FrogPilotSelfdriveState::AlertStatus::FROGPILOT, QColor(0x17, 0x86, 0x44, 0xf1)},
+  };
 };

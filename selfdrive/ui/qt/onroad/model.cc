@@ -50,6 +50,7 @@ void ModelRenderer::draw(QPainter &painter, const QRect &surface_rect) {
 
     // FrogPilot variables
     SubMaster &fpsm = *(frogpilotUIState()->sm);
+    const cereal::FrogPilotRadarState::Reader &frogpilot_radar_state = fpsm["frogpilotRadarState"].getFrogpilotRadarState();
   }
 
   // FrogPilot variables
@@ -100,6 +101,8 @@ void ModelRenderer::update_model(const cereal::ModelDataV2::Reader &model, const
   // FrogPilot variables
   FrogPilotUIState *fs = frogpilotUIState();
   SubMaster &fpsm = *(fs->sm);
+
+  const cereal::FrogPilotPlan::Reader &frogpilotPlan = fpsm["frogpilotPlan"].getFrogpilotPlan();
 }
 
 void ModelRenderer::drawLaneLines(QPainter &painter) {

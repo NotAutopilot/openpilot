@@ -69,6 +69,7 @@ class HyundaiSafetyFlags(IntFlag):
 
 
 # FrogPilot variables
+class HyundaiFrogPilotSafetyFlags(IntFlag):
 
 
 class HyundaiFlags(IntFlag):

@@ -6,7 +6,7 @@
 #include "selfdrive/ui/qt/util.h"
 
 void OnroadAlerts::updateState(const UIState &s, const FrogPilotUIState &fs) {
-  Alert a = getAlert(*(s.sm), s.scene.started_frame);
+  Alert a = getAlert(*(s.sm), *(fs.sm), s.scene.started_frame);
   if (!alert.equal(a)) {
     alert = a;
     update();
@@ -23,11 +23,12 @@ void OnroadAlerts::clear() {
   alertHeight = 0;
 }
 
-OnroadAlerts::Alert OnroadAlerts::getAlert(const SubMaster &sm, uint64_t started_frame) {
+OnroadAlerts::Alert OnroadAlerts::getAlert(const SubMaster &sm, const SubMaster &fpsm, uint64_t started_frame) {
   const cereal::SelfdriveState::Reader &ss = sm["selfdriveState"].getSelfdriveState();
   const uint64_t selfdrive_frame = sm.rcv_frame("selfdriveState");
 
   // FrogPilot variables
+  const cereal::FrogPilotSelfdriveState::Reader &fpss = fpsm["frogpilotSelfdriveState"].getFrogpilotSelfdriveState();
 
   Alert a = {};
   if (selfdrive_frame >= started_frame) {  // Don't get old alert.
@@ -35,6 +36,10 @@ OnroadAlerts::Alert OnroadAlerts::getAlert(const SubMaster &sm, uint64_t started
          ss.getAlertType().cStr(), ss.getAlertSize(), ss.getAlertStatus()};
 
     // FrogPilot variables
+    if (a.size == cereal::SelfdriveState::AlertSize::NONE) {
+      a = {fpss.getAlertText1().cStr(), fpss.getAlertText2().cStr(),
+           fpss.getAlertType().cStr(), static_cast<cereal::SelfdriveState::AlertSize>(fpss.getAlertSize()), static_cast<cereal::SelfdriveState::AlertStatus>(fpss.getAlertStatus())};
+    }
   }
 
   if (!sm.updated("selfdriveState") && (sm.frame - started_frame) > 5 * UI_FREQ) {
@@ -93,7 +98,7 @@ void OnroadAlerts::paintEvent(QPaintEvent *event) {
   // draw background + gradient
   p.setPen(Qt::NoPen);
   p.setCompositionMode(QPainter::CompositionMode_SourceOver);
-  p.setBrush(QBrush(alert_colors[alert.status]));
+  p.setBrush(QBrush(frogpilot_alert_colors[static_cast<cereal::FrogPilotSelfdriveState::AlertStatus>(alert.status)]));
   p.drawRoundedRect(r, radius, radius);
 
   QLinearGradient g(0, r.y(), 0, r.bottom());
