@@ -186,6 +186,9 @@ class CarState(CarStateBase):
     # FrogPilot variables
     fp_ret = custom.FrogPilotCarState.new_message()
 
+    if self.CP.transmissionType == TransmissionType.direct:
+      self.single_pedal_mode |= ret.regenBraking and ret.gearShifter == GearShifter.manumatic
+
     return ret, fp_ret
 
   @staticmethod
