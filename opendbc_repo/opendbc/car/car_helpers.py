@@ -175,6 +175,10 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
   # FrogPilot variables
   FPCP: FrogPilotCarParams = CarInterface.get_frogpilot_params(candidate, fingerprints, car_fw, CP, frogpilot_toggles)
 
+  if not CP.alphaLongitudinalAvailable and frogpilot_toggles.disable_openpilot_long:
+    CP.openpilotLongitudinalControl = False
+    FPCP.openpilotLongitudinalControlDisabled = True
+
   return interfaces[CP.carFingerprint](CP, FPCP)
 
 

@@ -268,8 +268,10 @@ class FrogPilotVariables:
     else:
       FPCP = interfaces[MOCK.MOCK].get_frogpilot_params(MOCK.MOCK, gen_empty_fingerprint(), [], CP, toggle)
 
+    alpha_longitudinal = CP.alphaLongitudinalAvailable
     toggle.car_make = CP.brand
     toggle.car_model = CP.carFingerprint
+    toggle.disable_openpilot_long = self.get_value("DisableOpenpilotLongitudinal", condition=not alpha_longitudinal)
     friction = CP.lateralTuning.torque.friction
     has_bsm = CP.enableBsm
     toggle.has_cc_long = toggle.car_make == "gm" and bool(CP.flags & GMFlags.CC_LONG.value)
