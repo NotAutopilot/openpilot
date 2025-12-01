@@ -16,7 +16,7 @@ from openpilot.frogpilot.assets.theme_manager import ThemeManager
 from openpilot.frogpilot.common.frogpilot_backups import backup_frogpilot
 from openpilot.frogpilot.common.frogpilot_utilities import is_FrogsGoMoo, run_cmd, use_konik_server
 from openpilot.frogpilot.common.frogpilot_variables import (
-  ERROR_LOGS_PATH, FROGS_GO_MOO_PATH, HD_LOGS_PATH, KONIK_LOGS_PATH, THEME_SAVE_PATH,
+  ERROR_LOGS_PATH, FROGS_GO_MOO_PATH, HD_LOGS_PATH, KONIK_LOGS_PATH, MAPD_PATH, MAPS_PATH, THEME_SAVE_PATH,
   FrogPilotVariables, get_frogpilot_toggles
 )
 
@@ -94,6 +94,38 @@ def update_boot_logo(frogpilot=False, stock=False):
     run_cmd(["sudo", "mount", "-o", "remount,rw", "/"], "Successfully remounted / as read-write", "Failed to remount /")
     run_cmd(["sudo", "cp", target_logo, boot_logo_location], "Successfully replaced boot logo", "Failed to replace boot logo")
     run_cmd(["sudo", "mount", "-o", f"remount,{mount_options}", "/"], "Successfully restored / mount options", "Failed to restore / mount options")
+
+
+def update_maps(now, params, params_memory):
+  while not MAPD_PATH.exists():
+    time.sleep(60)
+
+  maps_selected = params.get("MapsSelected")
+  if not maps_selected or not (maps_selected.get("nations") or maps_selected.get("states")):
+    return
+
+  day = now.day
+  is_first = day == 1
+  is_sunday = now.weekday() == 6
+  schedule = params.get("PreferredSchedule")
+
+  maps_downloaded = MAPS_PATH.exists()
+  if maps_downloaded and (schedule == 0 or (schedule == 1 and not is_sunday) or (schedule == 2 and not is_first)):
+    return
+
+  suffix = "th" if 11 <= day <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+  todays_date = now.strftime(f"%B {day}{suffix}, %Y")
+
+  if maps_downloaded and params.get("LastMapsUpdate") == todays_date:
+    return
+
+  if params.get("OSMDownloadProgress") is None:
+    params_memory.put("OSMDownloadLocations", maps_selected)
+
+  while params.get("OSMDownloadProgress") is not None:
+    time.sleep(60)
+
+  params.put("LastMapsUpdate", todays_date)
 
 
 def update_openpilot(thread_manager, params):

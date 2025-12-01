@@ -130,6 +130,7 @@ elif TICI:
   procs.append(NativeProcess("ui", "selfdrive/ui", ["./ui"], always_run, watchdog_max_dt=5)),
 procs += [
   PythonProcess("frogpilot_process", "frogpilot.frogpilot_process", always_run),
+  PythonProcess("mapd", "frogpilot.navigation.mapd", always_run),
 ]
 
 managed_processes = {p.name: p for p in procs}
