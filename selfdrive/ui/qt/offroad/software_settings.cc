@@ -86,6 +86,12 @@ SoftwarePanel::SoftwarePanel(QWidget* parent) : ListWidget(parent) {
       checkForUpdates();
 
       // FrogPilot variables
+      if (selection != cur) {
+        if (FrogPilotConfirmationDialog::yesorno(tr("This branch must be downloaded before switching. Would you like to download it now?"), this)) {
+          std::system("pkill -SIGHUP -f system.updated.updated");
+          frogpilotUIState()->params_memory.putBool("ManualUpdateInitiated", true);
+        }
+      }
     }
   });
   addItem(targetBranchBtn);
