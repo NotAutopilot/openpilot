@@ -267,7 +267,7 @@ class FrogPilotVariables:
 
     return value
 
-  def update(self, started=False):
+  def update(self, holiday_theme="stock", started=False):
     toggle = self.frogpilot_toggles
     self.tuning_level = self.params.get("TuningLevel") if self.params.get_bool("TuningLevelConfirmed") else TUNING_LEVELS["ADVANCED"]
 
@@ -533,6 +533,16 @@ class FrogPilotVariables:
     toggle.stoppingDecelRate = 0.01 if toggle.frogsgomoo_tweak else toggle.stoppingDecelRate
     toggle.vEgoStarting = 0.1 if toggle.frogsgomoo_tweak else toggle.vEgoStarting
     toggle.vEgoStopping = 0.5 if toggle.frogsgomoo_tweak else toggle.vEgoStopping
+
+    toggle.holiday_themes = self.get_value("HolidayThemes")
+    toggle.current_holiday_theme = holiday_theme if toggle.holiday_themes else "stock"
+    if toggle.current_holiday_theme != "stock":
+      toggle.color_scheme = toggle.current_holiday_theme
+      toggle.distance_icons = toggle.current_holiday_theme
+      toggle.icon_pack = toggle.current_holiday_theme
+      toggle.signal_icons = toggle.current_holiday_theme
+      toggle.sound_pack = toggle.current_holiday_theme
+      toggle.wheel_image = toggle.current_holiday_theme
 
     toggle.lane_changes = self.get_value("LaneChanges")
     toggle.lane_change_delay = self.get_value("LaneChangeTime", cast=float, condition=toggle.lane_changes)

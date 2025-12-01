@@ -24,7 +24,7 @@ def frogpilot_boot_functions(build_metadata, params):
   params_memory = Params(memory=True)
 
   FrogPilotVariables()
-  ThemeManager(params, params_memory, boot_run=True).update_active_theme(frogpilot_toggles=get_frogpilot_toggles(), boot_run=True)
+  ThemeManager(params, params_memory, boot_run=True).update_active_theme(time_validated=system_time_valid(), frogpilot_toggles=get_frogpilot_toggles(), boot_run=True)
 
   def boot_thread():
     while not system_time_valid():
