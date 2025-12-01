@@ -216,6 +216,7 @@ class FrogPilotVariables:
     toggle.car_model = CP.carFingerprint
     friction = CP.lateralTuning.torque.friction
     has_bsm = CP.enableBsm
+    toggle.has_cc_long = toggle.car_make == "gm" and bool(CP.flags & GMFlags.CC_LONG.value)
     toggle.has_pedal = CP.enableGasInterceptorDEPRECATED
     has_radar = not CP.radarUnavailable
     toggle.has_sdsu = toggle.car_make == "toyota" and bool(FPCP.flags & ToyotaFrogPilotFlags.SMART_DSU.value)
