@@ -8,6 +8,7 @@ static void update_state(FrogPilotUIState *fs) {
 
   if (fpsm.updated("deviceState")) {
     const cereal::DeviceState::Reader &deviceState = fpsm["deviceState"].getDeviceState();
+    frogpilot_scene.online = deviceState.getNetworkType() != cereal::DeviceState::NetworkType::NONE;
   }
   if (fpsm.updated("selfdriveState")) {
     const cereal::SelfdriveState::Reader &selfdriveState = fpsm["selfdriveState"].getSelfdriveState();

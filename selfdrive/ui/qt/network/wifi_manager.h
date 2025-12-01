@@ -70,6 +70,7 @@ public:
   QString getTetheringPassword();
 
   // FrogPilot variables
+  QString getIp4Address();
 
 private:
   QString adapter;  // Path to network manager wifi-device
@@ -83,7 +84,6 @@ private:
 
   QString getAdapter(const uint = NM_DEVICE_TYPE_WIFI);
   uint getAdapterType(const QDBusObjectPath &path);
-  QString getIp4Address();
   void deactivateConnectionBySsid(const QString &ssid);
   void deactivateConnection(const QDBusObjectPath &path);
   QVector<QDBusObjectPath> getActiveConnections();

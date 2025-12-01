@@ -150,6 +150,10 @@ void UIState::update() {
   FrogPilotUIState *fs = frogpilotUIState();
   FrogPilotUIScene &frogpilot_scene = fs->frogpilot_scene;
 
+  if (frogpilot_scene.frogpilot_panel_active) {
+    device()->resetInteractiveTimeout();
+  }
+
   fs->update();
 }
 

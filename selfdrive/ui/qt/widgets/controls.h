@@ -68,6 +68,7 @@ signals:
   void showDescriptionEvent();
 
   // FrogPilot variables
+  void hideDescriptionEvent();
 
 protected:
   AbstractControl(const QString &title, const QString &desc = "", const QString &icon = "", QWidget *parent = nullptr);
@@ -135,6 +136,12 @@ public:
   }
 
   // FrogPilot variables
+  void forceOn(bool force) {
+    toggle.setEnabled(!force);
+    if (force && !toggle.on) {
+     toggle.togglePosition();
+    }
+  }
 
 signals:
   void toggleFlipped(bool state);
