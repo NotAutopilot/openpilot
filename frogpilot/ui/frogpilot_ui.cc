@@ -41,6 +41,10 @@ FrogPilotUIState::FrogPilotUIState(QObject *parent) : QObject(parent) {
   });
 
   wifi = new WifiManager(this);
+
+  if (params.getInt("TetheringEnabled") == 1) {
+    wifi->setTetheringEnabled(true);
+  }
 }
 
 FrogPilotUIState *frogpilotUIState() {
