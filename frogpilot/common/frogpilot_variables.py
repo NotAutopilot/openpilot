@@ -243,17 +243,19 @@ class FrogPilotVariables:
       LTP = messaging.log_from_bytes(msg_bytes, log.LiveTorqueParametersData)
     else:
 
+    toggle.debug_mode = self.params.get_bool("DebugMode")
+
     toggle.is_metric = self.params.get_bool("IsMetric")
     distance_conversion = 1 if toggle.is_metric else CV.FOOT_TO_METER
     small_distance_conversion = 1 if toggle.is_metric else CV.INCH_TO_CM
     speed_conversion = CV.KPH_TO_MS if toggle.is_metric else CV.MPH_TO_MS
 
     advanced_custom_ui = self.get_value("AdvancedCustomUI")
-    toggle.hide_alerts = self.get_value("HideAlerts", condition=advanced_custom_ui)
-    toggle.hide_lead_marker = self.get_value("HideLeadMarker", condition=advanced_custom_ui and toggle.openpilot_longitudinal)
-    toggle.hide_max_speed = self.get_value("HideMaxSpeed", condition=advanced_custom_ui)
-    toggle.hide_speed = self.get_value("HideSpeed", condition=advanced_custom_ui)
-    toggle.hide_speed_limit = self.get_value("HideSpeedLimit", condition=advanced_custom_ui)
+    toggle.hide_alerts = self.get_value("HideAlerts", condition=advanced_custom_ui and not toggle.debug_mode)
+    toggle.hide_lead_marker = self.get_value("HideLeadMarker", condition=advanced_custom_ui and toggle.openpilot_longitudinal and not toggle.debug_mode)
+    toggle.hide_max_speed = self.get_value("HideMaxSpeed", condition=advanced_custom_ui and not toggle.debug_mode)
+    toggle.hide_speed = self.get_value("HideSpeed", condition=advanced_custom_ui and not toggle.debug_mode)
+    toggle.hide_speed_limit = self.get_value("HideSpeedLimit", condition=advanced_custom_ui and not toggle.debug_mode)
     toggle.use_wheel_speed = self.get_value("WheelSpeed", condition=advanced_custom_ui)
 
     advanced_lateral_tuning = self.get_value("AdvancedLateralTune")
@@ -309,10 +311,10 @@ class FrogPilotVariables:
     toggle.conditional_model_stop_time = self.get_value("CEModelStopTime", cast=float, condition=toggle.conditional_experimental_mode and self.get_value("CEStopLights"))
     toggle.conditional_signal = self.get_value("CESignalSpeed", cast=float, condition=toggle.conditional_experimental_mode, conversion=speed_conversion)
     toggle.conditional_signal_lane_detection = self.get_value("CESignalLaneDetection", condition=toggle.conditional_signal != 0)
-    toggle.cem_status = self.get_value("ShowCEMStatus", condition=toggle.conditional_experimental_mode)
+    toggle.cem_status = self.get_value("ShowCEMStatus", condition=toggle.conditional_experimental_mode) or toggle.debug_mode
 
     toggle.curve_speed_controller = toggle.openpilot_longitudinal and self.get_value("CurveSpeedController")
-    toggle.csc_status = self.get_value("ShowCSCStatus", condition=toggle.curve_speed_controller)
+    toggle.csc_status = self.get_value("ShowCSCStatus", condition=toggle.curve_speed_controller) or toggle.debug_mode
 
     custom_alerts = self.get_value("CustomAlerts")
     toggle.goat_scream_alert = self.get_value("GoatScream", condition=custom_alerts)
@@ -364,7 +366,7 @@ class FrogPilotVariables:
     toggle.wheel_image = self.get_value("WheelIcon", cast=None, condition=custom_themes, default="stock")
 
     custom_ui = self.get_value("CustomUI")
-    toggle.acceleration_path = toggle.openpilot_longitudinal and (self.get_value("AccelerationPath", condition=custom_ui))
+    toggle.acceleration_path = toggle.openpilot_longitudinal and (self.get_value("AccelerationPath", condition=custom_ui) or toggle.debug_mode)
     toggle.adjacent_paths = self.get_value("AdjacentPath", condition=custom_ui)
     toggle.blind_spot_path = has_bsm and self.get_value("BlindSpotPath", condition=custom_ui)
     toggle.compass = self.get_value("Compass", condition=custom_ui)
@@ -377,26 +379,25 @@ class FrogPilotVariables:
     developer_metrics = self.get_value("DeveloperMetrics", condition=toggle.developer_ui)
     border_metrics = self.get_value("BorderMetrics", condition=developer_metrics)
     toggle.blind_spot_metrics = has_bsm and self.get_value("BlindSpotMetrics", condition=border_metrics)
-    toggle.signal_metrics = self.get_value("SignalMetrics", condition=border_metrics)
-    toggle.steering_metrics = self.get_value("ShowSteering", condition=border_metrics)
-    toggle.show_fps = self.get_value("FPSCounter", condition=developer_metrics)
-    toggle.adjacent_path_metrics = self.get_value("AdjacentPathMetrics", condition=developer_metrics)
-    toggle.lead_info = self.get_value("LeadInfo", condition=developer_metrics)
-    toggle.numerical_temp = self.get_value("NumericalTemp", condition=developer_metrics)
-    toggle.fahrenheit = self.get_value("Fahrenheit", condition=toggle.numerical_temp)
-    toggle.cpu_metrics = self.get_value("ShowCPU", condition=developer_metrics)
-    toggle.gpu_metrics = self.get_value("ShowGPU", condition=developer_metrics)
+    toggle.signal_metrics = self.get_value("SignalMetrics", condition=border_metrics) or toggle.debug_mode
+    toggle.steering_metrics = self.get_value("ShowSteering", condition=border_metrics) or toggle.debug_mode
+    toggle.show_fps = self.get_value("FPSCounter", condition=developer_metrics) or toggle.debug_mode
+    toggle.adjacent_path_metrics = self.get_value("AdjacentPathMetrics", condition=developer_metrics) or toggle.debug_mode
+    toggle.lead_info = self.get_value("LeadInfo", condition=developer_metrics) or toggle.debug_mode
+    toggle.numerical_temp = self.get_value("NumericalTemp", condition=developer_metrics) or toggle.debug_mode
+    toggle.fahrenheit = self.get_value("Fahrenheit", condition=toggle.numerical_temp and not toggle.debug_mode)
+    toggle.cpu_metrics = self.get_value("ShowCPU", condition=developer_metrics) or toggle.debug_mode
+    toggle.gpu_metrics = self.get_value("ShowGPU", condition=developer_metrics and not toggle.debug_mode)
     toggle.ip_metrics = self.get_value("ShowIP", condition=developer_metrics)
-    toggle.memory_metrics = self.get_value("ShowMemoryUsage", condition=developer_metrics)
-    toggle.storage_left_metrics = self.get_value("ShowStorageLeft", condition=developer_metrics)
-    toggle.storage_used_metrics = self.get_value("ShowStorageUsed", condition=developer_metrics)
-    toggle.use_si_metrics = self.get_value("UseSI", condition=developer_metrics)
-    toggle.developer_sidebar = self.get_value("DeveloperSidebar", condition=toggle.developer_ui)
+    toggle.memory_metrics = self.get_value("ShowMemoryUsage", condition=developer_metrics) or toggle.debug_mode
+    toggle.storage_left_metrics = self.get_value("ShowStorageLeft", condition=developer_metrics and not toggle.debug_mode)
+    toggle.storage_used_metrics = self.get_value("ShowStorageUsed", condition=developer_metrics and not toggle.debug_mode)
+    toggle.use_si_metrics = self.get_value("UseSI", condition=developer_metrics) or toggle.debug_mode
     developer_widgets = self.get_value("DeveloperWidgets", condition=toggle.developer_ui)
-    toggle.adjacent_lead_tracking = has_radar and (self.get_value("AdjacentLeadsUI", condition=developer_widgets))
-    toggle.radar_tracks = has_radar and (self.get_value("RadarTracksUI", condition=developer_widgets))
-    toggle.show_stopping_point = toggle.openpilot_longitudinal and (self.get_value("ShowStoppingPoint", condition=developer_widgets))
-    toggle.show_stopping_point_metrics = self.get_value("ShowStoppingPointMetrics", condition=toggle.show_stopping_point)
+    toggle.adjacent_lead_tracking = has_radar and (self.get_value("AdjacentLeadsUI", condition=developer_widgets) or toggle.debug_mode)
+    toggle.radar_tracks = has_radar and (self.get_value("RadarTracksUI", condition=developer_widgets) or toggle.debug_mode)
+    toggle.show_stopping_point = toggle.openpilot_longitudinal and (self.get_value("ShowStoppingPoint", condition=developer_widgets) or toggle.debug_mode)
+    toggle.show_stopping_point_metrics = self.get_value("ShowStoppingPointMetrics", condition=toggle.show_stopping_point) or toggle.debug_mode
 
     device_management = self.get_value("DeviceManagement")
     toggle.increase_thermal_limits = self.get_value("IncreaseThermalLimits", condition=device_management)
@@ -463,15 +464,15 @@ class FrogPilotVariables:
     toggle.taco_tune = self.get_value("TacoTune", condition=longitudinal_tuning)
 
     toggle.model_ui = self.get_value("ModelUI")
-    toggle.dynamic_path_width = self.get_value("DynamicPathWidth", condition=toggle.model_ui)
-    toggle.lane_line_width = self.get_value("LaneLinesWidth", cast=float, condition=toggle.model_ui, conversion=small_distance_conversion / 200)
-    toggle.path_edge_width = self.get_value("PathEdgeWidth", cast=float, condition=toggle.model_ui)
-    toggle.path_width = self.get_value("PathWidth", cast=float, condition=toggle.model_ui, conversion=distance_conversion / 2)
-    toggle.road_edge_width = self.get_value("RoadEdgesWidth", cast=float, condition=toggle.model_ui, conversion=small_distance_conversion / 200)
+    toggle.dynamic_path_width = self.get_value("DynamicPathWidth", condition=toggle.model_ui and not toggle.debug_mode)
+    toggle.lane_line_width = self.get_value("LaneLinesWidth", cast=float, condition=toggle.model_ui and not toggle.debug_mode, conversion=small_distance_conversion / 200)
+    toggle.path_edge_width = self.get_value("PathEdgeWidth", cast=float, condition=toggle.model_ui and not toggle.debug_mode)
+    toggle.path_width = self.get_value("PathWidth", cast=float, condition=toggle.model_ui and not toggle.debug_mode, conversion=distance_conversion / 2)
+    toggle.road_edge_width = self.get_value("RoadEdgesWidth", cast=float, condition=toggle.model_ui and not toggle.debug_mode, conversion=small_distance_conversion / 200)
 
     navigation_ui = self.get_value("NavigationUI")
-    toggle.road_name_ui = self.get_value("RoadNameUI", condition=navigation_ui)
-    toggle.show_speed_limits = self.get_value("ShowSpeedLimits", condition=navigation_ui)
+    toggle.road_name_ui = self.get_value("RoadNameUI", condition=navigation_ui) or toggle.debug_mode
+    toggle.show_speed_limits = self.get_value("ShowSpeedLimits", condition=navigation_ui) or toggle.debug_mode
     toggle.speed_limit_vienna = self.get_value("UseVienna", condition=navigation_ui)
 
     quality_of_life_lateral = self.get_value("QOLLateral")
@@ -507,19 +508,19 @@ class FrogPilotVariables:
     toggle.reduce_lateral_acceleration_snow = self.get_value("ReduceLateralAccelerationSnow", cast=float, condition=toggle.weather_presets, conversion=0.01)
 
     quality_of_life_visuals = self.get_value("QOLVisuals")
-    toggle.camera_view = self.get_value("CameraView", cast=float, condition=quality_of_life_visuals)
+    toggle.camera_view = self.get_value("CameraView", cast=float, condition=quality_of_life_visuals and not toggle.debug_mode)
     toggle.driver_camera_in_reverse = self.get_value("DriverCamera", condition=quality_of_life_visuals)
-    toggle.onroad_distance_button = toggle.openpilot_longitudinal and (self.get_value("OnroadDistanceButton", condition=quality_of_life_visuals))
+    toggle.onroad_distance_button = toggle.openpilot_longitudinal and (self.get_value("OnroadDistanceButton", condition=quality_of_life_visuals) or toggle.debug_mode)
     toggle.stopped_timer = self.get_value("StoppedTimer", condition=quality_of_life_visuals)
 
-    toggle.rainbow_path = self.get_value("RainbowPath")
+    toggle.rainbow_path = self.get_value("RainbowPath", condition=not toggle.debug_mode)
 
     toggle.random_events = self.get_value("RandomEvents")
 
     screen_management = self.get_value("ScreenManagement")
     toggle.screen_brightness = max(self.get_value("ScreenBrightness", cast=float, condition=screen_management), 1)
     toggle.screen_brightness_onroad = self.get_value("ScreenBrightnessOnroad", cast=float, condition=(screen_management))
-    toggle.screen_recorder = self.get_value("ScreenRecorder", condition=screen_management)
+    toggle.screen_recorder = self.get_value("ScreenRecorder", condition=screen_management) or toggle.debug_mode
     toggle.screen_timeout = self.get_value("ScreenTimeout", cast=float, condition=screen_management)
     toggle.screen_timeout_onroad = self.get_value("ScreenTimeoutOnroad", cast=float, condition=screen_management)
     toggle.standby_mode = self.get_value("StandbyMode", condition=screen_management)
@@ -530,7 +531,7 @@ class FrogPilotVariables:
     toggle.map_speed_lookahead_higher = self.get_value("SLCLookaheadHigher", cast=float, condition=toggle.speed_limit_controller)
     toggle.map_speed_lookahead_lower = self.get_value("SLCLookaheadLower", cast=float, condition=toggle.speed_limit_controller)
     toggle.set_speed_limit = self.get_value("SetSpeedLimit", condition=toggle.speed_limit_controller)
-    toggle.show_speed_limit_offset = self.get_value("ShowSLCOffset", condition=toggle.speed_limit_controller)
+    toggle.show_speed_limit_offset = self.get_value("ShowSLCOffset", condition=toggle.speed_limit_controller) or toggle.debug_mode
     slc_fallback_method = self.get_value("SLCFallback", cast=float, condition=toggle.speed_limit_controller)
     toggle.slc_fallback_experimental_mode = slc_fallback_method == 1
     toggle.slc_fallback_previous_speed_limit = slc_fallback_method == 2
@@ -553,7 +554,7 @@ class FrogPilotVariables:
     toggle.speed_limit_priority2 = self.get_value("SLCPriority2", cast=None, condition=toggle.speed_limit_controller)
     toggle.speed_limit_priority_highest = toggle.speed_limit_priority1 == "Highest"
     toggle.speed_limit_priority_lowest = toggle.speed_limit_priority1 == "Lowest"
-    toggle.speed_limit_sources = self.get_value("SpeedLimitSources", condition=toggle.speed_limit_controller)
+    toggle.speed_limit_sources = self.get_value("SpeedLimitSources", condition=toggle.speed_limit_controller) or toggle.debug_mode
 
     toggle.speed_limit_filler = self.get_value("SpeedLimitFiller")
 

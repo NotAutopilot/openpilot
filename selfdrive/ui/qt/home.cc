@@ -73,7 +73,7 @@ void HomeWindow::offroadTransition(bool offroad) {
   QJsonObject &frogpilot_toggles = frogpilot_scene.frogpilot_toggles;
 
   body->setEnabled(false);
-  sidebar->setVisible(offroad);
+  sidebar->setVisible(offroad || frogpilot_toggles.value("debug_mode").toBool());
   if (offroad) {
     slayout->setCurrentWidget(home);
 
