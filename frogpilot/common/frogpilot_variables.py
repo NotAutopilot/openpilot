@@ -207,11 +207,17 @@ class FrogPilotVariables:
     toggle.has_zss = toggle.car_make == "toyota" and bool(FPCP.flags & ToyotaFrogPilotFlags.ZSS.value)
     is_angle_car = CP.steerControlType == car.CarParams.SteerControlType.angle
     latAccelFactor = CP.lateralTuning.torque.latAccelFactor
+    longitudinalActuatorDelay = CP.longitudinalActuatorDelay
     toggle.openpilot_longitudinal = CP.openpilotLongitudinalControl and not toggle.disable_openpilot_long
     pcm_cruise = CP.pcmCruise
+    startAccel = CP.startAccel
+    stopAccel = CP.stopAccel
     steerActuatorDelay = CP.steerActuatorDelay
     steerKp = KP
     steerRatio = CP.steerRatio
+    toggle.stoppingDecelRate = CP.stoppingDecelRate
+    toggle.vEgoStarting = CP.vEgoStarting
+    toggle.vEgoStopping = CP.vEgoStopping
 
     msg_bytes = self.params.get("LiveTorqueParameters")
     if msg_bytes:
@@ -241,6 +247,14 @@ class FrogPilotVariables:
     toggle.use_custom_latAccelFactor = bool(round(toggle.latAccelFactor, 2) != round(latAccelFactor, 2)) and is_torque_car
     toggle.steerRatio = self.get_value("SteerRatio", cast=float, condition=advanced_lateral_tuning, default=steerRatio, min=steerRatio * 0.5, max=steerRatio * 1.5)
     toggle.use_custom_steerRatio = bool(round(toggle.steerRatio, 2) != round(steerRatio, 2))
+
+    advanced_longitudinal_tuning = toggle.openpilot_longitudinal and self.get_value("AdvancedLongitudinalTune")
+    toggle.longitudinalActuatorDelay = self.get_value("LongitudinalActuatorDelay", cast=float, condition=advanced_longitudinal_tuning, default=longitudinalActuatorDelay, min=0, max=1)
+    toggle.startAccel = self.get_value("StartAccel", cast=float, condition=advanced_longitudinal_tuning, default=startAccel, min=0, max=MAX_ACCELERATION)
+    toggle.stopAccel = self.get_value("StopAccel", cast=float, condition=advanced_longitudinal_tuning, default=stopAccel, min=-MAX_ACCELERATION, max=0)
+    toggle.stoppingDecelRate = self.get_value("StoppingDecelRate", cast=float, condition=advanced_longitudinal_tuning, default=toggle.stoppingDecelRate, min=0.001, max=1)
+    toggle.vEgoStarting = self.get_value("VEgoStarting", cast=float, condition=advanced_longitudinal_tuning, default=toggle.vEgoStarting, min=0.01, max=1)
+    toggle.vEgoStopping = self.get_value("VEgoStopping", cast=float, condition=advanced_longitudinal_tuning, default=toggle.vEgoStopping, min=0.01, max=1)
 
     toggle.alert_volume_controller = self.get_value("AlertVolumeControl")
     toggle.disengage_volume = self.get_value("DisengageVolume", cast=float, condition=toggle.alert_volume_controller)
