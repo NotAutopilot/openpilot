@@ -4,14 +4,18 @@
 
 #include "selfdrive/ui/qt/util.h"
 
-void drawIcon(QPainter &p, const QPoint &center, const QPixmap &img, const QBrush &bg, float opacity) {
+void drawIcon(QPainter &p, const QPoint &center, const QPixmap &img, const QBrush &bg, float opacity, const int &angle) {
   p.setRenderHint(QPainter::Antialiasing);
   p.setOpacity(1.0);  // bg dictates opacity of ellipse
   p.setPen(Qt::NoPen);
   p.setBrush(bg);
   p.drawEllipse(center, btn_size / 2, btn_size / 2);
+  p.save();
+  p.translate(center);
+  p.rotate(angle);
   p.setOpacity(opacity);
-  p.drawPixmap(center - QPoint(img.width() / 2, img.height() / 2), img);
+  p.drawPixmap(-QPoint(img.width() / 2, img.height() / 2), img);
+  p.restore();
   p.setOpacity(1.0);
 }
 
@@ -55,6 +59,14 @@ void ExperimentalButton::updateState(const UIState &s, const FrogPilotUIState &f
 
   updateBackgroundColor();
 
+  int current_steering_angle_deg = -carState.getSteeringAngleDeg();
+  if (current_steering_angle_deg != steering_angle_deg && frogpilot_toggles.value("rotating_wheel").toBool()) {
+    steering_angle_deg = current_steering_angle_deg;
+    update();
+  } else if (!frogpilot_toggles.value("rotating_wheel").toBool()) {
+    steering_angle_deg = 0;
+  }
+
   if (params_memory.getBool("UpdateWheelImage")) {
     updateTheme();
     params_memory.remove("UpdateWheelImage");
@@ -68,11 +80,11 @@ void ExperimentalButton::paintEvent(QPaintEvent *event) {
 
   if (frogpilot_toggles.value("wheel_image").toString() == "stock") {
     QPixmap img = experimental_mode ? experimental_img : engage_img;
-    drawIcon(p, QPoint(btn_size / 2, btn_size / 2), img, background_color, (isDown() || !engageable) ? 0.6 : 1.0);
+    drawIcon(p, QPoint(btn_size / 2, btn_size / 2), img, background_color, (isDown() || !engageable) ? 0.6 : 1.0, steering_angle_deg);
   } else if (wheel_gif) {
-    drawIcon(p, QPoint(btn_size / 2, btn_size / 2), wheel_gif->currentPixmap(), background_color, (isDown() || !engageable) ? 0.6 : 1.0);
+    drawIcon(p, QPoint(btn_size / 2, btn_size / 2), wheel_gif->currentPixmap(), background_color, (isDown() || !engageable) ? 0.6 : 1.0, steering_angle_deg);
   } else if (!wheel_img.isNull()) {
-    drawIcon(p, QPoint(btn_size / 2, btn_size / 2), wheel_img, background_color, (isDown() || !engageable) ? 0.6 : 1.0);
+    drawIcon(p, QPoint(btn_size / 2, btn_size / 2), wheel_img, background_color, (isDown() || !engageable) ? 0.6 : 1.0, steering_angle_deg);
   }
 }
 

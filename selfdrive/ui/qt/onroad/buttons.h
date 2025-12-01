@@ -34,6 +34,8 @@ private:
   void updateBackgroundColor();
   void updateTheme();
 
+  int steering_angle_deg;
+
   Params params_memory{"", true};
 
   QColor background_color;
@@ -43,4 +45,4 @@ private:
   QSharedPointer<QMovie> wheel_gif;
 };
 
-void drawIcon(QPainter &p, const QPoint &center, const QPixmap &img, const QBrush &bg, float opacity);
+void drawIcon(QPainter &p, const QPoint &center, const QPixmap &img, const QBrush &bg, float opacity, const int &angle = 0);
