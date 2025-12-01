@@ -52,6 +52,7 @@ private:
   void paintCurveSpeedControlTraining(QPainter &p);
   void paintRoadName(QPainter &p);
   void paintStandstillTimer(QPainter &p);
+  void paintStoppingPoint(QPainter &p);
   void paintTurnSignals(QPainter &p);
   void updateSignals();
 
@@ -62,6 +63,7 @@ private:
   bool cscControllingSpeed;
   bool cscTraining;
   bool experimentalMode;
+  bool redLight;
 
   int animationFrameIndex;
   int frogHopCount;
@@ -77,6 +79,7 @@ private:
   float setSpeed;
   float speedConversion;
   float speedConversionMetrics;
+  float stoppingDistance;
 
   Params params;
   Params params_memory{"", true};
@@ -89,6 +92,7 @@ private:
 
   QPixmap curveSpeedIcon;
   QPixmap curveSpeedIconFlipped;
+  QPixmap stopSignImg;
 
   QPoint cemStatusPosition;
   QPoint compassPosition;
