@@ -43,6 +43,8 @@ protected:
   Alert alert = {};
 
   // FrogPilot variables
+  bool sidebarsOpen;
+
   const QMap<cereal::FrogPilotSelfdriveState::AlertStatus, QColor> frogpilot_alert_colors = {
     {cereal::FrogPilotSelfdriveState::AlertStatus::NORMAL, QColor(0x15, 0x15, 0x15, 0xf1)},
     {cereal::FrogPilotSelfdriveState::AlertStatus::USER_PROMPT, QColor(0xDA, 0x6F, 0x25, 0xf1)},

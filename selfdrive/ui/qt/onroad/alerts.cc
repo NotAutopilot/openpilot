@@ -13,6 +13,7 @@ void OnroadAlerts::updateState(const UIState &s, const FrogPilotUIState &fs) {
   }
 
   // FrogPilot variables
+  sidebarsOpen = fs.frogpilot_scene.sidebars_open;
 }
 
 void OnroadAlerts::clear() {
@@ -115,12 +116,15 @@ void OnroadAlerts::paintEvent(QPaintEvent *event) {
   p.setPen(QColor(0xff, 0xff, 0xff));
   p.setRenderHint(QPainter::TextAntialiasing);
   if (alert.size == cereal::SelfdriveState::AlertSize::SMALL) {
-    p.setFont(InterFont(74, QFont::DemiBold));
+    bool long_alert1 = alert.text1.length() > 40;
+    p.setFont(InterFont(long_alert1 && sidebarsOpen ? 64 : 74, QFont::DemiBold));
     p.drawText(r, Qt::AlignCenter, alert.text1);
   } else if (alert.size == cereal::SelfdriveState::AlertSize::MID) {
-    p.setFont(InterFont(88, QFont::Bold));
+    bool long_alert1 = alert.text1.length() > 30;
+    p.setFont(InterFont(long_alert1 && sidebarsOpen ? 78 : 88, QFont::Bold));
     p.drawText(QRect(0, c.y() - 125, width(), 150), Qt::AlignHCenter | Qt::AlignTop, alert.text1);
-    p.setFont(InterFont(66));
+    bool long_alert2 = alert.text2.length() > 40;
+    p.setFont(InterFont(long_alert2 && sidebarsOpen ? 56 : 66));
     p.drawText(QRect(0, c.y() + 21, width(), 90), Qt::AlignHCenter, alert.text2);
   } else if (alert.size == cereal::SelfdriveState::AlertSize::FULL) {
     bool l = alert.text1.length() > 15;

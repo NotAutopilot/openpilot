@@ -77,6 +77,25 @@ BUTTON_FUNCTIONS = {
   "TRAFFIC_MODE": 6
 }
 
+DEVELOPER_SIDEBAR_METRICS = {
+  "NONE": 0,
+  "ACCELERATION_CURRENT": 1,
+  "ACCELERATION_MAX": 2,
+  "AUTOTUNE_ACTUATOR_DELAY": 3,
+  "AUTOTUNE_FRICTION": 4,
+  "AUTOTUNE_LATERAL_ACCELERATION": 5,
+  "AUTOTUNE_STEER_RATIO": 6,
+  "AUTOTUNE_STIFFNESS_FACTOR": 7,
+  "ENGAGEMENT_LATERAL": 8,
+  "ENGAGEMENT_LONGITUDINAL": 9,
+  "LATERAL_STEERING_ANGLE": 10,
+  "LATERAL_TORQUE_USED": 11,
+  "LONGITUDINAL_ACTUATOR_ACCELERATION": 12,
+  "LONGITUDINAL_MPC_JERK_ACCELERATION": 13,
+  "LONGITUDINAL_MPC_JERK_DANGER_ZONE": 14,
+  "LONGITUDINAL_MPC_JERK_SPEED_CONTROL": 15,
+}
+
 EXCLUDED_KEYS = {
   "AvailableModelNames",
   "AvailableModels",
@@ -395,6 +414,14 @@ class FrogPilotVariables:
     toggle.storage_left_metrics = self.get_value("ShowStorageLeft", condition=developer_metrics and not toggle.debug_mode)
     toggle.storage_used_metrics = self.get_value("ShowStorageUsed", condition=developer_metrics and not toggle.debug_mode)
     toggle.use_si_metrics = self.get_value("UseSI", condition=developer_metrics) or toggle.debug_mode
+    toggle.developer_sidebar = self.get_value("DeveloperSidebar", condition=toggle.developer_ui) or toggle.debug_mode
+    toggle.developer_sidebar_metric1 = self.get_value("DeveloperSidebarMetric1", cast=None, condition=toggle.developer_sidebar, default=DEVELOPER_SIDEBAR_METRICS["LONGITUDINAL_ACTUATOR_ACCELERATION"] if toggle.debug_mode else None)
+    toggle.developer_sidebar_metric2 = self.get_value("DeveloperSidebarMetric2", cast=None, condition=toggle.developer_sidebar, default=DEVELOPER_SIDEBAR_METRICS["ACCELERATION_CURRENT"] if toggle.debug_mode else None)
+    toggle.developer_sidebar_metric3 = self.get_value("DeveloperSidebarMetric3", cast=None, condition=toggle.developer_sidebar, default=DEVELOPER_SIDEBAR_METRICS["LATERAL_STEERING_ANGLE"] if toggle.debug_mode else None)
+    toggle.developer_sidebar_metric4 = self.get_value("DeveloperSidebarMetric4", cast=None, condition=toggle.developer_sidebar, default=DEVELOPER_SIDEBAR_METRICS["LATERAL_TORQUE_USED"] if toggle.debug_mode else None)
+    toggle.developer_sidebar_metric5 = self.get_value("DeveloperSidebarMetric5", cast=None, condition=toggle.developer_sidebar, default=DEVELOPER_SIDEBAR_METRICS["LONGITUDINAL_MPC_JERK_ACCELERATION"] if toggle.debug_mode else None)
+    toggle.developer_sidebar_metric6 = self.get_value("DeveloperSidebarMetric6", cast=None, condition=toggle.developer_sidebar, default=DEVELOPER_SIDEBAR_METRICS["LONGITUDINAL_MPC_JERK_DANGER_ZONE"] if toggle.debug_mode else None)
+    toggle.developer_sidebar_metric7 = self.get_value("DeveloperSidebarMetric7", cast=None, condition=toggle.developer_sidebar, default=DEVELOPER_SIDEBAR_METRICS["LONGITUDINAL_MPC_JERK_SPEED_CONTROL"] if toggle.debug_mode else None)
     developer_widgets = self.get_value("DeveloperWidgets", condition=toggle.developer_ui)
     toggle.adjacent_lead_tracking = has_radar and (self.get_value("AdjacentLeadsUI", condition=developer_widgets) or toggle.debug_mode)
     toggle.radar_tracks = has_radar and (self.get_value("RadarTracksUI", condition=developer_widgets) or toggle.debug_mode)
