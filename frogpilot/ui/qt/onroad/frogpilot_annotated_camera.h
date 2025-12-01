@@ -49,6 +49,7 @@ private:
   void paintCompass(QPainter &p);
   void paintCurveSpeedControl(QPainter &p);
   void paintCurveSpeedControlTraining(QPainter &p);
+  void paintRoadName(QPainter &p);
   void paintTurnSignals(QPainter &p);
   void updateSignals();
 
@@ -99,6 +100,7 @@ private:
 
   QString leadDistanceUnit;
   QString leadSpeedUnit;
+  QString roadName;
   QString speedUnit;
 
   QTimer *animationTimer;

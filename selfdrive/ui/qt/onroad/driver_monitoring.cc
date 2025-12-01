@@ -74,6 +74,9 @@ void DriverMonitorRenderer::draw(QPainter &painter, const QRect &surface_rect) {
   float opacity = is_active ? 0.65f : 0.2f;
 
   // FrogPilot variables
+  if (frogpilot_toggles.value("road_name_ui").toBool()) {
+    y -= UI_BORDER_SIZE;
+  }
 
   drawIcon(painter, QPoint(x, y), dm_img, QColor(0, 0, 0, 70), opacity);
 
