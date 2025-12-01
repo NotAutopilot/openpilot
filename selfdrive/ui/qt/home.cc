@@ -70,9 +70,18 @@ void HomeWindow::updateState(const UIState &s, const FrogPilotUIState &fs) {
   const QJsonObject &frogpilot_toggles = frogpilot_scene.frogpilot_toggles;
 
   if (s.scene.started) {
-    developer_sidebar->setVisible(frogpilot_toggles.value("developer_sidebar").toBool());
+    if (frogpilot_scene.driver_camera_timer >= UI_FREQ / 2) {
+      showDriverView(true, true);
+    } else {
+      if (driver_view->isVisible()) {
+        sidebar->setVisible(params.getBool("Sidebar") || frogpilot_toggles.value("debug_mode").toBool());
+        slayout->setCurrentWidget(onroad);
+      }
 
-    frogpilotUIState()->frogpilot_scene.sidebars_open = developer_sidebar->isVisible() && sidebar->isVisible();
+      developer_sidebar->setVisible(frogpilot_toggles.value("developer_sidebar").toBool());
+
+      frogpilotUIState()->frogpilot_scene.sidebars_open = developer_sidebar->isVisible() && sidebar->isVisible();
+    }
   }
 }
 
@@ -94,9 +103,11 @@ void HomeWindow::offroadTransition(bool offroad) {
   }
 }
 
-void HomeWindow::showDriverView(bool show) {
+void HomeWindow::showDriverView(bool show, bool started) {
   if (show) {
-    emit closeSettings();
+    if (!started) {
+      emit closeSettings();
+    }
     slayout->setCurrentWidget(driver_view);
   } else {
     slayout->setCurrentWidget(home);

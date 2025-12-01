@@ -17,6 +17,7 @@ struct FrogPilotUIScene {
   bool standstill;
 
   int conditional_status;
+  int driver_camera_timer;
   int started_timer;
 
   QJsonObject frogpilot_toggles;
