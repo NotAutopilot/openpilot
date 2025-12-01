@@ -1188,6 +1188,22 @@ FROGPILOT_EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 3.),
   },
 
+  FrogPilotEventName.trafficModeActive: {
+    ET.WARNING: Alert(
+      "Traffic Mode enabled",
+      "",
+      FrogPilotAlertStatus.frogpilot, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 3.),
+  },
+
+  FrogPilotEventName.trafficModeInactive: {
+    ET.WARNING: Alert(
+      "Traffic Mode Disabled",
+      "",
+      FrogPilotAlertStatus.frogpilot, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 3.),
+  },
+
   # Random Events
   FrogPilotEventName.accel30: {
     ET.WARNING: Alert(

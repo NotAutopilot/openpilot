@@ -22,6 +22,7 @@ class FrogPilotCard:
     self.force_coast = False
     self.pause_lateral = False
     self.pause_longitudinal = False
+    self.traffic_mode_enabled = False
 
     self.gap_counter = 0
 
@@ -42,6 +43,8 @@ class FrogPilotCard:
       self.pause_lateral = not self.pause_lateral
     elif sm["carControl"].longActive and getattr(frogpilot_toggles, f"pause_longitudinal_via_{key}"):
       self.pause_longitudinal = not self.pause_longitudinal
+    elif getattr(frogpilot_toggles, f"traffic_mode_via_{key}"):
+      self.traffic_mode_enabled = not self.traffic_mode_enabled
 
   def handle_experimental_mode(self, sm, frogpilot_toggles):
     if frogpilot_toggles.conditional_experimental_mode:
@@ -108,5 +111,6 @@ class FrogPilotCard:
     frogpilotCarState.forceCoast = self.force_coast
     frogpilotCarState.pauseLateral = self.pause_lateral
     frogpilotCarState.pauseLongitudinal = self.pause_longitudinal
+    frogpilotCarState.trafficModeEnabled = self.traffic_mode_enabled
 
     return frogpilotCarState

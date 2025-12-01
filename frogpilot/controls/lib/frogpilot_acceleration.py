@@ -52,7 +52,9 @@ class FrogPilotAcceleration:
     eco_gear = sm["frogpilotCarState"].ecoGear
     sport_gear = sm["frogpilotCarState"].sportGear
 
-    if (eco_gear or sport_gear) and frogpilot_toggles.map_acceleration:
+    if sm["frogpilotCarState"].trafficModeEnabled:
+      self.max_accel = get_max_accel(v_ego)
+    elif (eco_gear or sport_gear) and frogpilot_toggles.map_acceleration:
       if eco_gear:
         self.max_accel = get_max_accel_eco(v_ego)
       else:
