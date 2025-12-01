@@ -38,6 +38,7 @@ private:
   bool wide_cam_requested = false;
 
   // FrogPilot variables
+  DrivingPersonalityButton *personality_btn;
 
 protected:
   void paintGL() override;

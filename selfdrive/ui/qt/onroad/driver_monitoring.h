@@ -15,6 +15,8 @@ public:
   // FrogPilot variables
   FrogPilotAnnotatedCameraWidget *frogpilot_nvg;
 
+  bool onroad_distance_btn_enabled;
+
   QJsonObject frogpilot_toggles;
 
 private:

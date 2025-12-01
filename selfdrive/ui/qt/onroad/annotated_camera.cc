@@ -21,6 +21,8 @@ AnnotatedCameraWidget::AnnotatedCameraWidget(VisionStreamType type, QWidget *par
   main_layout->addWidget(experimental_btn, 0, Qt::AlignTop | Qt::AlignRight);
 
   // FrogPilot variables
+  personality_btn = new DrivingPersonalityButton(this);
+  personality_btn->setVisible(false);
 }
 
 void AnnotatedCameraWidget::updateState(const UIState &s, const FrogPilotUIState &fs) {
@@ -34,6 +36,15 @@ void AnnotatedCameraWidget::updateState(const UIState &s, const FrogPilotUIState
   const cereal::CarState::Reader &carState = sm["carState"].getCarState();
 
   frogpilot_nvg->experimentalButtonPosition = QPoint(experimental_btn->x(), experimental_btn->y());
+
+  bool onroad_distance_btn_enabled = frogpilot_nvg->dmIconPosition != QPoint(0, 0) && !frogpilot_nvg->hideBottomIcons && frogpilot_toggles.value("onroad_distance_button").toBool();
+  personality_btn->setVisible(onroad_distance_btn_enabled);
+  if (onroad_distance_btn_enabled) {
+    personality_btn->move(frogpilot_nvg->rightHandDM ? width() - UI_BORDER_SIZE - personality_btn->width() - (UI_BORDER_SIZE / 2) : UI_BORDER_SIZE, frogpilot_nvg->dmIconPosition.y() - personality_btn->height() / 2);
+    personality_btn->updateState(s, fs);
+  }
+
+  dmon.onroad_distance_btn_enabled = onroad_distance_btn_enabled;
 }
 
 void AnnotatedCameraWidget::initializeGL() {
