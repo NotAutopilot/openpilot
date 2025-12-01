@@ -21,6 +21,8 @@ FrogPilotAnnotatedCameraWidget::FrogPilotAnnotatedCameraWidget(QWidget *parent) 
   });
   QObject::connect(frogpilotUIState(), &FrogPilotUIState::themeUpdated, this, &FrogPilotAnnotatedCameraWidget::updateSignals);
   QObject::connect(uiState(), &UIState::offroadTransition, [this] {
+    standstillTimer.invalidate();
+
     QJsonObject stats = QJsonDocument::fromJson(QString::fromStdString(params.get("FrogPilotStats")).toUtf8()).object();
     stats["FrogHops"] = stats.value("FrogHops").toInt(0) + frogHopCount;
     params.putNonBlocking("FrogPilotStats", QJsonDocument(stats).toJson(QJsonDocument::Compact).toStdString());
@@ -175,6 +177,17 @@ void FrogPilotAnnotatedCameraWidget::updateState(const UIState &s, const FrogPil
   } else {
     glowTimer.invalidate();
   }
+
+  if (frogpilot_scene.standstill && frogpilot_toggles.value("stopped_timer").toBool()) {
+    if (!standstillTimer.isValid()) {
+      standstillTimer.start();
+    } else {
+      standstillDuration = frogpilot_scene.started_timer / UI_FREQ < 60 ? 0 : standstillTimer.elapsed() / 1000;
+    }
+  } else {
+    standstillDuration = 0;
+    standstillTimer.invalidate();
+  }
 }
 
 void FrogPilotAnnotatedCameraWidget::mousePressEvent(QMouseEvent *mouseEvent) {
@@ -208,7 +221,11 @@ void FrogPilotAnnotatedCameraWidget::paintFrogPilotWidgets(QPainter &p, UIState 
     paintRoadName(p);
   }
 
-  if ((blinkerLeft || blinkerRight) && signalStyle != "None") {
+  if (standstillDuration != 0) {
+    paintStandstillTimer(p);
+  }
+
+  if ((blinkerLeft || blinkerRight) && signalStyle != "None" && (standstillDuration == 0 || signalStyle != "static")) {
     paintTurnSignals(p);
   }
 }
@@ -445,6 +462,52 @@ void FrogPilotAnnotatedCameraWidget::paintRoadName(QPainter &p) {
   p.setFont(font);
   p.setPen(QPen(whiteColor(), 6));
   p.drawText(roadNameRect, Qt::AlignCenter, roadName);
+
+  p.restore();
+}
+
+void FrogPilotAnnotatedCameraWidget::paintStandstillTimer(QPainter &p) {
+  p.save();
+
+  float transition = 0.0f;
+
+  QColor startColor, endColor;
+  if (standstillDuration < 60) {
+    startColor = endColor = bg_colors[STATUS_ENGAGED];
+  } else if (standstillDuration < 150) {
+    startColor = bg_colors[STATUS_ENGAGED];
+    endColor = bg_colors[STATUS_CEM_DISABLED];
+    transition = (standstillDuration - 60) / 90.0f;
+  } else if (standstillDuration < 300) {
+    startColor = bg_colors[STATUS_CEM_DISABLED];
+    endColor = bg_colors[STATUS_TRAFFIC_MODE_ENABLED];
+    transition = (standstillDuration - 150) / 150.0f;
+  } else {
+    startColor = endColor = bg_colors[STATUS_TRAFFIC_MODE_ENABLED];
+  }
+
+  QColor blendedColor(
+    startColor.red() + transition * (endColor.red() - startColor.red()),
+    startColor.green() + transition * (endColor.green() - startColor.green()),
+    startColor.blue() + transition * (endColor.blue() - startColor.blue())
+  );
+
+  std::function<void(const QString &, int, const QFont &, const QColor &)> drawText = [&](const QString &text, int y, const QFont &font, const QColor &color) {
+    p.setFont(font);
+    p.setPen(color);
+
+    QRect standstillRect = p.fontMetrics().boundingRect(text);
+    standstillRect.moveCenter({rect().center().x(), y - standstillRect.height() / 2});
+    p.drawText(standstillRect.x(), standstillRect.bottom(), text);
+  };
+
+  int minutes = standstillDuration / 60;
+  QString minuteStr = minutes == 1 ? tr("1 minute") : tr("%1 minutes").arg(minutes);
+  drawText(minuteStr, 210, InterFont(176, QFont::Bold), blendedColor);
+
+  int seconds = standstillDuration % 60;
+  QString secondStr = seconds == 1 ? tr("1 second") : tr("%1 seconds").arg(seconds);
+  drawText(secondStr, 290, InterFont(66), whiteColor());
 
   p.restore();
 }
