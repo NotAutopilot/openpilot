@@ -12,7 +12,7 @@ from openpilot.frogpilot.assets.theme_manager import THEME_COMPONENT_PARAMS, The
 from openpilot.frogpilot.common.frogpilot_backups import backup_toggles
 from openpilot.frogpilot.common.frogpilot_functions import update_openpilot
 from openpilot.frogpilot.common.frogpilot_utilities import ThreadManager, is_url_pingable
-from openpilot.frogpilot.common.frogpilot_variables import FrogPilotVariables
+from openpilot.frogpilot.common.frogpilot_variables import ERROR_LOGS_PATH, FrogPilotVariables
 from openpilot.frogpilot.controls.frogpilot_planner import FrogPilotPlanner
 from openpilot.frogpilot.system.frogpilot_stats import send_stats
 from openpilot.frogpilot.system.frogpilot_tracking import FrogPilotTracking
@@ -31,7 +31,9 @@ def transition_offroad(frogpilot_planner, thread_manager, time_validated, sm, pa
   if time_validated:
     thread_manager.run_with_lock(send_stats, (params, frogpilot_toggles))
 
-def transition_onroad():
+def transition_onroad(error_log):
+  if error_log.is_file():
+    error_log.unlink()
 
 def update_checks(now, theme_manager, thread_manager, params, params_memory, frogpilot_toggles, boot_run=False):
   while not (is_url_pingable("https://github.com") or is_url_pingable("https://gitlab.com")):
@@ -80,6 +82,10 @@ def frogpilot_thread():
   started_previously = False
   time_validated = False
 
+  error_log = ERROR_LOGS_PATH / "error.txt"
+  if error_log.is_file():
+    error_log.unlink()
+
   while True:
     sm.update()
 
@@ -93,10 +99,10 @@ def frogpilot_thread():
 
       run_update_checks = True
     elif started and not started_previously:
-      frogpilot_planner = FrogPilotPlanner()
+      frogpilot_planner = FrogPilotPlanner(error_log)
       frogpilot_tracking = FrogPilotTracking(frogpilot_planner, frogpilot_toggles)
 
-      transition_onroad()
+      transition_onroad(error_log)
 
     if started and sm.updated["modelV2"]:
       frogpilot_planner.update(now, time_validated, sm, frogpilot_toggles)

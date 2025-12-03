@@ -16,7 +16,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.system import micd
 from openpilot.system.hardware import HARDWARE
 
-from openpilot.frogpilot.common.frogpilot_variables import ACTIVE_THEME_PATH, get_frogpilot_toggles
+from openpilot.frogpilot.common.frogpilot_variables import ACTIVE_THEME_PATH, ERROR_LOGS_PATH, get_frogpilot_toggles
 
 SAMPLE_RATE = 48000
 SAMPLE_BUFFER = 4096 # (approx 100ms)
@@ -84,9 +84,13 @@ class Soundd:
 
     self.frogpilot_toggles = get_frogpilot_toggles()
 
+    self.openpilot_crashed_played = False
+
     self.auto_volume = 0
 
     self.previous_sound_pack = None
+
+    self.error_log = ERROR_LOGS_PATH / "error.txt"
 
     self.update_frogpilot_sounds()
 
@@ -154,6 +158,9 @@ class Soundd:
     if self.params_memory.get("TestAlert"):
       self.update_alert(getattr(AudibleAlert, self.params_memory.get("TestAlert")))
       self.params_memory.remove("TestAlert")
+    elif not self.openpilot_crashed_played and self.error_log.is_file():
+      self.update_alert(AudibleAlert.prompt)
+      self.openpilot_crashed_played = True
     elif sm.updated['selfdriveState']:
       new_alert = sm['selfdriveState'].alertSound.raw
 

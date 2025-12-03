@@ -57,6 +57,36 @@ FrogPilotDataPanel::FrogPilotDataPanel(FrogPilotSettingsWindow *parent, bool for
   }
   dataMainList->addItem(deleteDrivingDataButton);
 
+  ButtonControl *deleteErrorLogsButton = new ButtonControl(tr("Delete Error Logs"), tr("DELETE"), tr("<b>Delete collected error logs</b> to free up space and clear old crash records."));
+  QObject::connect(deleteErrorLogsButton, &ButtonControl::clicked, [=]() {
+    QDir errorLogsDir("/data/error_logs");
+
+    if (ConfirmationDialog::confirm(tr("Delete all error logs?"), tr("Delete"), this)) {
+      std::thread([=]() mutable {
+        parent->keepScreenOn = true;
+
+        deleteErrorLogsButton->setEnabled(false);
+        deleteErrorLogsButton->setValue(tr("Deleting..."));
+
+        errorLogsDir.removeRecursively();
+        errorLogsDir.mkpath(".");
+
+        deleteErrorLogsButton->setValue(tr("Deleted!"));
+
+        util::sleep_for(2500);
+
+        deleteErrorLogsButton->setEnabled(true);
+        deleteErrorLogsButton->setValue("");
+
+        parent->keepScreenOn = false;
+      }).detach();
+    }
+  });
+  if (forceOpenDescriptions) {
+    deleteErrorLogsButton->showDescription();
+  }
+  dataMainList->addItem(deleteErrorLogsButton);
+
   FrogPilotButtonsControl *frogpilotBackupButton = new FrogPilotButtonsControl(tr("FrogPilot Backups"), tr("<b>Create, delete, or restore FrogPilot backups.</b>"), "", {tr("BACKUP"), tr("DELETE"), tr("DELETE ALL"), tr("RESTORE")});
   QObject::connect(frogpilotBackupButton, &FrogPilotButtonsControl::buttonClicked, [=](int id) {
     QDir backupDir("/data/backups");
