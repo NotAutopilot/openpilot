@@ -3,8 +3,11 @@
 Tesla Pre-AP Comma Pedal Calibration Tool
 Ported from Tinkla's pedal_calibrator/calibratePedal.py
 
-This simplified version reads raw sensor values for min/max calibration.
-For full automated calibration with pedal control, see Tinkla's original.
+This is a full port of the original Tinkla calibration tool that:
+- Verifies safety conditions (car on, brake pressed, gear in neutral)
+- Sends commands to the pedal to detect min/max values
+- Fine-tunes and validates the calibration
+- Saves all calibration parameters
 
 Usage:
   SSH into comma device and run:
@@ -14,264 +17,546 @@ Usage:
 
 import time
 import sys
+import struct
+from ctypes import create_string_buffer
+
+# ============================================
+# Constants from Tinkla
+# ============================================
+
+# Pedal conversion constants (from comma_pedal.dbc)
+M1 = 0.050796813
+M2 = 0.101593626
+D = -22.85856576
+
+# CAN Message IDs
+GAS_SENSOR_ID = 0x552       # 1362 - Pedal sensor feedback
+GAS_COMMAND_ID = 0x551      # 1361 - Pedal command
+GTW_STATUS_ID = 0x348       # 840 - Car status
+BRAKE_MESSAGE_ID = 0x20A    # 522 - Brake status
+DI_TORQUE1_ID = 0x108       # 264 - Accelerator position
+DI_TORQUE2_ID = 0x118       # 280 - Gear status
+
+# Timing
+PEDAL_TIMEOUT_MS = 500
+MAX_PEDAL_ERRORS = 10
+
+# Gear values (from DBC)
+GEAR_NEUTRAL = 0x30  # DI_gear = 3 (Neutral) shifted to position
+
+# ============================================
+# Status Messages
+# ============================================
+
+CALIBRATOR_STATUSES = [
+  "Initializing...",
+  "Checking safety conditions...",
+  "Reading Pedal Zero...",
+  "Detecting Pedal Max...",
+  "Fine-tuning calibration...",
+  "Validating calibration...",
+  "Saving values...",
+  "Calibration Complete!",
+  "Calibration Error: ",
+]
+
+CALIBRATION_ERRORS = [
+  "Pedal communication timeout!",
+  "Car is not ON! Turn ignition on.",
+  "Car is not in NEUTRAL! Shift to N.",
+  "Accelerator pedal is pressed! Release it.",
+  "Brake pedal not pressed! Press and hold brake.",
+  "Pedal sensor error!",
+]
 
 # ============================================
 # Safety Banner
 # ============================================
 SAFETY_BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║                    ⚠️  SAFETY WARNING ⚠️                          ║
+║              ⚠️  PEDAL CALIBRATION - SAFETY FIRST ⚠️              ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║                                                                  ║
-║  Before proceeding, ensure:                                      ║
+║  BEFORE PROCEEDING, YOU MUST:                                    ║
 ║                                                                  ║
-║    1. Vehicle is in PARK                                         ║
-║    2. Parking brake is ENGAGED                                   ║
-║    3. Engine/Motor is OFF (or car is not in Drive)               ║
-║    4. You are in a safe, stationary location                     ║
+║    1. Park in a SAFE location (flat, away from traffic)          ║
+║    2. Turn the car ON (ignition on, ready to drive)              ║
+║    3. Shift into NEUTRAL (N)                                     ║
+║    4. Press and HOLD the BRAKE pedal                             ║
+║    5. Keep hands ready on the gear selector                      ║
 ║                                                                  ║
-║  This tool will read the Comma Pedal sensor values.              ║
-║  The car should NOT move during calibration.                     ║
+║  During calibration:                                             ║
+║    - The pedal will be tested automatically                      ║
+║    - Keep your foot on the brake at ALL times                    ║
+║    - If anything feels wrong, shift to PARK immediately          ║
+║                                                                  ║
+║  The calibration will ABORT if:                                  ║
+║    - Car is not on                                               ║
+║    - Gear is not in Neutral                                      ║
+║    - Brake is not pressed                                        ║
 ║                                                                  ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
-# CAN Constants
-GAS_SENSOR_ID = 0x552  # 1362 decimal - GAS_SENSOR from comma_pedal.dbc
 
-# Calibration Constants
-SAMPLE_COUNT = 50  # Number of samples to average
-SAMPLE_TIMEOUT = 0.5  # Timeout per sample in seconds
-DETECTION_TIMEOUT = 10.0  # Initial detection timeout
+def current_time_ms():
+  return int(round(time.time() * 1000))
 
 
-def get_pedal_value(can_sock, timeout=1.0, pedal_bus=None):
+class PedalCalibrator:
   """
-  Read pedal sensor value from CAN.
+  Full port of Tinkla's PedalCalibrator class.
+  """
   
-  GAS_SENSOR message format (comma_pedal.dbc):
-    SG_ INTERCEPTOR_GAS : 7|16@0+ (1,0) [0|1] "" EON
+  @staticmethod
+  def checksum(msg_id, dat):
+    """Calculate Tesla-style checksum."""
+    ret = (msg_id & 0xFF) + ((msg_id >> 8) & 0xFF)
+    ret += sum(dat)
+    return ret & 0xFF
+  
+  def __init__(self):
+    import cereal.messaging as messaging
+    from openpilot.common.params import Params
     
-  This is big-endian: (dat[0] << 8) | dat[1]
-  """
-  import cereal.messaging as messaging
+    self.messaging = messaging
+    self.params = Params()
+    
+    print(CALIBRATOR_STATUSES[0])
+    
+    # Messaging setup
+    self.can_sock = messaging.sub_sock('can')
+    self.pm = messaging.PubMaster(['sendcan'])
+    
+    # Pedal state
+    self.pedal_idx = 0
+    self.rcv_pedal_idx = -1
+    self.last_rcv_pedal_idx = -1
+    self.last_pedal_seen_ms = 0
+    self.last_pedal_sent_ms = 0
+    self.pedal_interceptor_state = 0
+    self.pedal_interceptor_value = 1000.0
+    self.pedal_interceptor_value2 = 1000.0
+    self.pedal_available = False
+    self.pedal_timeout = True
+    self.pedal_error_count = 0
+    self.pedal_enabled = 0
+    
+    # Determine pedal CAN bus
+    self.pedal_can = 2
+    try:
+      if self.params.get_bool("TeslaPedalCanZero"):
+        self.pedal_can = 0
+    except:
+      pass
+    
+    # Car state
+    self.car_on = False
+    self.brake_pressed = False
+    self.gear_shifter = None
+    self.gear_neutral = False
+    self.di_gas = 0.0
+    
+    # Calibration state
+    self.status = 0
+    self.prev_status = -1
+    self.frame = 0
+    
+    # Stage 2: Pedal zero
+    self.pedal_zero_count = 0
+    self.pedal_zero_values_to_read = 100
+    self.pedal_zero_sum = 0.0
+    
+    # Stage 3: Pedal max detection
+    self.pedal_last_value_sent = 0.0
+    self.pedal_pressed_value = -1000.0
+    self.pedal_max_value = -1000.0
+    self.pedal_step = 0
+    
+    # Stage 4: Fine-tuning
+    self.finetuning_stage = 0
+    self.finetuning_target = 99.6
+    self.finetuning_step = 0.1
+    self.finetuning_sum = 0.0
+    self.finetuning_count = 0
+    self.finetuning_steps = 10
+    self.finetuning_best_val = 0.0
+    self.finetuning_best_delta = 1000.0
+    self.finetuning_best_result = -1000.0
+    self.finetuning_start = 0.0
+    
+    # Stage 5: Validation
+    self.validation_stage = 0
+    self.validation_target = 0.0
+    self.validation_count = 0
+    self.validation_sum = 0.0
+    self.validation_steps = 10
+    self.validation_value = 0.0
+    
+    # Final values
+    self.pedal_min = -1000.0
+    self.pedal_max = -1000.0
+    self.pedal_pressed = -1000.0
+    self.pedal_factor = -1000.0
   
-  start_time = time.time()
-  while time.time() - start_time < timeout:
-    messages = messaging.drain_sock(can_sock, wait_for_one=False)
-    for m in messages:
-      if m.which() == 'can':
-        for c in m.can:
-          if c.address == GAS_SENSOR_ID:
-            # Filter by bus if specified
-            if pedal_bus is not None and c.src not in (pedal_bus,):
-              continue
-            # Big-endian 16-bit value
-            if len(c.dat) >= 2:
-              return (c.dat[0] << 8) | c.dat[1]
-    time.sleep(0.01)
-  return None
-
-
-def detect_pedal_bus(can_sock):
-  """Detect which CAN bus the pedal is on (0 or 2)."""
-  import cereal.messaging as messaging
+  def show_status(self, n):
+    """Print status message."""
+    if self.status != self.prev_status:
+      print(f"\n{CALIBRATOR_STATUSES[n]}")
+      self.prev_status = self.status
   
-  print("Detecting pedal CAN bus...")
-  start_time = time.time()
+  def show_error(self, n):
+    """Print error message (rate limited)."""
+    if self.frame % 100 == 0:
+      print(f"  ⚠️  {CALIBRATION_ERRORS[n]}", flush=True)
   
-  while time.time() - start_time < DETECTION_TIMEOUT:
-    messages = messaging.drain_sock(can_sock, wait_for_one=False)
-    for m in messages:
-      if m.which() == 'can':
-        for c in m.can:
-          if c.address == GAS_SENSOR_ID:
-            print(f"  Found pedal on CAN bus {c.src}")
-            return c.src
-    time.sleep(0.01)
+  def finish_with_error(self, n):
+    """Exit with error."""
+    print(f"\n❌ {CALIBRATOR_STATUSES[-1]}{CALIBRATION_ERRORS[n]}")
+    sys.exit(1)
   
-  return None
-
-
-def read_samples(can_sock, pedal_bus, count=SAMPLE_COUNT):
-  """Read multiple samples and return list of values."""
-  values = []
-  errors = 0
+  def finish(self):
+    """Exit successfully."""
+    print(f"\n✅ {CALIBRATOR_STATUSES[-2]}")
+    sys.exit(0)
   
-  for i in range(count):
-    val = get_pedal_value(can_sock, timeout=SAMPLE_TIMEOUT, pedal_bus=pedal_bus)
-    if val is not None:
-      values.append(val)
-      print(".", end="", flush=True)
+  def create_pedal_command_msg(self, accel_command, enable):
+    """Create and send GAS_COMMAND (0x551) message to Comma Pedal."""
+    msg_id = GAS_COMMAND_ID
+    msg_len = 6
+    
+    if enable == 1:
+      int_accel_command = int((accel_command - D) / M1)
+      int_accel_command2 = int((accel_command - D) / M2)
     else:
-      errors += 1
-      print("x", end="", flush=True)
-    time.sleep(0.02)
+      int_accel_command = 0
+      int_accel_command2 = 0
+    
+    msg = create_string_buffer(msg_len)
+    struct.pack_into(
+      "BBBBB",
+      msg,
+      0,
+      int((int_accel_command >> 8) & 0xFF),
+      int_accel_command & 0xFF,
+      int((int_accel_command2 >> 8) & 0xFF),
+      int_accel_command2 & 0xFF,
+      ((enable << 7) + self.pedal_idx) & 0xFF,
+    )
+    struct.pack_into("B", msg, msg_len - 1, self.checksum(msg_id, msg.raw))
+    
+    # Send via sendcan
+    can_msg = self.messaging.new_message('sendcan', 1)
+    can_msg.sendcan[0].address = msg_id
+    can_msg.sendcan[0].dat = msg.raw
+    can_msg.sendcan[0].src = self.pedal_can
+    self.pm.send('sendcan', can_msg)
+    
+    self.last_pedal_sent_ms = current_time_ms()
+    self.pedal_idx = (self.pedal_idx + 1) % 16
   
-  print("")
-  return values, errors
+  def process_can(self):
+    """Process incoming CAN messages."""
+    messages = self.messaging.drain_sock(self.can_sock, wait_for_one=False)
+    
+    for m in messages:
+      if m.which() != 'can':
+        continue
+      
+      for c in m.can:
+        addr = c.address
+        dat = c.dat
+        
+        # GTW_status - Car on state
+        if addr == GTW_STATUS_ID:
+          self.car_on = (dat[0] & 0x01) == 1
+        
+        # BrakeMessage - Brake pressed
+        if addr == BRAKE_MESSAGE_ID:
+          self.brake_pressed = ((dat[0] >> 2) & 0x03) != 1
+        
+        # DI_torque2 - Gear position
+        if addr == DI_TORQUE2_ID:
+          self.gear_shifter = dat[1] & 0x70
+          self.gear_neutral = self.gear_shifter == GEAR_NEUTRAL
+        
+        # DI_torque1 - Accelerator position
+        if addr == DI_TORQUE1_ID:
+          self.di_gas = dat[6] * 0.4
+        
+        # GAS_SENSOR - Pedal feedback
+        if addr == GAS_SENSOR_ID:
+          self.pedal_interceptor_state = (dat[4] >> 7) & 0x01
+          self.pedal_interceptor_value = ((dat[0] << 8) + dat[1]) * M1 + D
+          self.pedal_interceptor_value2 = ((dat[2] << 8) + dat[3]) * M2 + D
+          self.rcv_pedal_idx = dat[4] & 0x0F
+  
+  def check_safety_conditions(self):
+    """Check all safety conditions. Returns True if safe to proceed."""
+    # Car must be on
+    if not self.car_on:
+      self.show_error(1)
+      return False
+    
+    # Brake must be pressed
+    if not self.brake_pressed:
+      self.show_error(4)
+      if self.pedal_enabled == 1:
+        self.create_pedal_command_msg(0, 0)
+        self.pedal_enabled = 0
+      return False
+    
+    # Must be in neutral
+    if not self.gear_neutral:
+      self.show_error(2)
+      if self.pedal_enabled == 1:
+        self.create_pedal_command_msg(0, 0)
+        self.pedal_enabled = 0
+      return False
+    
+    # Accelerator not pressed (only for early stages)
+    if self.di_gas > 0 and self.status < 3:
+      self.show_error(3)
+      if self.pedal_enabled == 1:
+        self.create_pedal_command_msg(0, 0)
+        self.pedal_enabled = 0
+      return False
+    
+    return True
+  
+  def run(self, rate=100):
+    """Main calibration loop."""
+    from openpilot.common.realtime import Ratekeeper
+    
+    self.status = 1  # Checking safety
+    rk = Ratekeeper(rate)
+    
+    print("\nWaiting for safety conditions...")
+    print("  - Car ON")
+    print("  - Gear in NEUTRAL")
+    print("  - Brake PRESSED")
+    print("  - Accelerator RELEASED")
+    
+    while True:
+      rk.keep_time()
+      self.frame = rk.frame
+      curr_time_ms = current_time_ms()
+      
+      # Process CAN
+      self.process_can()
+      
+      # Check for completion
+      if self.status == 7:
+        self.finish()
+      
+      # Show status change
+      self.show_status(self.status)
+      
+      # Check safety conditions
+      if not self.check_safety_conditions():
+        continue
+      
+      # Safety conditions met - advance from checking stage
+      if self.status == 1:
+        print("\n✓ All safety conditions met!")
+        self.status = 2
+        continue
+      
+      # Process pedal message
+      if self.rcv_pedal_idx != self.last_rcv_pedal_idx:
+        self.last_pedal_seen_ms = curr_time_ms
+        self.last_rcv_pedal_idx = self.rcv_pedal_idx
+        
+        if self.pedal_interceptor_state == 0:
+          self.pedal_error_count = 0
+          
+          # Stage 2: Reading pedal zero (released position)
+          if self.status == 2:
+            self.pedal_zero_sum += self.pedal_interceptor_value
+            self.pedal_zero_count += 1
+            
+            if self.pedal_zero_count >= self.pedal_zero_values_to_read:
+              self.pedal_min = self.pedal_zero_sum / self.pedal_zero_count
+              print(f"\n  ✓ Pedal MIN detected: {self.pedal_min:.2f}")
+              self.pedal_last_value_sent = self.pedal_min
+              self.pedal_enabled = 1
+              self.status = 3
+            elif self.frame % 20 == 0:
+              print(f"  Reading zero: {self.pedal_zero_count}/{self.pedal_zero_values_to_read}", flush=True)
+          
+          # Stage 3: Detecting pedal max
+          if self.status == 3:
+            if self.di_gas >= 99.6 and self.pedal_max_value == -1000 and self.pedal_step == 1:
+              print(f"\n  ✓ Pedal MAX detected: {self.pedal_last_value_sent:.2f}")
+              self.pedal_max_value = self.pedal_last_value_sent
+              self.pedal_last_value_sent = self.pedal_max_value - 0.5
+              self.finetuning_start = self.pedal_max_value - 0.5
+              self.pedal_enabled = 1
+              self.pedal_step = 0
+              self.status = 4
+            
+            if self.di_gas > 0 and self.pedal_pressed_value == -1000 and self.pedal_step == 1:
+              print(f"\n  ✓ Pedal PRESSED threshold: {self.pedal_last_value_sent:.2f}")
+              self.pedal_pressed_value = self.pedal_last_value_sent
+            
+            if self.di_gas < 100:
+              if self.frame % 50 == 0:
+                print(f"  Detecting max: sent {self.pedal_last_value_sent:.1f} -> car sees {self.di_gas:.1f}%", flush=True)
+              if self.pedal_step == 1:
+                self.pedal_last_value_sent += 1
+                self.pedal_step = 0
+              else:
+                self.pedal_step = 1
+          
+          # Stage 4: Fine-tuning
+          if self.status == 4:
+            if self.finetuning_count < self.finetuning_steps:
+              self.finetuning_sum += self.di_gas
+              self.finetuning_count += 1
+            
+            if self.finetuning_count == self.finetuning_steps:
+              avg = self.finetuning_sum / self.finetuning_count
+              delta = abs(self.finetuning_target - avg)
+              
+              if delta < self.finetuning_best_delta:
+                self.finetuning_best_val = self.pedal_last_value_sent
+                self.finetuning_best_delta = delta
+                self.finetuning_best_result = avg
+              
+              self.pedal_last_value_sent += self.finetuning_step
+              print(f"  Fine-tuning: target {self.finetuning_target:.1f}%, got {avg:.1f}%", flush=True)
+              self.finetuning_count = 0
+              self.finetuning_sum = 0
+              
+              if self.pedal_last_value_sent > self.finetuning_start + 0.5:
+                if self.finetuning_stage == 0:
+                  self.pedal_max = self.finetuning_best_val
+                  self.finetuning_best_val = 0
+                  self.finetuning_best_delta = 1000.0
+                  self.finetuning_stage = 1
+                  self.pedal_last_value_sent = self.pedal_pressed_value - 0.5
+                  self.finetuning_start = self.pedal_pressed_value - 0.5
+                  self.finetuning_target = 0.4
+                  print("\n  ✓ Done fine-tuning pedal MAX")
+                else:
+                  self.pedal_pressed = self.finetuning_best_val
+                  self.pedal_last_value_sent = self.pedal_min
+                  self.pedal_factor = 100.0 / (self.pedal_max - self.pedal_pressed)
+                  self.status = 5
+                  print("\n  ✓ Done fine-tuning pedal ZERO")
+          
+          # Stage 5: Validation
+          if self.status == 5:
+            if self.validation_stage == 0:
+              self.validation_stage = 1
+              self.validation_target = self.validation_stage * 10
+              self.validation_count = 0
+              self.validation_sum = 0
+              self.validation_value = self.pedal_pressed + self.validation_target * (self.pedal_max - self.pedal_pressed) / 100.0
+              self.pedal_last_value_sent = self.validation_value
+            else:
+              if self.validation_count < self.validation_steps:
+                self.validation_sum += self.di_gas
+                self.validation_count += 1
+                
+                if self.validation_count == self.validation_steps:
+                  avg = self.validation_sum / self.validation_count
+                  print(f"  Validating {self.validation_target:.0f}%: got {avg:.1f}%", flush=True)
+                  self.validation_stage += 1
+                  
+                  if self.validation_stage == 10:
+                    print("\n  ✓ Validation complete")
+                    self.status = 6
+                  else:
+                    self.validation_target = self.validation_stage * 10
+                    self.validation_count = 0
+                    self.validation_sum = 0
+                    self.validation_value = self.pedal_pressed + self.validation_target * (self.pedal_max - self.pedal_pressed) / 100.0
+                    self.pedal_last_value_sent = self.validation_value
+          
+          # Stage 6: Save values
+          if self.status == 6:
+            saved_count = 0
+            
+            print("\n" + "=" * 50)
+            print("CALIBRATION RESULTS")
+            print("=" * 50)
+            
+            if self.pedal_min != -1000:
+              self.params.put("TeslaPedalCalibMin", str(self.pedal_min))
+              print(f"  Pedal Min:    {self.pedal_min:.2f}")
+              saved_count += 1
+            
+            if self.pedal_max != -1000:
+              self.params.put("TeslaPedalCalibMax", str(self.pedal_max))
+              print(f"  Pedal Max:    {self.pedal_max:.2f}")
+              saved_count += 1
+            
+            if self.pedal_pressed != -1000:
+              self.params.put("TeslaPedalCalibZero", str(self.pedal_pressed))
+              print(f"  Pedal Zero:   {self.pedal_pressed:.2f}")
+              saved_count += 1
+            
+            if self.pedal_factor != -1000:
+              self.params.put("TeslaPedalCalibFactor", str(self.pedal_factor))
+              print(f"  Pedal Factor: {self.pedal_factor:.4f}")
+              saved_count += 1
+            
+            # Also save simplified min/max for compatibility
+            if self.pedal_min != -1000:
+              self.params.put("TeslaPedalMin", str(int(self.pedal_min)))
+            if self.pedal_max != -1000:
+              self.params.put("TeslaPedalMax", str(int(self.pedal_max)))
+            
+            if saved_count == 4:
+              self.params.put_bool("TeslaPedalCalibDone", True)
+              self.params.put_bool("TeslaPedalCalibrated", True)
+              self.params.put_bool("TeslaUsePedal", True)
+              print("\n  ✓ All parameters saved!")
+              print("  ✓ Pedal enabled (TeslaUsePedal = True)")
+            
+            self.status = 7
+          
+          # Keep sending pedal command
+          self.create_pedal_command_msg(self.pedal_last_value_sent, self.pedal_enabled)
+      
+      # Check pedal timeout
+      self.pedal_timeout = curr_time_ms - self.last_pedal_seen_ms > PEDAL_TIMEOUT_MS
+      self.pedal_available = not self.pedal_timeout and self.pedal_interceptor_state == 0
+      
+      if self.pedal_timeout or self.pedal_interceptor_state > 0:
+        if curr_time_ms - self.last_pedal_sent_ms > PEDAL_TIMEOUT_MS:
+          self.pedal_error_count += 1
+          if self.pedal_error_count > MAX_PEDAL_ERRORS:
+            self.finish_with_error(0)
+          # Send reset command
+          self.create_pedal_command_msg(0, 0)
 
 
 def main():
-  import cereal.messaging as messaging
-  
-  # Import here to avoid issues when running outside comma device
-  try:
-    from openpilot.common.params import Params
-    params = Params()
-  except ImportError:
-    print("Error: Must run on comma device with openpilot installed.")
-    return 1
-  
-  # Show safety warning
   print(SAFETY_BANNER)
-  response = input("Type 'YES' to acknowledge safety warning and continue: ")
+  
+  response = input("Type 'YES' to acknowledge safety requirements and continue: ")
   if response.strip().upper() != "YES":
-    print("Calibration cancelled.")
+    print("\nCalibration cancelled.")
     return 1
   
   print("\n" + "=" * 50)
-  print("Comma Pedal Calibration Tool")
+  print("COMMA PEDAL CALIBRATION")
+  print("Ported from Tinkla")
   print("=" * 50)
   
-  # Connect to CAN
-  print("\nConnecting to CAN bus...")
   try:
-    can_sock = messaging.sub_sock('can')
-    # Give it a moment to connect
-    time.sleep(0.5)
+    calibrator = PedalCalibrator()
+    calibrator.run()
+  except KeyboardInterrupt:
+    print("\n\nCalibration interrupted by user.")
+    return 1
   except Exception as e:
-    print(f"Error: Failed to subscribe to CAN: {e}")
+    print(f"\n\nError: {e}")
+    import traceback
+    traceback.print_exc()
     return 1
-  
-  # Detect pedal bus
-  pedal_bus = detect_pedal_bus(can_sock)
-  if pedal_bus is None:
-    print("\nError: Could not detect Comma Pedal!")
-    print("  - Check that the pedal is connected")
-    print("  - Check CAN wiring")
-    print("  - Verify pedal is powered (car ignition on)")
-    return 1
-  
-  # Store pedal bus preference
-  if pedal_bus == 0:
-    params.put_bool("TeslaPedalCanZero", True)
-    print("  Saved: TeslaPedalCanZero = True")
-  else:
-    params.put_bool("TeslaPedalCanZero", False)
-    print("  Saved: TeslaPedalCanZero = False")
-  
-  # Initial reading
-  val = get_pedal_value(can_sock, timeout=2.0, pedal_bus=pedal_bus)
-  if val is None:
-    print("\nError: Lost connection to pedal!")
-    return 1
-  print(f"\nCurrent pedal sensor value: {val}")
-  
-  # ============================================
-  # Step 1: Calibrate Minimum (Released)
-  # ============================================
-  print("\n" + "-" * 50)
-  print("STEP 1: Calibrate MINIMUM (Pedal Released)")
-  print("-" * 50)
-  print("  Completely release the accelerator pedal.")
-  print("  Keep your foot OFF the pedal.")
-  input("\n  Press Enter when ready...")
-  
-  print("\n  Reading samples", end="", flush=True)
-  min_vals, min_errors = read_samples(can_sock, pedal_bus)
-  
-  if len(min_vals) < 10:
-    print(f"\nError: Only got {len(min_vals)} valid samples (need at least 10)")
-    return 1
-  
-  avg_min = int(sum(min_vals) / len(min_vals))
-  print(f"\n  Samples: {len(min_vals)}, Errors: {min_errors}")
-  print(f"  Min value: {min(min_vals)}")
-  print(f"  Max value: {max(min_vals)}")
-  print(f"  Average:   {avg_min}")
-  print(f"\n  ✓ Recorded MINIMUM: {avg_min}")
-  
-  # ============================================
-  # Step 2: Calibrate Maximum (Floored)
-  # ============================================
-  print("\n" + "-" * 50)
-  print("STEP 2: Calibrate MAXIMUM (Pedal Floored)")
-  print("-" * 50)
-  print("  Press the accelerator pedal ALL THE WAY to the floor.")
-  print("  Hold it there firmly.")
-  input("\n  Press Enter when ready...")
-  
-  print("\n  Reading samples", end="", flush=True)
-  max_vals, max_errors = read_samples(can_sock, pedal_bus)
-  
-  if len(max_vals) < 10:
-    print(f"\nError: Only got {len(max_vals)} valid samples (need at least 10)")
-    return 1
-  
-  avg_max = int(sum(max_vals) / len(max_vals))
-  print(f"\n  Samples: {len(max_vals)}, Errors: {max_errors}")
-  print(f"  Min value: {min(max_vals)}")
-  print(f"  Max value: {max(max_vals)}")
-  print(f"  Average:   {avg_max}")
-  print(f"\n  ✓ Recorded MAXIMUM: {avg_max}")
-  
-  # ============================================
-  # Validation
-  # ============================================
-  print("\n" + "-" * 50)
-  print("VALIDATION")
-  print("-" * 50)
-  
-  if avg_max <= avg_min:
-    print("\n  ✗ ERROR: Maximum value is not greater than minimum!")
-    print(f"    Min: {avg_min}, Max: {avg_max}")
-    print("\n  Calibration FAILED. Please try again.")
-    return 1
-  
-  # Check for reasonable range
-  pedal_range = avg_max - avg_min
-  if pedal_range < 100:
-    print(f"\n  ⚠ WARNING: Pedal range seems small ({pedal_range})")
-    print("    Expected range is typically 500-1000")
-    response = input("    Continue anyway? (y/N): ")
-    if response.strip().lower() != 'y':
-      print("\n  Calibration cancelled.")
-      return 1
-  
-  print(f"\n  ✓ Pedal range: {pedal_range} (looks reasonable)")
-  
-  # ============================================
-  # Save Parameters
-  # ============================================
-  print("\n" + "-" * 50)
-  print("SAVING CALIBRATION")
-  print("-" * 50)
-  
-  params.put("TeslaPedalMin", str(avg_min))
-  params.put("TeslaPedalMax", str(avg_max))
-  params.put_bool("TeslaPedalCalibrated", True)
-  params.put_bool("TeslaUsePedal", True)
-  
-  print(f"  TeslaPedalMin:        {avg_min}")
-  print(f"  TeslaPedalMax:        {avg_max}")
-  print(f"  TeslaPedalCalibrated: True")
-  print(f"  TeslaUsePedal:        True")
-  
-  # ============================================
-  # Summary
-  # ============================================
-  print("\n" + "=" * 50)
-  print("CALIBRATION COMPLETE!")
-  print("=" * 50)
-  print(f"\n  Pedal Min:   {avg_min}")
-  print(f"  Pedal Max:   {avg_max}")
-  print(f"  Range:       {pedal_range}")
-  print(f"  CAN Bus:     {pedal_bus}")
-  print("\n  The Comma Pedal is now enabled and calibrated.")
-  print("  Reboot your comma device for changes to take effect.")
-  print("\n  To disable the pedal later, run:")
-  print("    echo 0 > /data/params/d/TeslaUsePedal")
   
   return 0
 
