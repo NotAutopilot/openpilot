@@ -186,8 +186,10 @@ class PedalCalibrator:
     
     # Set SAFETY_ALLOUTPUT to allow sending any CAN message
     # This is required because the Tesla safety blocks 0x551 when not engaged
+    # Using raw integer 17 because Panda class may not have SAFETY_ALLOUTPUT attribute
     print("  Setting SAFETY_ALLOUTPUT mode...")
-    self.panda.set_safety_mode(Panda.SAFETY_ALLOUTPUT)
+    SAFETY_ALLOUTPUT = 17  # Raw firmware ID for all-output mode
+    self.panda.set_safety_mode(SAFETY_ALLOUTPUT)
     print("  ✓ Panda configured for calibration")
     
     # Pedal state
@@ -279,9 +281,10 @@ class PedalCalibrator:
         
         # Restore to SAFETY_SILENT (no output) for safety
         # The car software will set the proper mode when it starts
-        from panda import Panda
+        # Using raw integer 0 because Panda class may not have SAFETY_SILENT attribute
+        SAFETY_SILENT = 0  # Raw firmware ID for silent mode (no TX allowed)
         print("  Setting SAFETY_SILENT mode...")
-        self.panda.set_safety_mode(Panda.SAFETY_SILENT)
+        self.panda.set_safety_mode(SAFETY_SILENT)
         print("  ✓ Panda safety restored")
       except Exception as e:
         print(f"  ⚠️  Warning: Could not restore safety: {e}")
