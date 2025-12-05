@@ -359,7 +359,15 @@ class PedalCalibrator:
     """Process incoming CAN messages from Panda."""
     try:
       # Direct Panda receive
-      for addr, _, dat, src in self.panda.can_recv():
+      # Handle both old (3-tuple) and new (4-tuple) panda.can_recv() formats
+      for msg in self.panda.can_recv():
+        if len(msg) == 4:
+          addr, _, dat, src = msg  # New format: (addr, bustime, data, bus)
+        elif len(msg) == 3:
+          addr, dat, src = msg    # Old format: (addr, data, bus)
+        else:
+          continue  # Unknown format, skip
+        
         # GTW_status - Car on state
         if addr == GTW_STATUS_ID:
           self.car_on = (dat[0] & 0x01) == 1
