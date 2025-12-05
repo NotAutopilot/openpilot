@@ -142,13 +142,19 @@ class PedalCalibrator:
     self.pedal_error_count = 0
     self.pedal_enabled = 0
     
-    # Determine pedal CAN bus
+    # Determine pedal CAN bus (check both Tinkla and new param names)
     self.pedal_can = 2
     try:
-      if self.params.get_bool("TeslaPedalCanZero"):
+      # Check original Tinkla param first
+      if self.params.get_bool("TinklaPedalCanZero"):
+        self.pedal_can = 0
+      # Then check new param name
+      elif self.params.get_bool("TeslaPedalCanZero"):
         self.pedal_can = 0
     except:
       pass
+    
+    print(f"  Pedal CAN bus: {self.pedal_can}")
     
     # Car state
     self.car_on = False
@@ -509,11 +515,14 @@ class PedalCalibrator:
               self.params.put("TeslaPedalMax", str(int(self.pedal_max)))
             
             if saved_count == 4:
+              # Set all pedal calibration flags (both old Tinkla and new names for compatibility)
               self.params.put_bool("TeslaPedalCalibDone", True)
               self.params.put_bool("TeslaPedalCalibrated", True)
               self.params.put_bool("TeslaUsePedal", True)
+              self.params.put_bool("TinklaEnablePedal", True)  # Tinkla compatibility
               print("\n  ✓ All parameters saved!")
               print("  ✓ Pedal enabled (TeslaUsePedal = True)")
+              print("  ✓ Tinkla compatibility (TinklaEnablePedal = True)")
             
             self.status = 7
           
