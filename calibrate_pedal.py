@@ -3,11 +3,11 @@
 Tesla Pre-AP Comma Pedal Calibration Tool
 Ported from Tinkla's pedal_calibrator/calibratePedal.py
 
-This is a full port of the original Tinkla calibration tool that:
-- Verifies safety conditions (car on, brake pressed, gear in neutral)
-- Sends commands to the pedal to detect min/max values
-- Fine-tunes and validates the calibration
-- Saves all calibration parameters
+CRITICAL: This script uses DIRECT PANDA ACCESS with SAFETY_ALLOUTPUT mode.
+This bypasses the normal safety layer to allow sending pedal commands while
+the car is in Neutral (not engaged).
+
+Safety is ALWAYS restored via try/finally block when the script exits.
 
 Usage:
   SSH into comma device and run:
@@ -18,6 +18,7 @@ Usage:
 import time
 import sys
 import struct
+import os
 from ctypes import create_string_buffer
 
 # ============================================
@@ -44,13 +45,16 @@ MAX_PEDAL_ERRORS = 10
 # Gear values (from DBC)
 GEAR_NEUTRAL = 0x30  # DI_gear = 3 (Neutral) shifted to position
 
+# JSON config file path
+CONFIG_FILE = "/data/tinkla_params.json"
+
 # ============================================
 # Status Messages
 # ============================================
 
 CALIBRATOR_STATUSES = [
   "Initializing...",
-  "Checking safety conditions...",
+  "Configuring Panda (SAFETY_ALLOUTPUT)...",
   "Reading Pedal Zero...",
   "Detecting Pedal Max...",
   "Fine-tuning calibration...",
@@ -67,6 +71,7 @@ CALIBRATION_ERRORS = [
   "Accelerator pedal is pressed! Release it.",
   "Brake pedal not pressed! Press and hold brake.",
   "Pedal sensor error!",
+  "Panda not found! Is USB connected?",
 ]
 
 # ============================================
@@ -95,6 +100,9 @@ SAFETY_BANNER = """
 ║    - Gear is not in Neutral                                      ║
 ║    - Brake is not pressed                                        ║
 ║                                                                  ║
+║  ⚠️  This script uses DIRECT PANDA ACCESS.                        ║
+║     Safety mode is restored automatically on exit.               ║
+║                                                                  ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
@@ -103,9 +111,50 @@ def current_time_ms():
   return int(round(time.time() * 1000))
 
 
+def load_config():
+  """Load config from JSON file."""
+  import json
+  try:
+    if os.path.exists(CONFIG_FILE):
+      with open(CONFIG_FILE, 'r') as f:
+        return json.load(f)
+  except Exception:
+    pass
+  return {}
+
+
+def save_config(config):
+  """Atomically save config to JSON file."""
+  import json
+  import tempfile
+  try:
+    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+      dir=os.path.dirname(CONFIG_FILE),
+      prefix='.tinkla_params_',
+      suffix='.tmp'
+    )
+    try:
+      with os.fdopen(fd, 'w') as f:
+        json.dump(config, f, indent=2)
+      os.replace(tmp_path, CONFIG_FILE)
+      return True
+    except Exception:
+      try:
+        os.unlink(tmp_path)
+      except Exception:
+        pass
+  except Exception:
+    pass
+  return False
+
+
 class PedalCalibrator:
   """
   Full port of Tinkla's PedalCalibrator class.
+  
+  Uses DIRECT PANDA ACCESS with SAFETY_ALLOUTPUT to bypass
+  the safety layer that blocks pedal commands when not engaged.
   """
   
   @staticmethod
@@ -116,17 +165,30 @@ class PedalCalibrator:
     return ret & 0xFF
   
   def __init__(self):
-    import cereal.messaging as messaging
-    from openpilot.common.params import Params
-    
-    self.messaging = messaging
-    self.params = Params()
+    from panda import Panda
     
     print(CALIBRATOR_STATUSES[0])
     
-    # Messaging setup
-    self.can_sock = messaging.sub_sock('can')
-    self.pm = messaging.PubMaster(['sendcan'])
+    # ============================================
+    # CRITICAL: Direct Panda Access
+    # ============================================
+    print(CALIBRATOR_STATUSES[1])
+    
+    try:
+      self.panda = Panda()
+    except Exception as e:
+      print(f"\n❌ {CALIBRATION_ERRORS[6]}")
+      print(f"   Error: {e}")
+      raise
+    
+    # Store original safety mode to restore later
+    self.original_safety_mode = None
+    
+    # Set SAFETY_ALLOUTPUT to allow sending any CAN message
+    # This is required because the Tesla safety blocks 0x551 when not engaged
+    print("  Setting SAFETY_ALLOUTPUT mode...")
+    self.panda.set_safety_mode(Panda.SAFETY_ALLOUTPUT)
+    print("  ✓ Panda configured for calibration")
     
     # Pedal state
     self.pedal_idx = 0
@@ -142,18 +204,11 @@ class PedalCalibrator:
     self.pedal_error_count = 0
     self.pedal_enabled = 0
     
-    # Determine pedal CAN bus (check both Tinkla and new param names)
+    # Determine pedal CAN bus from config
     self.pedal_can = 2
-    try:
-      # Check original Tinkla param first
-      if self.params.get_bool("TinklaPedalCanZero"):
-        self.pedal_can = 0
-      # Then check new param name
-      elif self.params.get_bool("TeslaPedalCanZero"):
-        self.pedal_can = 0
-    except:
-      pass
-    
+    config = load_config()
+    if config.get('pedal_can_zero', False):
+      self.pedal_can = 0
     print(f"  Pedal CAN bus: {self.pedal_can}")
     
     # Car state
@@ -205,6 +260,37 @@ class PedalCalibrator:
     self.pedal_pressed = -1000.0
     self.pedal_factor = -1000.0
   
+  def cleanup(self):
+    """
+    Restore Panda to safe state.
+    
+    CRITICAL: This MUST be called when exiting, even on error.
+    The main() function uses try/finally to ensure this.
+    """
+    if hasattr(self, 'panda') and self.panda is not None:
+      print("\n" + "=" * 50)
+      print("RESTORING PANDA SAFETY MODE")
+      print("=" * 50)
+      try:
+        # Send disable command to pedal first
+        print("  Disabling pedal...")
+        self.create_pedal_command_msg(0, 0)
+        time.sleep(0.1)
+        
+        # Restore to SAFETY_SILENT (no output) for safety
+        # The car software will set the proper mode when it starts
+        from panda import Panda
+        print("  Setting SAFETY_SILENT mode...")
+        self.panda.set_safety_mode(Panda.SAFETY_SILENT)
+        print("  ✓ Panda safety restored")
+      except Exception as e:
+        print(f"  ⚠️  Warning: Could not restore safety: {e}")
+      
+      try:
+        self.panda.close()
+      except Exception:
+        pass
+  
   def show_status(self, n):
     """Print status message."""
     if self.status != self.prev_status:
@@ -219,15 +305,20 @@ class PedalCalibrator:
   def finish_with_error(self, n):
     """Exit with error."""
     print(f"\n❌ {CALIBRATOR_STATUSES[-1]}{CALIBRATION_ERRORS[n]}")
-    sys.exit(1)
+    raise SystemExit(1)
   
   def finish(self):
     """Exit successfully."""
     print(f"\n✅ {CALIBRATOR_STATUSES[-2]}")
-    sys.exit(0)
+    raise SystemExit(0)
   
   def create_pedal_command_msg(self, accel_command, enable):
-    """Create and send GAS_COMMAND (0x551) message to Comma Pedal."""
+    """
+    Create and send GAS_COMMAND (0x551) message to Comma Pedal.
+    
+    Uses DIRECT PANDA CAN SEND (not sendcan/boardd).
+    The enable bit (bit 7 of byte 4) MUST be set for the pedal to respond.
+    """
     msg_id = GAS_COMMAND_ID
     msg_len = 6
     
@@ -238,6 +329,10 @@ class PedalCalibrator:
       int_accel_command = 0
       int_accel_command2 = 0
     
+    # Clamp values
+    int_accel_command = max(0, min(65534, int_accel_command))
+    int_accel_command2 = max(0, min(65534, int_accel_command2))
+    
     msg = create_string_buffer(msg_len)
     struct.pack_into(
       "BBBBB",
@@ -247,32 +342,21 @@ class PedalCalibrator:
       int_accel_command & 0xFF,
       int((int_accel_command2 >> 8) & 0xFF),
       int_accel_command2 & 0xFF,
-      ((enable << 7) + self.pedal_idx) & 0xFF,
+      ((enable << 7) + self.pedal_idx) & 0xFF,  # Enable bit is bit 7!
     )
     struct.pack_into("B", msg, msg_len - 1, self.checksum(msg_id, msg.raw))
     
-    # Send via sendcan
-    can_msg = self.messaging.new_message('sendcan', 1)
-    can_msg.sendcan[0].address = msg_id
-    can_msg.sendcan[0].dat = msg.raw
-    can_msg.sendcan[0].src = self.pedal_can
-    self.pm.send('sendcan', can_msg)
+    # DIRECT PANDA SEND (bypasses boardd/safety)
+    self.panda.can_send(msg_id, msg.raw, self.pedal_can)
     
     self.last_pedal_sent_ms = current_time_ms()
     self.pedal_idx = (self.pedal_idx + 1) % 16
   
   def process_can(self):
-    """Process incoming CAN messages."""
-    messages = self.messaging.drain_sock(self.can_sock, wait_for_one=False)
-    
-    for m in messages:
-      if m.which() != 'can':
-        continue
-      
-      for c in m.can:
-        addr = c.address
-        dat = c.dat
-        
+    """Process incoming CAN messages from Panda."""
+    try:
+      # Direct Panda receive
+      for addr, _, dat, src in self.panda.can_recv():
         # GTW_status - Car on state
         if addr == GTW_STATUS_ID:
           self.car_on = (dat[0] & 0x01) == 1
@@ -296,6 +380,8 @@ class PedalCalibrator:
           self.pedal_interceptor_value = ((dat[0] << 8) + dat[1]) * M1 + D
           self.pedal_interceptor_value2 = ((dat[2] << 8) + dat[3]) * M2 + D
           self.rcv_pedal_idx = dat[4] & 0x0F
+    except Exception as e:
+      print(f"  CAN recv error: {e}")
   
   def check_safety_conditions(self):
     """Check all safety conditions. Returns True if safe to proceed."""
@@ -332,10 +418,7 @@ class PedalCalibrator:
   
   def run(self, rate=100):
     """Main calibration loop."""
-    from openpilot.common.realtime import Ratekeeper
-    
-    self.status = 1  # Checking safety
-    rk = Ratekeeper(rate)
+    self.status = 2  # Start at "Reading Pedal Zero"
     
     print("\nWaiting for safety conditions...")
     print("  - Car ON")
@@ -343,29 +426,29 @@ class PedalCalibrator:
     print("  - Brake PRESSED")
     print("  - Accelerator RELEASED")
     
+    loop_period = 1.0 / rate
+    
     while True:
-      rk.keep_time()
-      self.frame = rk.frame
+      loop_start = time.time()
+      self.frame += 1
       curr_time_ms = current_time_ms()
       
       # Process CAN
       self.process_can()
       
+      # Show status change
+      self.show_status(self.status)
+      
       # Check for completion
       if self.status == 7:
         self.finish()
       
-      # Show status change
-      self.show_status(self.status)
-      
       # Check safety conditions
       if not self.check_safety_conditions():
-        continue
-      
-      # Safety conditions met - advance from checking stage
-      if self.status == 1:
-        print("\n✓ All safety conditions met!")
-        self.status = 2
+        # Sleep and continue
+        elapsed = time.time() - loop_start
+        if elapsed < loop_period:
+          time.sleep(loop_period - elapsed)
         continue
       
       # Process pedal message
@@ -480,8 +563,9 @@ class PedalCalibrator:
                     self.validation_value = self.pedal_pressed + self.validation_target * (self.pedal_max - self.pedal_pressed) / 100.0
                     self.pedal_last_value_sent = self.validation_value
           
-          # Stage 6: Save values
+          # Stage 6: Save values to JSON config
           if self.status == 6:
+            config = load_config()
             saved_count = 0
             
             print("\n" + "=" * 50)
@@ -489,40 +573,37 @@ class PedalCalibrator:
             print("=" * 50)
             
             if self.pedal_min != -1000:
-              self.params.put("TeslaPedalCalibMin", str(self.pedal_min))
+              config['pedal_calib_min'] = self.pedal_min
+              config['pedal_min'] = int(self.pedal_min)
               print(f"  Pedal Min:    {self.pedal_min:.2f}")
               saved_count += 1
             
             if self.pedal_max != -1000:
-              self.params.put("TeslaPedalCalibMax", str(self.pedal_max))
+              config['pedal_calib_max'] = self.pedal_max
+              config['pedal_max'] = int(self.pedal_max)
               print(f"  Pedal Max:    {self.pedal_max:.2f}")
               saved_count += 1
             
             if self.pedal_pressed != -1000:
-              self.params.put("TeslaPedalCalibZero", str(self.pedal_pressed))
+              config['pedal_calib_zero'] = self.pedal_pressed
               print(f"  Pedal Zero:   {self.pedal_pressed:.2f}")
               saved_count += 1
             
             if self.pedal_factor != -1000:
-              self.params.put("TeslaPedalCalibFactor", str(self.pedal_factor))
+              config['pedal_calib_factor'] = self.pedal_factor
               print(f"  Pedal Factor: {self.pedal_factor:.4f}")
               saved_count += 1
             
-            # Also save simplified min/max for compatibility
-            if self.pedal_min != -1000:
-              self.params.put("TeslaPedalMin", str(int(self.pedal_min)))
-            if self.pedal_max != -1000:
-              self.params.put("TeslaPedalMax", str(int(self.pedal_max)))
-            
             if saved_count == 4:
-              # Set all pedal calibration flags (both old Tinkla and new names for compatibility)
-              self.params.put_bool("TeslaPedalCalibDone", True)
-              self.params.put_bool("TeslaPedalCalibrated", True)
-              self.params.put_bool("TeslaUsePedal", True)
-              self.params.put_bool("TinklaEnablePedal", True)  # Tinkla compatibility
-              print("\n  ✓ All parameters saved!")
-              print("  ✓ Pedal enabled (TeslaUsePedal = True)")
-              print("  ✓ Tinkla compatibility (TinklaEnablePedal = True)")
+              config['pedal_calibrated'] = True
+              config['use_pedal'] = True
+              
+              if save_config(config):
+                print("\n  ✓ All parameters saved to JSON!")
+                print(f"  ✓ Config file: {CONFIG_FILE}")
+                print("  ✓ Pedal enabled (use_pedal = True)")
+              else:
+                print("\n  ⚠️  Warning: Could not save config file!")
             
             self.status = 7
           
@@ -540,6 +621,11 @@ class PedalCalibrator:
             self.finish_with_error(0)
           # Send reset command
           self.create_pedal_command_msg(0, 0)
+      
+      # Rate limiting
+      elapsed = time.time() - loop_start
+      if elapsed < loop_period:
+        time.sleep(loop_period - elapsed)
 
 
 def main():
@@ -555,19 +641,30 @@ def main():
   print("Ported from Tinkla")
   print("=" * 50)
   
+  calibrator = None
+  exit_code = 0
+  
   try:
     calibrator = PedalCalibrator()
     calibrator.run()
+  except SystemExit as e:
+    exit_code = e.code if e.code is not None else 0
   except KeyboardInterrupt:
-    print("\n\nCalibration interrupted by user.")
-    return 1
+    print("\n\n⚠️  Calibration interrupted by user.")
+    exit_code = 1
   except Exception as e:
-    print(f"\n\nError: {e}")
+    print(f"\n\n❌ Error: {e}")
     import traceback
     traceback.print_exc()
-    return 1
+    exit_code = 1
+  finally:
+    # ============================================
+    # CRITICAL: ALWAYS restore safety mode
+    # ============================================
+    if calibrator is not None:
+      calibrator.cleanup()
   
-  return 0
+  return exit_code
 
 
 if __name__ == "__main__":
