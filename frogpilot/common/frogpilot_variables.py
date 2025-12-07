@@ -67,6 +67,9 @@ FROGS_GO_MOO_PATH = Path("/persist/frogsgomoo.py")
 HD_LOGS_PATH = Path("/data/media/0/realdata_HD")
 HD_PATH = Path("/cache/use_HD")
 
+KONIK_LOGS_PATH = Path("/data/media/0/realdata_konik")
+KONIK_PATH = Path("/cache/use_konik")
+
 MAPD_PATH = Path("/data/media/0/osm/mapd")
 MAPS_PATH = Path("/data/media/0/osm/offline")
 
@@ -223,6 +226,17 @@ class FrogPilotVariables:
       HARDWARE.reboot()
     elif HD_PATH.is_file() and not toggle.use_higher_bitrate:
       HD_PATH.unlink()
+      HARDWARE.reboot()
+
+    toggle.use_konik_server = device_management
+    toggle.use_konik_server &= self.get_value("UseKonikServer")
+    toggle.use_konik_server |= Path("/data/openpilot/not_vetted").is_file()
+
+    if not KONIK_PATH.is_file() and toggle.use_konik_server:
+      KONIK_PATH.touch()
+      HARDWARE.reboot()
+    elif KONIK_PATH.is_file() and not toggle.use_konik_server:
+      KONIK_PATH.unlink()
       HARDWARE.reboot()
 
     stock_colors_json = (STOCK_THEME_PATH / "colors/colors.json")

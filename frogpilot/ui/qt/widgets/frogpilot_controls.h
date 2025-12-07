@@ -16,6 +16,7 @@
 #include "selfdrive/ui/qt/widgets/controls.h"
 
 bool isFrogsGoMoo();
+bool useKonikServer();
 
 void loadGif(const QString &gifPath, QSharedPointer<QMovie> &movie, const QSize &size, QWidget *parent);
 void loadImage(const QString &basePath, QPixmap &pixmap, QSharedPointer<QMovie> &movie, const QSize &size, QWidget *parent);

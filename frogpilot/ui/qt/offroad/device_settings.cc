@@ -29,6 +29,7 @@ FrogPilotDevicePanel::FrogPilotDevicePanel(FrogPilotSettingsWindow *parent, bool
     {"HigherBitrate", tr("High-Quality Recording"), tr("<b>Save drive footage in higher video quality.</b>"), ""},
     {"LowVoltageShutdown", tr("Low-Voltage Cutoff"), tr("<b>While parked, if the battery voltage falls below the set level, the device shuts down</b> to prevent excessive battery drain."), ""},
     {"IncreaseThermalLimits", tr("Raise Temperature Limits"), QString("<b>%1</b><br><br>%2").arg(tr("WARNING: Running at higher temperatures may damage your device!")).arg(tr("<b>Allow the device to run at higher temperatures</b> before throttling or shutting down. Use only if you understand the risks!")), ""},
+    {"UseKonikServer", tr("Use Konik Server"), tr("<b>Upload driving data to \"stable.konik.ai\" instead of \"connect.comma.ai\".</b>"), ""},
 
     {"ScreenManagement", tr("Screen Settings"), tr("<b>Settings that control screen brightness, screen recording, and timeout duration.</b>"), "../../frogpilot/assets/toggle_icons/icon_light.png"},
     {"ScreenBrightness", tr("Screen Brightness (Offroad)"), tr("<b>The screen brightness while not driving.</b>"), ""},
@@ -136,12 +137,14 @@ FrogPilotDevicePanel::FrogPilotDevicePanel(FrogPilotSettingsWindow *parent, bool
     QObject::connect(static_cast<ToggleControl*>(toggles[key]), &ToggleControl::toggleFlipped, this, &FrogPilotDevicePanel::updateToggles);
   }
 
-  QSet<QString> rebootKeys = {"HigherBitrate"};
+  QSet<QString> rebootKeys = {"HigherBitrate", "UseKonikServer"};
   for (const QString &key : rebootKeys) {
     QObject::connect(static_cast<ToggleControl*>(toggles[key]), &ToggleControl::toggleFlipped, [key, this](bool state) {
       QString filePath;
       if (key == "HigherBitrate") {
         filePath = "/cache/use_HD";
+      } else if (key == "UseKonikServer") {
+        filePath = "/cache/use_konik";
       }
 
       if (!filePath.isEmpty()) {
@@ -201,6 +204,10 @@ void FrogPilotDevicePanel::updateToggles() {
 
     if (key == "HigherBitrate") {
       setVisible &= params.getBool("DeviceManagement") && params.getBool("NoUploads") && !params.getBool("DisableOnroadUploads");
+    }
+
+    else if (key == "UseKonikServer" && QFile("/data/not_vetted").exists()) {
+      static_cast<ToggleControl*>(toggle)->forceOn(true);
     }
 
     toggle->setVisible(setVisible);

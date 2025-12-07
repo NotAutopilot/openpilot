@@ -229,7 +229,7 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
   addItem(new LabelControl(tr("Serial"), params.get("HardwareSerial").c_str()));
 
   pair_device = new ButtonControl(tr("Pair Device"), tr("PAIR"),
-                                  tr("Pair your device with comma connect (connect.comma.ai) and claim your comma prime offer."));
+                                  useKonikServer() ? tr("Pair your device with Konik connect (stable.konik.ai).") : tr("Pair your device with comma connect (connect.comma.ai) and claim your comma prime offer."));
   connect(pair_device, &ButtonControl::clicked, [=]() {
     PairingPopup popup(this);
     popup.exec();
@@ -577,7 +577,7 @@ SettingsWindow::SettingsWindow(QWidget *parent) : QFrame(parent) {
 
         if (!tuningLevelConfirmed) {
           int frogpilotHours = QJsonDocument::fromJson(QString::fromStdString(params.get("FrogPilotStats")).toUtf8()).object().value("FrogPilotSeconds").toInt() / (60 * 60);
-          int openpilotHours = params.getInt("openpilotMinutes") / 60;
+          int openpilotHours = params.getInt("KonikMinutes") / 60 + params.getInt("openpilotMinutes") / 60;
 
           if (frogpilotHours < 1 && openpilotHours < 100) {
             if (openpilotHours < 10) {

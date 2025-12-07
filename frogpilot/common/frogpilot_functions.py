@@ -9,13 +9,14 @@ from pathlib import Path
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.common.time_helpers import system_time_valid
+from openpilot.system.athena.registration import register
 from openpilot.system.hardware import HARDWARE
 
 from openpilot.frogpilot.assets.theme_manager import ThemeManager
 from openpilot.frogpilot.common.frogpilot_backups import backup_frogpilot
-from openpilot.frogpilot.common.frogpilot_utilities import is_FrogsGoMoo, run_cmd
+from openpilot.frogpilot.common.frogpilot_utilities import is_FrogsGoMoo, run_cmd, use_konik_server
 from openpilot.frogpilot.common.frogpilot_variables import (
-  ERROR_LOGS_PATH, FROGS_GO_MOO_PATH, HD_LOGS_PATH, THEME_SAVE_PATH,
+  ERROR_LOGS_PATH, FROGS_GO_MOO_PATH, HD_LOGS_PATH, KONIK_LOGS_PATH, THEME_SAVE_PATH,
   FrogPilotVariables, get_frogpilot_toggles
 )
 
@@ -25,6 +26,15 @@ def frogpilot_boot_functions(build_metadata, params):
 
   FrogPilotVariables()
   ThemeManager(params, params_memory, boot_run=True).update_active_theme(time_validated=system_time_valid(), frogpilot_toggles=get_frogpilot_toggles(), boot_run=True)
+
+  if use_konik_server():
+    if params.get("KonikDongleId") is not None:
+      params.put("DongleId", params.get("KonikDongleId"))
+    else:
+      params.put("KonikDongleId", register(show_spinner=True, register_konik=True))
+      params.put("DongleId", params.get("KonikDongleId"))
+  elif params.get("DongleId") == params.get("KonikDongleId"):
+    params.put("DongleId", params.get("StockDongleId"))
 
   def boot_thread():
     while not system_time_valid():
@@ -40,6 +50,7 @@ def install_frogpilot(build_metadata, params):
   paths = [
     ERROR_LOGS_PATH,
     HD_LOGS_PATH,
+    KONIK_LOGS_PATH,
     THEME_SAVE_PATH
   ]
   for path in paths:

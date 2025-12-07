@@ -17,6 +17,11 @@ bool isFrogsGoMoo() {
   return is_FrogsGoMoo;
 }
 
+bool useKonikServer() {
+  static bool use_konik = QFile::exists("/cache/use_konik");
+  return use_konik;
+}
+
 void clearMovie(QSharedPointer<QMovie> &movie, QWidget *parent) {
   if (!movie) {
     return;

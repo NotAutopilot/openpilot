@@ -9,6 +9,7 @@ import threading
 import time
 import zipfile
 
+from functools import cache
 from pathlib import Path
 
 import openpilot.system.sentry as sentry
@@ -17,7 +18,7 @@ from cereal import log, messaging
 from openpilot.common.realtime import DT_DMON, DT_HW
 from panda import Panda
 
-from openpilot.frogpilot.common.frogpilot_variables import EARTH_RADIUS, FROGS_GO_MOO_PATH
+from openpilot.frogpilot.common.frogpilot_variables import EARTH_RADIUS, FROGS_GO_MOO_PATH, KONIK_PATH
 
 class ThreadManager:
   def __init__(self):
@@ -209,6 +210,11 @@ def update_json_file(path, data):
     os.fsync(file.fileno())
 
   os.replace(temp_path, path)
+
+
+@cache
+def use_konik_server():
+  return KONIK_PATH.is_file()
 
 
 def wait_for_no_driver(params, sm, time_threshold=60):
