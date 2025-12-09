@@ -212,6 +212,15 @@ void TogglesPanel::updateToggles() {
   // FrogPilot variables
   FrogPilotUIState &fs = *frogpilotUIState();
   FrogPilotUIScene &frogpilot_scene = fs.frogpilot_scene;
+  QJsonObject &frogpilot_toggles = frogpilot_scene.frogpilot_toggles;
+
+  auto disengage_on_accelerator_toggle = toggles["DisengageOnAccelerator"];
+  disengage_on_accelerator_toggle->setVisible(!frogpilot_toggles.value("always_on_lateral").toBool());
+  auto driver_camera_toggle = toggles["RecordFront"];
+  driver_camera_toggle->setVisible(!frogpilot_toggles.value("no_logging").toBool());
+  experimental_mode_toggle->setVisible(!frogpilot_toggles.value("conditional_experimental_mode").toBool());
+  auto record_audio_toggle = toggles["RecordAudio"];
+  record_audio_toggle->setVisible(!frogpilot_toggles.value("no_logging").toBool());
 }
 
 DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
@@ -426,6 +435,8 @@ void SettingsWindow::hideEvent(QHideEvent *event) {
   subPanelOpen = false;
   subSubPanelOpen = false;
   subSubSubPanelOpen = false;
+
+  updateFrogPilotToggles();
 }
 
 void SettingsWindow::setCurrentPanel(int index, const QString &param) {

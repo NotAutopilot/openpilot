@@ -14,7 +14,6 @@ from openpilot.system.version import get_build_metadata
 
 from openpilot.frogpilot.common.frogpilot_download_utilities import github_rate_limited
 from openpilot.frogpilot.common.frogpilot_utilities import clean_model_name, is_url_pingable
-from openpilot.frogpilot.common.frogpilot_variables import get_frogpilot_toggles
 
 BUCKET = os.environ.get("STATS_BUCKET", "")
 ORG_ID = os.environ.get("STATS_ORG_ID", "")
@@ -137,12 +136,11 @@ def get_city_center(latitude, longitude):
 
   return (0.0, 0.0, "N/A", "N/A", "N/A")
 
-def send_stats(params):
+def send_stats(params, frogpilot_toggles):
   if not is_url_pingable(os.environ.get("STATS_URL", "")):
     return
 
   build_metadata = get_build_metadata()
-  frogpilot_toggles = get_frogpilot_toggles()
 
   car_params = "{}"
   msg_bytes = params.get("CarParamsPersistent")

@@ -63,12 +63,14 @@ void HomeWindow::updateState(const UIState &s, const FrogPilotUIState &fs) {
 
   // FrogPilot variables
   const FrogPilotUIScene &frogpilot_scene = fs.frogpilot_scene;
+  const QJsonObject &frogpilot_toggles = frogpilot_scene.frogpilot_toggles;
 }
 
 void HomeWindow::offroadTransition(bool offroad) {
   // FrogPilot variables
   FrogPilotUIState &fs = *frogpilotUIState();
   FrogPilotUIScene &frogpilot_scene = fs.frogpilot_scene;
+  QJsonObject &frogpilot_toggles = frogpilot_scene.frogpilot_toggles;
 
   body->setEnabled(false);
   sidebar->setVisible(offroad);
@@ -251,4 +253,5 @@ void OffroadHome::refresh() {
   // FrogPilot variables
   FrogPilotUIState &fs = *frogpilotUIState();
   FrogPilotUIScene &frogpilot_scene = fs.frogpilot_scene;
+  QJsonObject &frogpilot_toggles = frogpilot_scene.frogpilot_toggles;
 }

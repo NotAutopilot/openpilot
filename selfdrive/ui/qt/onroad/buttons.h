@@ -17,6 +17,8 @@ public:
   // FrogPilot variables
   FrogPilotUIScene frogpilot_scene;
 
+  QJsonObject frogpilot_toggles;
+
 private:
   void paintEvent(QPaintEvent *event) override;
   void changeMode();

@@ -14,6 +14,8 @@ struct FrogPilotUIScene {
   bool standstill;
 
   int started_timer;
+
+  QJsonObject frogpilot_toggles;
 };
 
 class FrogPilotUIState : public QObject {

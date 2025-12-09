@@ -12,7 +12,7 @@ from openpilot.frogpilot.controls.lib.frogpilot_events import RANDOM_EVENT_END, 
 from openpilot.frogpilot.controls.lib.weather_checker import WEATHER_CATEGORIES
 
 class FrogPilotTracking:
-  def __init__(self, frogpilot_planner):
+  def __init__(self, frogpilot_planner, frogpilot_toggles):
     self.params = frogpilot_planner.params
 
     self.frogpilot_events = frogpilot_planner.frogpilot_events
@@ -36,7 +36,7 @@ class FrogPilotTracking:
 
     self.model_name = clean_model_name(frogpilot_toggles.model_name)
 
-  def update(self, now, time_validated, sm):
+  def update(self, now, time_validated, sm, frogpilot_toggles):
     v_cruise = min(sm["carState"].vCruiseCluster, V_CRUISE_MAX) * CV.KPH_TO_MS
     v_ego = max(sm["carState"].vEgo, 0)
 

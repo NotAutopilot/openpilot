@@ -14,6 +14,8 @@ public:
 
   QColor bg;
 
+  QJsonObject frogpilot_toggles;
+
 private:
   void paintEvent(QPaintEvent *event);
   void resizeEvent(QResizeEvent *event);

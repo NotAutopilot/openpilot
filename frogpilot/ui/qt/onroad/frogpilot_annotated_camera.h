@@ -27,6 +27,8 @@ public:
   QColor purpleColor(int alpha = 255) { return QColor(128, 0, 128, alpha); }
   QColor whiteColor(int alpha = 255) { return QColor(255, 255, 255, alpha); }
 
+  QJsonObject frogpilot_toggles;
+
   QPoint dmIconPosition;
   QPoint experimentalButtonPosition;
 

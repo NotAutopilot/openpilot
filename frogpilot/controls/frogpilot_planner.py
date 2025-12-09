@@ -40,7 +40,7 @@ class FrogPilotPlanner:
 
     self.tracking_lead_filter = FirstOrderFilter(0, 0.5, DT_MDL)
 
-  def update(self, now, time_validated, sm):
+  def update(self, now, time_validated, sm, frogpilot_toggles):
     self.lead_one = sm["radarState"].leadOne
 
     long_control_active = sm["carControl"].longActive
@@ -49,14 +49,14 @@ class FrogPilotPlanner:
     v_ego = max(sm["carState"].vEgo, 0)
 
     if long_control_active:
-      self.frogpilot_acceleration.update(v_ego, sm)
+      self.frogpilot_acceleration.update(v_ego, sm, frogpilot_toggles)
     else:
       self.frogpilot_acceleration.max_accel = 0
       self.frogpilot_acceleration.min_accel = 0
 
-    self.frogpilot_events.update(v_cruise, sm)
+    self.frogpilot_events.update(v_cruise, sm, frogpilot_toggles)
 
-    self.frogpilot_following.update(long_control_active, v_ego, sm)
+    self.frogpilot_following.update(long_control_active, v_ego, sm, frogpilot_toggles)
 
     gps_location = sm[self.gps_location_service]
     self.gps_position = {
@@ -75,7 +75,7 @@ class FrogPilotPlanner:
     if not sm["carState"].standstill:
       self.tracking_lead = self.update_lead_status()
 
-    self.v_cruise = self.frogpilot_vcruise.update(long_control_active, now, time_validated, v_cruise, v_ego, sm)
+    self.v_cruise = self.frogpilot_vcruise.update(long_control_active, now, time_validated, v_cruise, v_ego, sm, frogpilot_toggles)
 
   def update_lead_status(self):
     following_lead = self.lead_one.status
@@ -84,7 +84,7 @@ class FrogPilotPlanner:
     self.tracking_lead_filter.update(following_lead)
     return self.tracking_lead_filter.x >= THRESHOLD
 
-  def publish(self, sm, pm):
+  def publish(self, sm, pm, frogpilot_toggles):
     frogpilot_plan_send = messaging.new_message("frogpilotPlan")
     frogpilot_plan_send.valid = sm.all_checks(service_list=["carState", "controlsState", "selfdriveState", "radarState"])
     frogpilotPlan = frogpilot_plan_send.frogpilotPlan
@@ -96,6 +96,8 @@ class FrogPilotPlanner:
     frogpilotPlan.tFollow = float(self.frogpilot_following.t_follow)
 
     frogpilotPlan.frogpilotEvents = self.frogpilot_events.events.to_msg()
+
+    frogpilotPlan.frogpilotToggles = json.dumps(vars(frogpilot_toggles))
 
     frogpilotPlan.lateralCheck = self.lateral_check
 

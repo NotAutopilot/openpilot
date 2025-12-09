@@ -68,6 +68,7 @@ void OnroadWindow::updateState(const UIState &s, const FrogPilotUIState &fs) {
 
   // FrogPilot variables
   const FrogPilotUIScene &frogpilot_scene = fs.frogpilot_scene;
+  const QJsonObject &frogpilot_toggles = frogpilot_scene.frogpilot_toggles;
 
   frogpilot_nvg->alertHeight = alerts->alertHeight;
 
@@ -78,6 +79,11 @@ void OnroadWindow::updateState(const UIState &s, const FrogPilotUIState &fs) {
   nvg->frogpilot_scene = frogpilot_scene;
   frogpilot_nvg->frogpilot_scene = frogpilot_scene;
   frogpilot_onroad->frogpilot_scene = frogpilot_scene;
+
+  alerts->frogpilot_toggles = frogpilot_toggles;
+  frogpilot_nvg->frogpilot_toggles = frogpilot_toggles;
+  frogpilot_onroad->frogpilot_toggles = frogpilot_toggles;
+  nvg->frogpilot_toggles = frogpilot_toggles;
 
   frogpilot_onroad->setGeometry(rect());
 

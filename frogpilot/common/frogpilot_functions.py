@@ -12,10 +12,15 @@ from openpilot.common.time_helpers import system_time_valid
 from openpilot.system.hardware import HARDWARE
 
 from openpilot.frogpilot.common.frogpilot_utilities import run_cmd
+from openpilot.frogpilot.common.frogpilot_variables import (
+  FrogPilotVariables
+)
 
 
 def frogpilot_boot_functions(params):
   params_memory = Params(memory=True)
+
+  FrogPilotVariables()
 
   def boot_thread():
     while not system_time_valid():

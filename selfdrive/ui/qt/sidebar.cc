@@ -48,6 +48,7 @@ void Sidebar::mousePressEvent(QMouseEvent *event) {
   // FrogPilot variables
   FrogPilotUIState *fs = frogpilotUIState();
   FrogPilotUIScene &frogpilot_scene = fs->frogpilot_scene;
+  QJsonObject &frogpilot_toggles = frogpilot_scene.frogpilot_toggles;
 
   if (onroad && home_btn.contains(event->pos())) {
     flag_pressed = true;
@@ -87,6 +88,7 @@ void Sidebar::updateState(const UIState &s, const FrogPilotUIState &fs) {
 
   // FrogPilot variables
   const FrogPilotUIScene &frogpilot_scene = fs.frogpilot_scene;
+  const QJsonObject &frogpilot_toggles = frogpilot_scene.frogpilot_toggles;
 
   const SubMaster &fpsm = *(fs.sm);
 
@@ -157,6 +159,7 @@ void Sidebar::paintEvent(QPaintEvent *event) {
   // FrogPilot variables
   FrogPilotUIState *fs = frogpilotUIState();
   FrogPilotUIScene &frogpilot_scene = fs->frogpilot_scene;
+  QJsonObject &frogpilot_toggles = frogpilot_scene.frogpilot_toggles;
 
   // network
   int x = 58;

@@ -22,6 +22,8 @@ public:
 
   FrogPilotUIScene frogpilot_scene;
 
+  QJsonObject frogpilot_toggles;
+
 private:
   QVBoxLayout *main_layout;
   ExperimentalButton *experimental_btn;
