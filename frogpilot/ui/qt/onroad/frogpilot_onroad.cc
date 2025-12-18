@@ -1,6 +1,10 @@
 #include "frogpilot/ui/qt/onroad/frogpilot_onroad.h"
 
 FrogPilotOnroadWindow::FrogPilotOnroadWindow(QWidget *parent) : QWidget(parent) {
+  signalTimer = new QTimer(this);
+  QObject::connect(signalTimer, &QTimer::timeout, [this] {
+    flickerActive = !flickerActive;
+  });
 }
 
 void FrogPilotOnroadWindow::resizeEvent(QResizeEvent *event) {
@@ -15,9 +19,15 @@ void FrogPilotOnroadWindow::updateState(const UIState &s, const FrogPilotUIState
   const cereal::CarState::Reader &carState = sm["carState"].getCarState();
   const cereal::CarControl::Reader &carControl = fpsm["carControl"].getCarControl();
 
+  blindSpotLeft = carState.getLeftBlindspot();
+  blindSpotRight = carState.getRightBlindspot();
   torque = -carControl.getActuators().getTorque();
+  turnSignalLeft = carState.getLeftBlinker();
+  turnSignalRight = carState.getRightBlinker();
 
+  showBlindspot = (blindSpotLeft || blindSpotRight) && frogpilot_toggles.value("blind_spot_metrics").toBool();
   showFPS = frogpilot_toggles.value("show_fps").toBool();
+  showSignal = (turnSignalLeft || turnSignalRight) && frogpilot_toggles.value("signal_metrics").toBool();
   showSteering = frogpilot_toggles.value("steering_metrics").toBool();
 
   if (showSteering) {
@@ -26,6 +36,32 @@ void FrogPilotOnroadWindow::updateState(const UIState &s, const FrogPilotUIState
     if (std::abs(smoothedSteer - absTorque) < 0.01f) {
       smoothedSteer = absTorque;
     }
+  }
+
+  if (showBlindspot || showSignal) {
+    std::function<QColor(bool, bool)> getBorderColor = [&](bool blindSpot, bool turnSignal) {
+      if (turnSignal && showSignal) {
+        if (blindSpot) {
+          return flickerActive ? bg_colors[STATUS_TRAFFIC_MODE_ENABLED] : bg_colors[STATUS_CEM_DISABLED];
+        } else {
+          return flickerActive ? bg_colors[STATUS_CEM_DISABLED] : bg;
+        }
+      } else if (blindSpot && showBlindspot) {
+        return bg_colors[STATUS_TRAFFIC_MODE_ENABLED];
+      } else {
+        return bg;
+      }
+    };
+
+    leftBorderColor = getBorderColor(blindSpotLeft, turnSignalLeft);
+    rightBorderColor = getBorderColor(blindSpotRight, turnSignalRight);
+
+    int interval = showBlindspot ? 250 : 500;
+    if (!signalTimer->isActive() || signalTimer->interval() != interval) {
+      signalTimer->start(interval);
+    }
+  } else if (signalTimer->isActive()) {
+    signalTimer->stop();
   }
 
   if (showFPS) {
@@ -63,6 +99,10 @@ void FrogPilotOnroadWindow::paintEvent(QPaintEvent *event) {
     paintSteeringTorqueBorder(p);
   }
 
+  if (showBlindspot || showSignal) {
+    paintTurnSignalBorder(p);
+  }
+
   if (showFPS) {
     paintFPS(p);
   }
@@ -96,6 +136,15 @@ void FrogPilotOnroadWindow::paintSteeringTorqueBorder(QPainter &p) {
   int yPos = rect.y() + rect.height() - visibleHeight;
 
   p.fillRect(QRect(xPos, yPos, UI_BORDER_SIZE, visibleHeight), gradient);
+
+  p.restore();
+}
+
+void FrogPilotOnroadWindow::paintTurnSignalBorder(QPainter &p) {
+  p.save();
+
+  p.fillRect(rect.x(), rect.y(), rect.width() / 2, rect.height(), leftBorderColor);
+  p.fillRect(rect.x() + rect.width() / 2, rect.y(), rect.width() / 2, rect.height(), rightBorderColor);
 
   p.restore();
 }
