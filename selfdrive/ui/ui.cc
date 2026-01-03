@@ -154,7 +154,7 @@ void UIState::update() {
   FrogPilotUIScene &frogpilot_scene = fs->frogpilot_scene;
   QJsonObject &frogpilot_toggles = frogpilot_scene.frogpilot_toggles;
 
-  if (frogpilot_scene.frogpilot_panel_active) {
+  if (frogpilot_scene.downloading_update || frogpilot_scene.frogpilot_panel_active) {
     device()->resetInteractiveTimeout();
   }
 

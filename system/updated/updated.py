@@ -422,10 +422,6 @@ class Updater:
 def main() -> None:
   params = Params()
 
-  if params.get_bool("DisableUpdates"):
-    cloudlog.warning("updates are disabled by the DisableUpdates param")
-    exit(0)
-
   with open(LOCK_FILE, 'w') as ov_lock_fd:
     try:
       fcntl.flock(ov_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -467,6 +463,9 @@ def main() -> None:
       # FrogPilot variables
       frogpilot_toggles = get_frogpilot_toggles()
 
+      manual_update_requested = params_memory.get_bool("ManualUpdateInitiated")
+      params_memory.remove("ManualUpdateInitiated")
+
       # Attempt an update
       exception = None
       try:
@@ -483,21 +482,24 @@ def main() -> None:
 
         update_failed_count += 1
 
-        # check for update
-        params.put("UpdaterState", "checking...")
-        updater.check_for_update()
+        if manual_update_requested or params.get_bool("IsOffroad"):
+          # check for update
+          params.put("UpdaterState", "checking...")
+          updater.check_for_update()
 
-        # download update
-        last_fetch = params.get("UpdaterLastFetchTime")
-        timed_out = last_fetch is None or (datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - last_fetch > datetime.timedelta(days=3))
-        user_requested_fetch = wait_helper.user_request == UserRequest.FETCH
-        if params.get_bool("NetworkMetered") and not timed_out and not user_requested_fetch:
-          cloudlog.info("skipping fetch, connection metered")
-        elif wait_helper.user_request == UserRequest.CHECK:
-          cloudlog.info("skipping fetch, only checking")
+          # download update
+          last_fetch = params.get("UpdaterLastFetchTime")
+          timed_out = last_fetch is None or (datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - last_fetch > datetime.timedelta(days=3))
+          user_requested_fetch = wait_helper.user_request == UserRequest.FETCH
+          if params.get_bool("NetworkMetered") and not timed_out and not user_requested_fetch:
+            cloudlog.info("skipping fetch, connection metered")
+          elif wait_helper.user_request == UserRequest.CHECK:
+            cloudlog.info("skipping fetch, only checking")
+          else:
+            updater.fetch_update()
+            write_time_to_param(params, "UpdaterLastFetchTime")
         else:
-          updater.fetch_update()
-          write_time_to_param(params, "UpdaterLastFetchTime")
+          cloudlog.info("skipping fetch, vehicle is onroad")
         update_failed_count = 0
       except subprocess.CalledProcessError as e:
         cloudlog.event(
@@ -522,7 +524,7 @@ def main() -> None:
 
       # infrequent attempts if we successfully updated recently
       wait_helper.user_request = UserRequest.NONE
-      wait_helper.sleep(5*60 if update_failed_count > 0 else 1.5*60*60)
+      wait_helper.sleep(60*60*24*365*100)
 
 
 if __name__ == "__main__":

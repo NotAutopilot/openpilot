@@ -21,13 +21,19 @@ void SoftwarePanel::checkForUpdates() {
 }
 
 SoftwarePanel::SoftwarePanel(QWidget* parent) : ListWidget(parent) {
-  onroadLbl = new QLabel(tr("Updates are only downloaded while the car is off."));
+  onroadLbl = new QLabel(tr("Updates are only downloaded while the car is off or in park."));
   onroadLbl->setStyleSheet("font-size: 50px; font-weight: 400; text-align: left; padding-top: 30px; padding-bottom: 30px;");
   addItem(onroadLbl);
 
   // current version
   versionLbl = new LabelControl(tr("Current Version"), "");
   addItem(versionLbl);
+
+  // automatic updates toggle
+  ParamControl *automaticUpdatesToggle = new ParamControl("AutomaticUpdates", tr("Automatically Update FrogPilot"),
+                                                       tr("Automatically update FrogPilot when the vehicle is parked with an active internet connection."), "");
+  automaticUpdatesToggle->setVisible(params.getBool("IsReleaseBranch"));
+  addItem(automaticUpdatesToggle);
 
   // download update btn
   downloadBtn = new ButtonControl(tr("Download"), tr("CHECK"));
@@ -38,6 +44,7 @@ SoftwarePanel::SoftwarePanel(QWidget* parent) : ListWidget(parent) {
     } else {
       std::system("pkill -SIGHUP -f system.updated.updated");
     }
+    frogpilotUIState()->params_memory.putBool("ManualUpdateInitiated", true);
   });
   addItem(downloadBtn);
 
@@ -110,12 +117,18 @@ void SoftwarePanel::showEvent(QShowEvent *event) {
   // FrogPilot variables
   FrogPilotUIState &fs = *frogpilotUIState();
   FrogPilotUIScene &frogpilot_scene = fs.frogpilot_scene;
+
+  if (frogpilot_scene.online && params.get("UpdaterState") == "idle") {
+    checkForUpdates();
+  }
 }
 
 void SoftwarePanel::updateLabels() {
   // FrogPilot variables
   FrogPilotUIState &fs = *frogpilotUIState();
   FrogPilotUIScene &frogpilot_scene = fs.frogpilot_scene;
+
+  bool parked = frogpilot_scene.parked;
 
   // add these back in case the files got removed
   fs_watch->addParam("LastUpdateTime");
@@ -125,12 +138,13 @@ void SoftwarePanel::updateLabels() {
 
   if (!isVisible()) {
     // FrogPilot variables
+    frogpilot_scene.downloading_update = false;
     return;
   }
 
-  // updater only runs offroad
-  onroadLbl->setVisible(is_onroad);
-  downloadBtn->setVisible(!is_onroad);
+  // updater only runs offroad or when parked
+  onroadLbl->setVisible(is_onroad && !parked);
+  downloadBtn->setVisible(!is_onroad || parked);
 
   // download update
   QString updater_state = QString::fromStdString(params.get("UpdaterState"));
@@ -140,6 +154,7 @@ void SoftwarePanel::updateLabels() {
     downloadBtn->setValue(updater_state);
 
     // FrogPilot variables
+    frogpilot_scene.downloading_update = true;
   } else {
     if (failed) {
       downloadBtn->setText(tr("CHECK"));
@@ -159,6 +174,7 @@ void SoftwarePanel::updateLabels() {
     downloadBtn->setEnabled(true);
 
     // FrogPilot variables
+    frogpilot_scene.downloading_update = false;
   }
   targetBranchBtn->setValue(QString::fromStdString(params.get("UpdaterTargetBranch")));
 
@@ -166,7 +182,7 @@ void SoftwarePanel::updateLabels() {
   versionLbl->setText(QString::fromStdString(params.get("UpdaterCurrentDescription")));
   versionLbl->setDescription(QString::fromStdString(params.get("UpdaterCurrentReleaseNotes")));
 
-  installBtn->setVisible(!is_onroad && params.getBool("UpdateAvailable"));
+  installBtn->setVisible((!is_onroad || parked) && params.getBool("UpdateAvailable"));
   installBtn->setValue(QString::fromStdString(params.get("UpdaterNewDescription")));
   installBtn->setDescription(QString::fromStdString(params.get("UpdaterNewReleaseNotes")));
 
