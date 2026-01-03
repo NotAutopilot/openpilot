@@ -14,6 +14,376 @@ FrogPilotDataPanel::FrogPilotDataPanel(FrogPilotSettingsWindow *parent, bool for
   ScrollView *statsLabelsPanel = new ScrollView(statsLabelsList, this);
   dataLayout->addWidget(statsLabelsPanel);
 
+  FrogPilotButtonsControl *frogpilotBackupButton = new FrogPilotButtonsControl(tr("FrogPilot Backups"), tr("<b>Create, delete, or restore FrogPilot backups.</b>"), "", {tr("BACKUP"), tr("DELETE"), tr("DELETE ALL"), tr("RESTORE")});
+  QObject::connect(frogpilotBackupButton, &FrogPilotButtonsControl::buttonClicked, [=](int id) {
+    QDir backupDir("/data/backups");
+
+    QFileInfoList backupList = backupDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+    std::sort(backupList.begin(), backupList.end(), [](const QFileInfo &a, const QFileInfo &b) {
+      return a.lastModified() > b.lastModified();
+    });
+
+    QStringList friendlyNames;
+    QMap<QString, QString> backupMap;
+
+    for (const QFileInfo &fileInfo : backupList) {
+      QString fileName = fileInfo.fileName();
+
+      if (fileName.contains("in_progress")) {
+        continue;
+      }
+
+      QString friendlyName = fileName;
+
+      if (fileName.endsWith("_auto.tar.zst")) {
+        QStringList parts = QString(fileName).remove(".tar.zst").split("_");
+
+        if (parts.size() >= 3) {
+          QDate date = fileInfo.lastModified().date();
+
+          if (date.isValid()) {
+            int day = date.day();
+            QString suffix = (day >= 11 && day <= 13) ? "th" :
+                             (day % 10 == 1) ? "st" :
+                             (day % 10 == 2) ? "nd" :
+                             (day % 10 == 3) ? "rd" : "th";
+
+            friendlyName = QString("%1 %2%3, %4 (%5)")
+              .arg(date.toString("MMMM"))
+              .arg(day)
+              .arg(suffix)
+              .arg(date.year())
+              .arg(parts[1]);
+          }
+        }
+      }
+
+      if (friendlyName == fileName) {
+        friendlyName.remove(".tar.zst");
+        friendlyName.replace("_", " ");
+      }
+
+      friendlyNames.append(friendlyName);
+      backupMap[friendlyName] = fileName;
+    }
+
+    if (id == 0) {
+      QString name = InputDialog::getText(tr("Name your backup"), this, tr("Backup Name")).trimmed().replace(" ", "_");
+      if (!name.isEmpty()) {
+        QStringList distinctFileNames = backupDir.entryList(QDir::Files | QDir::NoDotAndDotDot);
+        if (distinctFileNames.contains(name + ".tar.zst")) {
+          ConfirmationDialog::alert(tr("Name already in use. Please choose a different name!"), this);
+          return;
+        }
+
+        std::thread([=]() {
+          parent->keepScreenOn = true;
+
+          frogpilotBackupButton->setEnabled(false);
+          frogpilotBackupButton->setValue(tr("Backing up..."));
+
+          frogpilotBackupButton->setVisibleButton(1, false);
+          frogpilotBackupButton->setVisibleButton(2, false);
+          frogpilotBackupButton->setVisibleButton(3, false);
+
+          std::system(QString("tar --use-compress-program=zstd -cf %1 %2").arg(backupDir.absoluteFilePath(name + ".tar.zst"), "/data/openpilot").toStdString().c_str());
+
+          frogpilotBackupButton->setValue(tr("Backup created!"));
+
+          util::sleep_for(2500);
+
+          frogpilotBackupButton->setEnabled(true);
+          frogpilotBackupButton->setValue("");
+
+          frogpilotBackupButton->setVisibleButton(1, true);
+          frogpilotBackupButton->setVisibleButton(2, true);
+          frogpilotBackupButton->setVisibleButton(3, true);
+
+          parent->keepScreenOn = false;
+        }).detach();
+      }
+
+    } else if (id == 1) {
+      QString selection = MultiOptionDialog::getSelection(tr("Choose a backup to delete"), friendlyNames, "", this);
+      if (!selection.isEmpty()) {
+        if (ConfirmationDialog::confirm(tr("Delete this backup?"), tr("Delete"), this)) {
+          std::thread([=]() {
+            parent->keepScreenOn = true;
+
+            frogpilotBackupButton->setEnabled(false);
+            frogpilotBackupButton->setValue(tr("Deleting..."));
+
+            frogpilotBackupButton->setVisibleButton(0, false);
+            frogpilotBackupButton->setVisibleButton(2, false);
+            frogpilotBackupButton->setVisibleButton(3, false);
+
+            QFile::remove(backupDir.absoluteFilePath(backupMap[selection]));
+
+            frogpilotBackupButton->setValue(tr("Deleted!"));
+
+            util::sleep_for(2500);
+
+            frogpilotBackupButton->setEnabled(true);
+            frogpilotBackupButton->setValue("");
+
+            frogpilotBackupButton->setVisibleButton(0, true);
+            frogpilotBackupButton->setVisibleButton(2, true);
+            frogpilotBackupButton->setVisibleButton(3, true);
+
+            parent->keepScreenOn = false;
+          }).detach();
+        }
+      }
+
+    } else if (id == 2) {
+      if (ConfirmationDialog::confirm(tr("Delete all FrogPilot backups?"), tr("Delete All"), this)) {
+        std::thread([=]() mutable {
+          parent->keepScreenOn = true;
+
+          frogpilotBackupButton->setEnabled(false);
+          frogpilotBackupButton->setValue(tr("Deleting..."));
+
+          frogpilotBackupButton->setVisibleButton(0, false);
+          frogpilotBackupButton->setVisibleButton(1, false);
+          frogpilotBackupButton->setVisibleButton(3, false);
+
+          backupDir.removeRecursively();
+          backupDir.mkpath(".");
+
+          frogpilotBackupButton->setValue(tr("Deleted!"));
+
+          util::sleep_for(2500);
+
+          frogpilotBackupButton->setEnabled(true);
+          frogpilotBackupButton->setValue("");
+
+          frogpilotBackupButton->setVisibleButton(0, true);
+          frogpilotBackupButton->setVisibleButton(1, true);
+          frogpilotBackupButton->setVisibleButton(3, true);
+
+          parent->keepScreenOn = false;
+        }).detach();
+      }
+
+    } else if (id == 3) {
+      QString selection = MultiOptionDialog::getSelection(tr("Choose a backup to restore"), friendlyNames, "", this);
+      if (!selection.isEmpty()) {
+        if (FrogPilotConfirmationDialog::yesorno(tr("Restore this backup? This will overwrite your current installation and reboot the device."), this)) {
+          std::thread([=]() {
+            parent->keepScreenOn = true;
+
+            frogpilotBackupButton->setEnabled(false);
+            frogpilotBackupButton->setValue(tr("Restoring..."));
+
+            frogpilotBackupButton->setVisibleButton(0, false);
+            frogpilotBackupButton->setVisibleButton(1, false);
+            frogpilotBackupButton->setVisibleButton(2, false);
+
+            std::system(QString("rm -rf /data/openpilot/* && tar --use-compress-program=zstd -xf %1 -C /").arg(backupDir.absoluteFilePath(backupMap[selection])).toStdString().c_str());
+            QFile("/cache/on_backup").open(QIODevice::WriteOnly);
+
+            frogpilotBackupButton->setValue(tr("Restored!"));
+
+            util::sleep_for(2500);
+
+            frogpilotBackupButton->setValue(tr("Rebooting..."));
+
+            util::sleep_for(2500);
+
+            Hardware::reboot();
+          }).detach();
+        }
+      }
+    }
+  });
+  if (forceOpenDescriptions) {
+    frogpilotBackupButton->showDescription();
+  }
+  dataMainList->addItem(frogpilotBackupButton);
+
+  FrogPilotButtonsControl *toggleBackupButton = new FrogPilotButtonsControl(tr("Toggle Backups"), tr("<b>Create, delete, or restore toggle backups.</b>"), "", {tr("BACKUP"), tr("DELETE"), tr("DELETE ALL"), tr("RESTORE")});
+  QObject::connect(toggleBackupButton, &FrogPilotButtonsControl::buttonClicked, [=](int id) {
+    QDir backupDir("/data/toggle_backups");
+
+    QStringList backupNames = backupDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    std::sort(backupNames.begin(), backupNames.end(), std::greater<QString>());
+
+    QMap<QString, QString> backupMap;
+    for (const QString &dirName : backupNames) {
+      if (dirName.contains("in_progress")) {
+        continue;
+      }
+
+      QString friendlyName = dirName;
+
+      if (dirName.endsWith("_auto")) {
+        QStringList parts = QString(dirName).remove("_auto").split("_");
+
+        if (parts.size() >= 2) {
+          QDate date = QDate::fromString(parts[0], "yyyy-MM-dd");
+          QTime time = QTime::fromString(parts[1], "HH-mm-ss");
+
+          if (date.isValid() && time.isValid()) {
+            int day = date.day();
+            QString suffix = (day >= 11 && day <= 13) ? "th" :
+                             (day % 10 == 1) ? "st" :
+                             (day % 10 == 2) ? "nd" :
+                             (day % 10 == 3) ? "rd" : "th";
+
+            friendlyName = QString("%1 %2%3, %4 (%5)")
+              .arg(date.toString("MMMM"))
+              .arg(day)
+              .arg(suffix)
+              .arg(date.year())
+              .arg(time.toString("h:mm AP"));
+          }
+        }
+      }
+
+      if (friendlyName == dirName) {
+        friendlyName.replace("_", " ");
+      }
+
+      backupMap[friendlyName] = dirName;
+    }
+
+    if (id == 0) {
+      QString name = InputDialog::getText(tr("Name your backup"), this, tr("Backup Name")).trimmed().replace(" ", "_");
+      if (!name.isEmpty()) {
+        if (backupNames.contains(name)) {
+          ConfirmationDialog::alert(tr("Name already in use. Please choose a different name!"), this);
+          return;
+        }
+
+        std::thread([=]() {
+          parent->keepScreenOn = true;
+
+          toggleBackupButton->setEnabled(false);
+          toggleBackupButton->setValue(tr("Backing up..."));
+
+          toggleBackupButton->setVisibleButton(1, false);
+          toggleBackupButton->setVisibleButton(2, false);
+          toggleBackupButton->setVisibleButton(3, false);
+
+          std::system(QString("cp -r /data/params/d/ %1").arg(backupDir.absoluteFilePath(name)).toStdString().c_str());
+
+          toggleBackupButton->setValue(tr("Backup created!"));
+
+          util::sleep_for(2500);
+
+          toggleBackupButton->setEnabled(true);
+          toggleBackupButton->setValue("");
+
+          toggleBackupButton->setVisibleButton(1, true);
+          toggleBackupButton->setVisibleButton(2, true);
+          toggleBackupButton->setVisibleButton(3, true);
+
+          parent->keepScreenOn = false;
+        }).detach();
+      }
+
+    } else if (id == 1) {
+      QString selection = MultiOptionDialog::getSelection(tr("Choose a backup to delete"), backupMap.keys(), "", this);
+      if (!selection.isEmpty()) {
+        if (ConfirmationDialog::confirm(tr("Delete this backup?"), tr("Delete"), this)) {
+          std::thread([=]() {
+            parent->keepScreenOn = true;
+
+            toggleBackupButton->setEnabled(false);
+            toggleBackupButton->setValue(tr("Deleting..."));
+
+            toggleBackupButton->setVisibleButton(0, false);
+            toggleBackupButton->setVisibleButton(2, false);
+            toggleBackupButton->setVisibleButton(3, false);
+
+            QDir(backupDir.absoluteFilePath(backupMap[selection])).removeRecursively();
+
+            toggleBackupButton->setValue(tr("Deleted!"));
+
+            util::sleep_for(2500);
+
+            toggleBackupButton->setEnabled(true);
+            toggleBackupButton->setValue("");
+
+            toggleBackupButton->setVisibleButton(0, true);
+            toggleBackupButton->setVisibleButton(2, true);
+            toggleBackupButton->setVisibleButton(3, true);
+
+            parent->keepScreenOn = false;
+          }).detach();
+        }
+      }
+
+    } else if (id == 2) {
+      if (ConfirmationDialog::confirm(tr("Delete all toggle backups?"), tr("Delete All"), this)) {
+        std::thread([=]() mutable {
+          parent->keepScreenOn = true;
+
+          toggleBackupButton->setEnabled(false);
+          toggleBackupButton->setValue(tr("Deleting..."));
+
+          toggleBackupButton->setVisibleButton(0, false);
+          toggleBackupButton->setVisibleButton(1, false);
+          toggleBackupButton->setVisibleButton(3, false);
+
+          backupDir.removeRecursively();
+          backupDir.mkpath(".");
+
+          toggleBackupButton->setValue(tr("Deleted!"));
+
+          util::sleep_for(2500);
+
+          toggleBackupButton->setEnabled(true);
+          toggleBackupButton->setValue("");
+
+          toggleBackupButton->setVisibleButton(0, true);
+          toggleBackupButton->setVisibleButton(1, true);
+          toggleBackupButton->setVisibleButton(3, true);
+
+          parent->keepScreenOn = false;
+        }).detach();
+      }
+
+    } else if (id == 3) {
+      QString selection = MultiOptionDialog::getSelection(tr("Choose a backup to restore"), backupMap.keys(), "", this);
+      if (!selection.isEmpty()) {
+        if (FrogPilotConfirmationDialog::yesorno(tr("Restore this backup? This will overwrite your current settings!"), this)) {
+          std::thread([=]() {
+            parent->keepScreenOn = true;
+
+            toggleBackupButton->setEnabled(false);
+            toggleBackupButton->setValue(tr("Restoring..."));
+
+            toggleBackupButton->setVisibleButton(0, false);
+            toggleBackupButton->setVisibleButton(1, false);
+            toggleBackupButton->setVisibleButton(2, false);
+
+            std::system(QString("cp -r %1/* /data/params/d/").arg(backupDir.absoluteFilePath(backupMap[selection])).toStdString().c_str());
+
+            updateFrogPilotToggles();
+
+            toggleBackupButton->setValue(tr("Restored!"));
+
+            util::sleep_for(2500);
+
+            toggleBackupButton->setEnabled(true);
+            toggleBackupButton->setValue("");
+
+            toggleBackupButton->setVisibleButton(0, true);
+            toggleBackupButton->setVisibleButton(1, true);
+            toggleBackupButton->setVisibleButton(2, true);
+
+            parent->keepScreenOn = false;
+          }).detach();
+        }
+      }
+    }
+  });
+  if (forceOpenDescriptions) {
+    toggleBackupButton->showDescription();
+  }
+  dataMainList->addItem(toggleBackupButton);
+
   FrogPilotButtonsControl *viewStatsButton = new FrogPilotButtonsControl(tr("FrogPilot Stats"), tr("<b>View your collected FrogPilot stats.</b>"), "", {tr("RESET"), tr("VIEW")});
   QObject::connect(viewStatsButton, &FrogPilotButtonsControl::buttonClicked, [dataLayout, statsLabelsPanel, this](int id) {
     if (id == 0) {

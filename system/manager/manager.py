@@ -46,9 +46,13 @@ def manager_init() -> None:
 
   # set unset params to their default value
   for k in params.all_keys():
-    default_value = params.get_default_value(k)
-    if default_value is not None and params.get(k) is None:
-      params.put(k, default_value)
+    current_value = params.get(k)
+    if current_value is None:
+      cached_value = params_cache.get(k)
+      if cached_value is not None:
+        params.put(k, cached_value)
+    else:
+      params_cache.put(k, current_value)
 
   # Create folders needed for msgq
   try:
@@ -101,7 +105,7 @@ def manager_init() -> None:
 
   # FrogPilot variables
   install_frogpilot(params)
-  frogpilot_boot_functions(params)
+  frogpilot_boot_functions(build_metadata, params)
 
 
 def manager_cleanup() -> None:
