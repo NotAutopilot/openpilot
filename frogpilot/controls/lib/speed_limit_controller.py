@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 
-from openpilot.frogpilot.common.frogpilot_utilities import calculate_bearing_offset, calculate_distance_to_point, is_url_pingable
+from openpilot.frogpilot.common.frogpilot_utilities import calculate_bearing_offset, is_url_pingable
 
 FREE_MAPBOX_REQUESTS = 100_000
 
@@ -239,7 +239,7 @@ class SpeedLimitController:
       self.frogpilot_planner.params.put_nonblocking("PreviousSpeedLimit", self.target)
 
   def update_limits(self, dashboard_speed_limit, now, time_validated, v_cruise, v_ego, sm):
-    self.update_map_speed_limit(v_ego)
+    self.update_map_speed_limit(v_ego, sm)
 
     limits = {
       "Dashboard": dashboard_speed_limit,
@@ -302,24 +302,11 @@ class SpeedLimitController:
       self.speed_limit_changed_timer = 0
       self.unconfirmed_speed_limit = 0
 
-  def update_map_speed_limit(self, v_ego):
-    if not self.frogpilot_planner.gps_position:
-      return
+  def update_map_speed_limit(self, v_ego, sm):
+    self.map_speed_limit = sm["mapdOut"].speedLimit
+    self.next_speed_limit = sm["mapdOut"].nextSpeedLimit
 
-    self.map_speed_limit = self.frogpilot_planner.params_memory.get("MapSpeedLimit")
-
-    next_map_speed_limit = self.frogpilot_planner.params_memory.get("NextMapSpeedLimit")
-    self.next_speed_limit = next_map_speed_limit.get("speedlimit", 0)
-
-    if self.next_speed_limit:
-      current_latitude = self.frogpilot_planner.gps_position.get("latitude")
-      current_longitude = self.frogpilot_planner.gps_position.get("longitude")
-
-      next_latitude = next_map_speed_limit.get("latitude")
-      next_longitude = next_map_speed_limit.get("longitude")
-
-      distance_to_upcoming = calculate_distance_to_point(current_latitude, current_longitude, next_latitude, next_longitude)
-
+    if self.next_speed_limit > 0:
       if self.map_speed_limit < self.next_speed_limit:
         max_lookahead = self.frogpilot_toggles.map_speed_lookahead_higher * v_ego
       elif self.map_speed_limit > self.next_speed_limit:
@@ -327,7 +314,7 @@ class SpeedLimitController:
       else:
         max_lookahead = 0
 
-      if distance_to_upcoming < max_lookahead:
+      if sm["mapdOut"].nextSpeedLimitDistance < max_lookahead:
         self.map_speed_limit = self.next_speed_limit
 
   def update_override(self, v_cruise, v_cruise_diff, v_ego, v_ego_diff, sm):

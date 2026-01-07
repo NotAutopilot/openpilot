@@ -50,7 +50,7 @@ class MapSpeedLogger:
 
     self.gps_location_service = get_gps_location_service(self.params)
 
-    self.sm = messaging.SubMaster(["deviceState", "frogpilotCarState", "frogpilotPlan", self.gps_location_service, "modelV2"])
+    self.sm = messaging.SubMaster(["deviceState", "frogpilotCarState", "frogpilotPlan", self.gps_location_service, "mapdOut", "modelV2"])
 
   @property
   def can_make_overpass_request(self):
@@ -230,7 +230,8 @@ class MapSpeedLogger:
       self.previous_coordinates = None
       return
 
-    road_name = self.params_memory.get("RoadName")
+    road_name = self.sm["mapdOut"].roadName
+
     if not road_name or not current_speed_source:
       return
 

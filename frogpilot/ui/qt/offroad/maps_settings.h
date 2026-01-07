@@ -18,7 +18,7 @@ protected:
 private:
   void cancelDownload();
   void startDownload();
-  void updateDownloadLabels(std::string &osmDownloadProgress);
+  void updateDownloadLabels(int downloadedFiles, int totalFiles);
   void updateState(const UIState &s, const FrogPilotUIState &fs);
 
   bool cancellingDownload;
@@ -27,7 +27,6 @@ private:
 
   ButtonControl *downloadMapsButton;
   ButtonControl *removeMapsButton;
-  ButtonControl *resetMapdButton;
 
   ButtonParamControl *preferredSchedule;
 

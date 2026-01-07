@@ -1,7 +1,3 @@
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-
 #include "frogpilot/ui/qt/widgets/navigation_functions.h"
 
 MapSelectionControl::MapSelectionControl(const QMap<QString, QString> &map, bool isCountry) : selectionType(isCountry ? "nations" : "states") {
@@ -28,11 +24,15 @@ MapSelectionControl::MapSelectionControl(const QMap<QString, QString> &map, bool
 }
 
 void MapSelectionControl::loadSelectedMaps() {
-  QJsonObject existingMaps = QJsonDocument::fromJson(QByteArray::fromStdString(params.get("MapsSelected"))).object();
+  QString mapsSelected = QString::fromStdString(params.get("MapsSelected"));
+  QStringList mapList = mapsSelected.split(",", QString::SkipEmptyParts);
+  QString prefix = (selectionType == "nations") ? "nation." : "us_state.";
 
   QSet<QString> selectedMaps;
-  for (const QJsonValue &value : existingMaps.value(selectionType).toArray()) {
-    selectedMaps.insert(value.toString());
+  for (const QString &map : mapList) {
+    if (map.startsWith(prefix)) {
+      selectedMaps.insert(map.mid(prefix.length()));
+    }
   }
 
   for (QAbstractButton *button : mapButtons->buttons()) {
@@ -41,22 +41,23 @@ void MapSelectionControl::loadSelectedMaps() {
 }
 
 void MapSelectionControl::updateSelectedMaps() {
-  QJsonObject existingMaps = QJsonDocument::fromJson(QByteArray::fromStdString(params.get("MapsSelected"))).object();
+  QString mapsSelected = QString::fromStdString(params.get("MapsSelected"));
+  QStringList mapList = mapsSelected.split(",", QString::SkipEmptyParts);
+  QString prefix = (selectionType == "nations") ? "nation." : "us_state.";
 
-  QSet<QString> selectedMaps;
-  for (const QJsonValue &value : existingMaps.value(selectionType).toArray()) {
-    selectedMaps.insert(value.toString());
-  }
-
-  for (QAbstractButton *button : mapButtons->buttons()) {
-    QString mapKey = button->property("mapKey").toString();
-    if (button->isChecked()) {
-      selectedMaps.insert(mapKey);
-    } else {
-      selectedMaps.remove(mapKey);
+  QStringList newMapList;
+  for (const QString &map : mapList) {
+    if (!map.startsWith(prefix)) {
+      newMapList.append(map);
     }
   }
 
-  existingMaps[selectionType] = QJsonArray::fromStringList(selectedMaps.values());
-  params.putNonBlocking("MapsSelected", QJsonDocument(existingMaps).toJson(QJsonDocument::Compact).toStdString());
+  for (QAbstractButton *button : mapButtons->buttons()) {
+    if (button->isChecked()) {
+      newMapList.append(prefix + button->property("mapKey").toString());
+    }
+  }
+
+  newMapList.sort();
+  params.putNonBlocking("MapsSelected", newMapList.join(",").toStdString());
 }
