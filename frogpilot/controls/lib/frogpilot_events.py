@@ -36,7 +36,7 @@ class FrogPilotEvents:
 
     self.error_log = error_log
 
-  def update(self, v_cruise, sm, frogpilot_toggles):
+  def update(self, long_control_active, v_cruise, sm, frogpilot_toggles):
     current_alert = sm["selfdriveState"].alertType
     current_frogpilot_alert = sm["selfdriveState"].alertType
 
@@ -44,9 +44,9 @@ class FrogPilotEvents:
 
     self.events.clear()
 
-    acceleration = sm["carState"].aEgo
+    acceleration = sm["carControl"].actuators.accel
 
-    if not sm["carState"].gasPressed:
+    if long_control_active:
       self.max_acceleration = max(acceleration, self.max_acceleration)
     else:
       self.max_acceleration = 0

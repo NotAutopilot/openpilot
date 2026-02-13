@@ -33,6 +33,7 @@ class FrogPilotPlanner:
     self.frogpilot_weather = WeatherChecker(self)
 
     self.driving_in_curve = False
+    self.gps_valid = False
     self.lateral_check = False
     self.model_stopped = False
     self.road_curvature_detected = False
@@ -74,7 +75,7 @@ class FrogPilotPlanner:
 
     self.driving_in_curve = abs(self.lateral_acceleration) >= MINIMUM_LATERAL_ACCELERATION
 
-    self.frogpilot_events.update(v_cruise, sm, frogpilot_toggles)
+    self.frogpilot_events.update(long_control_active, v_cruise, sm, frogpilot_toggles)
 
     self.frogpilot_following.update(long_control_active, v_ego, sm, frogpilot_toggles)
 
@@ -84,6 +85,7 @@ class FrogPilotPlanner:
       "longitude": gps_location.longitude,
       "bearing": gps_location.bearingDeg,
     }
+    self.gps_valid = self.gps_position["latitude"] != 0 or self.gps_position["longitude"] != 0
     self.params_memory.put("LastGPSPosition", json.dumps(self.gps_position))
 
     if v_ego >= frogpilot_toggles.minimum_lane_change_speed:
@@ -113,7 +115,7 @@ class FrogPilotPlanner:
 
     self.v_cruise = self.frogpilot_vcruise.update(long_control_active, now, time_validated, v_cruise, v_ego, sm, frogpilot_toggles)
 
-    if self.gps_position and time_validated and frogpilot_toggles.weather_presets:
+    if self.gps_valid and time_validated and frogpilot_toggles.weather_presets:
       self.frogpilot_weather.update_weather(now, frogpilot_toggles)
     else:
       self.frogpilot_weather.weather_id = 0

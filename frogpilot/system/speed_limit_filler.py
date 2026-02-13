@@ -213,6 +213,9 @@ class MapSpeedLogger:
     current_latitude = gps_location.latitude
     current_longitude = gps_location.longitude
 
+    if current_latitude == 0 and current_longitude == 0:
+      return
+
     if self.previous_coordinates is None:
       self.previous_coordinates = {"latitude": current_latitude, "longitude": current_longitude}
       return
