@@ -13,6 +13,31 @@ from openpilot.system.hardware import HARDWARE
 from openpilot.common.swaglog import cloudlog
 
 
+F4_FW_PATH = os.path.join(BASEDIR, "selfdrive/pandad/fw/panda_f4.bin.signed")
+
+def flash_f4_panda(panda: Panda) -> None:
+  if not os.path.isfile(F4_FW_PATH):
+    cloudlog.warning("F4 firmware not found, skipping deprecated panda flash")
+    return
+
+  expected_sig = Panda.get_signature_from_firmware(F4_FW_PATH)
+  panda_sig = b"" if panda.bootstub else panda.get_signature()
+
+  if not panda.bootstub and panda_sig == expected_sig:
+    cloudlog.info(f"F4 panda {panda.get_usb_serial()} already up to date")
+    return
+
+  cloudlog.info(f"Flashing deprecated F4 panda {panda.get_usb_serial()}")
+  with open(F4_FW_PATH, "rb") as f:
+    code = f.read()
+
+  if not panda.bootstub:
+    panda.reset(enter_bootstub=True)
+
+  Panda.flash_static(panda._handle, code, mcu_type=McuType.F4)
+  panda.reconnect()
+  cloudlog.info("Done flashing F4 panda")
+
 def get_expected_signature() -> bytes:
   try:
     fn = os.path.join(FW_PATH, McuType.H7.config.app_fn)
@@ -32,7 +57,11 @@ def flash_panda(panda_serial: str) -> Panda:
   # skip flashing if the detected panda is not supported
   supported_panda = check_panda_support(panda)
   if not supported_panda:
-    cloudlog.warning(f"Panda {panda_serial} is not supported (hw_type: {panda.get_type()}), skipping flash...")
+    hw_type = panda.get_type()
+    if hw_type in Panda.F4_DEVICES and not panda.is_internal():
+      flash_f4_panda(panda)
+    else:
+      cloudlog.warning(f"Panda {panda_serial} is not supported (hw_type: {hw_type}), skipping flash...")
     return panda
 
   fw_signature = get_expected_signature()
