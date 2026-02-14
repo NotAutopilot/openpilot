@@ -185,13 +185,13 @@ class SelfdriveD:
       self.events.add_from_msg(car_events)
 
       # Tesla Pre-AP pedal-long status alerts (banner + engage/disengage sounds).
-      # For this port, cruiseState.enabled is software-managed and speed > 0 indicates
-      # the double-pull long mode target is active.
+      # Use requested long-active state from carControl so alerts follow true
+      # long engagement/disengagement even when lateral-only mode stays engaged.
       if (self.CP.brand == "tesla"
           and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
           and self.CP.openpilotLongitudinalControl
           and not self.CP.pcmCruise):
-        pedal_long_active = bool(CS.cruiseState.enabled and CS.cruiseState.speed > 1e-3)
+        pedal_long_active = bool(self.sm['carControl'].longActive)
         if pedal_long_active and not self.prev_pedal_long_active:
           self.events.add(EventName.pedalCruiseEnabled)
         elif self.prev_pedal_long_active and not pedal_long_active:
@@ -206,11 +206,29 @@ class SelfdriveD:
           # body always wants to enable
           self.events.add(EventName.pcmEnable)
 
-      # Disable on rising edge of accelerator or brake. Also disable on brake when speed > 0
-      if (CS.gasPressed and not self.CS_prev.gasPressed and self.disengage_on_accelerator) or \
-        (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or \
-        (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
+      # Disable on rising edge of accelerator or brake. Also disable on brake when speed > 0.
+      #
+      # Tesla Pre-AP hotfix:
+      # On brake/regen press, keep lateral active but drop longitudinal only.
+      # This mirrors expected "steering-only on brake" behavior for pedal-long cars.
+      gas_disable = CS.gasPressed and not self.CS_prev.gasPressed and self.disengage_on_accelerator
+      brake_or_regen_disable = (
+        (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or
+        (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill))
+      )
+      preap_steering_only_brake = (
+        self.CP.brand == "tesla"
+        and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+        and self.CP.openpilotLongitudinalControl
+        and not self.CP.pcmCruise
+      )
+      if gas_disable:
         self.events.add(EventName.pedalPressed)
+      elif brake_or_regen_disable:
+        if preap_steering_only_brake:
+          self.events.add(EventName.gasPressedOverride)
+        else:
+          self.events.add(EventName.pedalPressed)
 
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.red:
