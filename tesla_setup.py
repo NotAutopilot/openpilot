@@ -21,7 +21,7 @@ if OPENDBC_PATH not in sys.path:
   sys.path.insert(0, OPENDBC_PATH)
 
 try:
-  from opendbc.car.tesla.tinkla_conf import tinkla_conf, PEDAL_PROFILES
+  from opendbc.car.tesla.tinkla_conf import tinkla_conf, PEDAL_PROFILES, ACCEL_MAX_PROFILES
   CONFIG_AVAILABLE = True
 except ImportError as e:
   print(f"Error: Could not import tinkla_conf: {e}")
@@ -84,6 +84,7 @@ def print_main_menu():
   pedal_status = f"{Colors.GREEN}CALIBRATED{Colors.RESET}" if tinkla_conf.pedal_calibrated else f"{Colors.RED}NOT CALIBRATED{Colors.RESET}"
   print(f"       Pedal Status:       {pedal_status}")
   print(f"    4. ACC Stalk Spam      {toggle_indicator(tinkla_conf.acc_spam_enabled)}")
+  print(f"    9. Accel Profile       {Colors.CYAN}{tinkla_conf.accel_profile}{Colors.RESET}")
   
   # Pedal Hardware
   print(f"\n  {Colors.YELLOW}PEDAL HARDWARE{Colors.RESET}")
@@ -218,6 +219,27 @@ def select_pedal_profile():
     print(f"  {Colors.RED}Invalid input.{Colors.RESET}")
 
 
+def select_accel_profile():
+  """Select planner acceleration profile."""
+  print(f"\n  {Colors.CYAN}Current Accel Profile: {tinkla_conf.accel_profile}{Colors.RESET}")
+  print("\n  Available Profiles:")
+  profiles = list(ACCEL_MAX_PROFILES.keys())
+  for i, profile in enumerate(profiles, 1):
+    current = " (current)" if profile == tinkla_conf.accel_profile else ""
+    print(f"    {i}. {profile}{current}")
+
+  print("\n  Enter profile number:")
+  try:
+    choice = int(input("  > "))
+    if 1 <= choice <= len(profiles):
+      tinkla_conf.accel_profile = profiles[choice - 1]
+      print_success(f"Accel Profile set to {tinkla_conf.accel_profile}")
+    else:
+      print(f"  {Colors.RED}Invalid choice.{Colors.RESET}")
+  except ValueError:
+    print(f"  {Colors.RED}Invalid input.{Colors.RESET}")
+
+
 def toggle_radar():
   """Toggle radar."""
   new_value = not tinkla_conf.radar_enabled
@@ -300,6 +322,8 @@ def main():
       toggle_pedal_can_bus()
     elif choice == '6':
       select_pedal_profile()
+    elif choice == '9':
+      select_accel_profile()
     elif choice == '7':
       toggle_radar()
     elif choice == '8':
