@@ -120,6 +120,7 @@ class SelfdriveD:
     self.recalibrating_seen = False
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
+    self.prev_pedal_long_active = False
 
     # Determine startup event
     self.startup_event = EventName.startup if build_metadata.openpilot.comma_remote and build_metadata.tested_channel else EventName.startupMaster
@@ -182,6 +183,22 @@ class SelfdriveD:
     if CS.canValid:
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
       self.events.add_from_msg(car_events)
+
+      # Tesla Pre-AP pedal-long status alerts (banner + engage/disengage sounds).
+      # For this port, cruiseState.enabled is software-managed and speed > 0 indicates
+      # the double-pull long mode target is active.
+      if (self.CP.brand == "tesla"
+          and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+          and self.CP.openpilotLongitudinalControl
+          and not self.CP.pcmCruise):
+        pedal_long_active = bool(CS.cruiseState.enabled and CS.cruiseState.speed > 1e-3)
+        if pedal_long_active and not self.prev_pedal_long_active:
+          self.events.add(EventName.pedalCruiseEnabled)
+        elif self.prev_pedal_long_active and not pedal_long_active:
+          self.events.add(EventName.pedalCruiseDisabled)
+        self.prev_pedal_long_active = pedal_long_active
+      else:
+        self.prev_pedal_long_active = False
 
       if self.CP.notCar:
         # wait for everything to init first

@@ -1003,6 +1003,22 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: personality_changed_alert,
   },
 
+  EventName.pedalCruiseEnabled: {
+    ET.WARNING: Alert(
+      "Pedal Cruise Engaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.engage, 0.8),
+  },
+
+  EventName.pedalCruiseDisabled: {
+    ET.WARNING: Alert(
+      "Pedal Cruise Disengaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.disengage, 0.8),
+  },
+
   EventName.userBookmark: {
     ET.PERMANENT: NormalPermanentAlert("Bookmark Saved", duration=1.5),
   },
