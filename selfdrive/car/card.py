@@ -7,6 +7,7 @@ import cereal.messaging as messaging
 
 from cereal import car, log
 
+from openpilot.common.conversions import Conversions as CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
