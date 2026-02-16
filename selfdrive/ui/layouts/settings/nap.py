@@ -7,13 +7,13 @@ from openpilot.system.ui.widgets.list_view import (
 )
 from openpilot.system.ui.widgets.scroller import Scroller
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
+from openpilot.system.ui.widgets.script_runner import ScriptRunner
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets.html_render import HtmlRenderer, ElementType
 from opendbc.car.tesla.nap_params import NAPParamKeys, DEFAULTS
 
 # Preset values for float/int params exposed as multiple-button selectors
-SPEED_OFFSET_PRESETS = [0.0, 5.0, 10.0, 15.0]
 BRAKE_FACTOR_PRESETS = [0.5, 1.0, 1.5, 2.0]
 PEDAL_CAN_BUS_VALUES = [0, 2]
 
@@ -123,19 +123,7 @@ class NAPLayout(Widget):
     )
     self._all_items.append(self._follow_buttons)
 
-    self._add_toggle(
-      NAPParamKeys.AUTORESUME_ACC,
-      "Auto-Resume ACC",
-      "Automatically resume adaptive cruise control after a stop.",
-    )
-
-    self._add_toggle(
-      NAPParamKeys.ENABLE_JUST_CC,
-      "Enable Just CC",
-      "Enable conventional (non-adaptive) cruise control mode.",
-    )
-
-    # ── Section 3: Pedal Hardware ──
+    # ── Section 2: Pedal Hardware ──
     self._all_items.append(section_header_item("Pedal Hardware"))
 
     pedal_profile = self._params.get(NAPParamKeys.PEDAL_PROFILE, return_default=True)
@@ -175,7 +163,7 @@ class NAPLayout(Widget):
     )
     self._all_items.append(self._calibrate_pedal_btn)
 
-    # ── Section 4: Radar ──
+    # ── Section 3: Radar ──
     self._all_items.append(section_header_item("Radar"))
 
     self._add_toggle(
@@ -206,33 +194,7 @@ class NAPLayout(Widget):
     )
     self._all_items.append(self._test_radar_btn)
 
-    # ── Section 5: Speed Limit ──
-    self._all_items.append(section_header_item("Speed Limit"))
-
-    self._add_toggle(
-      NAPParamKeys.ADJUST_ACC_WITH_SPEED_LIMIT,
-      "Adjust Speed with Speed Limit",
-      "Automatically adjust cruise speed based on detected speed limit signs.",
-    )
-
-    self._add_toggle(
-      NAPParamKeys.SPEED_LIMIT_USE_RELATIVE,
-      "Use Relative Offset",
-      "Apply speed limit offset as a relative value instead of absolute.",
-    )
-
-    speed_offset = self._params.get(NAPParamKeys.SPEED_LIMIT_OFFSET, return_default=True)
-    self._speed_offset_buttons = multiple_button_item(
-      "Speed Limit Offset",
-      "How much over the speed limit to set cruise speed.",
-      buttons=["0", "+5", "+10", "+15"],
-      button_width=120,
-      selected_index=_find_preset_index(SPEED_OFFSET_PRESETS, speed_offset),
-      callback=self._on_speed_offset,
-    )
-    self._all_items.append(self._speed_offset_buttons)
-
-    # ── Section 6: iBooster / Braking (not yet implemented — greyed out) ──
+    # ── Section 4: iBooster / Braking (not yet implemented — greyed out) ──
     self._all_items.append(section_header_item("iBooster / Braking"))
 
     self._add_toggle(
@@ -254,7 +216,7 @@ class NAPLayout(Widget):
     self._brake_factor_buttons.action_item.set_enabled(False)
     self._all_items.append(self._brake_factor_buttons)
 
-    # ── Section 7: Advanced ──
+    # ── Section 5: Advanced ──
     self._all_items.append(section_header_item("Advanced"))
 
     self._add_toggle(
@@ -263,13 +225,7 @@ class NAPLayout(Widget):
       "Force the system to treat this vehicle as a Pre-Autopilot Tesla.",
     )
 
-    self._add_toggle(
-      NAPParamKeys.USE_LONG_CONTROL_DATA,
-      "Use Longitudinal Control Data",
-      "Enable advanced longitudinal control data path.",
-    )
-
-    # ── Section 8: Actions ──
+    # ── Section 6: Actions ──
     self._all_items.append(section_header_item("Actions"))
 
     self._flash_epas_btn = button_item(
@@ -301,7 +257,7 @@ class NAPLayout(Widget):
     self._all_items.append(CreditsBlock(
       "<p>Special thanks to the following members. "
       "This project wouldn't be possible without you:</p>"
-      "<p><b>Boggyver</b> and the <b>Tinkla Project</b><br>"
+      "<p><b>Boggyver and the Tinkla Project</b><br>"
       "<b>Lukas Loetkolben</b><br>"
       "<b>Johnmr1</b><br>"
       "<b>SeriouslySerious</b><br>"
@@ -335,29 +291,78 @@ class NAPLayout(Widget):
   def _on_pedal_can_bus(self, index: int):
     self._params.put(NAPParamKeys.PEDAL_CAN_BUS, PEDAL_CAN_BUS_VALUES[index])
 
-  def _on_speed_offset(self, index: int):
-    self._params.put(NAPParamKeys.SPEED_LIMIT_OFFSET, SPEED_OFFSET_PRESETS[index])
-
   def _on_brake_factor(self, index: int):
     self._params.put(NAPParamKeys.BRAKE_FACTOR, BRAKE_FACTOR_PRESETS[index])
+
+  # ── Script runner helpers ──
+
+  def _launch_script(self, title: str, cmd: list[str]):
+    """Launch a ScriptRunner as a modal overlay."""
+    runner = ScriptRunner(title, cmd)
+
+    def on_script_done(result: int):
+      self._refresh_toggles()
+
+    gui_app.set_modal_overlay(runner, callback=on_script_done)
 
   # ── Action button callbacks ──
 
   def _on_calibrate_pedal(self):
-    # TODO: wire to ScriptRunner when available
-    pass
+    def confirm_callback(result: int):
+      if result == DialogResult.CONFIRM:
+        self._launch_script("Calibrate Pedal",
+                            ["python3", "-m", "scripts.nap.calibrate_pedal"])
+
+    content = (
+      "<h1>Calibrate Pedal</h1><br>"
+      "<p>This will calibrate the Comma Pedal interceptor.</p>"
+      "<p><b>Requirements:</b><br>"
+      "- Vehicle must be ON (ignition)<br>"
+      "- Gear in NEUTRAL<br>"
+      "- Brake pedal HELD<br>"
+      "- Accelerator RELEASED</p>"
+      "<p>Openpilot processes will be stopped during calibration.</p>"
+    )
+    dlg = ConfirmDialog(content, "Start Calibration", rich=True)
+    gui_app.set_modal_overlay(dlg, callback=confirm_callback)
 
   def _on_calibrate_radar(self):
-    # TODO: wire to ScriptRunner when available
-    pass
+    def confirm_callback(result: int):
+      if result == DialogResult.CONFIRM:
+        self._launch_script("Calibrate Radar",
+                            ["python3", "-m", "scripts.nap.calibrate_radar"])
+
+    content = (
+      "<h1>Calibrate Radar</h1><br>"
+      "<p>This will show filtered radar points to help align the Bosch radar.</p>"
+      "<p>Place a calibration target 3-10m ahead, centered on the vehicle axis. "
+      "Adjust radar aim until the target appears at ~0.0m lateral offset.</p>"
+      "<p>Openpilot processes will be stopped during calibration.</p>"
+    )
+    dlg = ConfirmDialog(content, "Start Calibration", rich=True)
+    gui_app.set_modal_overlay(dlg, callback=confirm_callback)
 
   def _on_test_radar(self):
-    # TODO: wire to ScriptRunner when available
-    pass
+    self._launch_script("Test Radar",
+                        ["python3", "-m", "scripts.nap.test_radar"])
 
   def _on_flash_epas(self):
-    # TODO: wire to ScriptRunner when available
-    pass
+    def confirm_callback(result: int):
+      if result == DialogResult.CONFIRM:
+        self._launch_script("Flash EPAS",
+                            ["python3", "-m", "scripts.nap.flash_epas"])
+
+    content = (
+      "<h1>Flash EPAS Firmware</h1><br>"
+      "<p><b>WARNING:</b> This will permanently modify the EPAS "
+      "(Electric Power Assisted Steering) firmware to enable openpilot "
+      "steering control.</p>"
+      "<p>A backup of the original firmware will be saved. "
+      "Do NOT interrupt the flashing process.</p>"
+      "<p>Openpilot processes will be stopped during flashing.</p>"
+    )
+    dlg = ConfirmDialog(content, "Flash Firmware", rich=True)
+    gui_app.set_modal_overlay(dlg, callback=confirm_callback)
 
   def _on_emergency_disable(self):
     def confirm_callback(result: int):
@@ -422,10 +427,6 @@ class NAPLayout(Widget):
     pedal_bus = self._params.get(NAPParamKeys.PEDAL_CAN_BUS, return_default=True)
     self._pedal_bus_buttons.action_item.set_selected_button(
       0 if pedal_bus == 0 else 1)
-
-    speed_offset = self._params.get(NAPParamKeys.SPEED_LIMIT_OFFSET, return_default=True)
-    self._speed_offset_buttons.action_item.set_selected_button(
-      _find_preset_index(SPEED_OFFSET_PRESETS, speed_offset))
 
     brake_factor = self._params.get(NAPParamKeys.BRAKE_FACTOR, return_default=True)
     self._brake_factor_buttons.action_item.set_selected_button(
