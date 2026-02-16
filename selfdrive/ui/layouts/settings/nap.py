@@ -1,5 +1,8 @@
+import os
+import subprocess
 import pyray as rl
 from openpilot.common.params import Params
+from openpilot.common.basedir import BASEDIR
 from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.list_view import (
   toggle_item, multiple_button_item, button_item, text_item,
@@ -7,7 +10,6 @@ from openpilot.system.ui.widgets.list_view import (
 )
 from openpilot.system.ui.widgets.scroller import Scroller
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
-from openpilot.system.ui.widgets.script_runner import ScriptRunner
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets.html_render import HtmlRenderer, ElementType
@@ -294,75 +296,103 @@ class NAPLayout(Widget):
   def _on_brake_factor(self, index: int):
     self._params.put(NAPParamKeys.BRAKE_FACTOR, BRAKE_FACTOR_PRESETS[index])
 
-  # ── Script runner helpers ──
+  # ── Script runner ──
 
-  def _launch_script(self, title: str, cmd: list[str]):
-    """Launch a ScriptRunner as a modal overlay."""
-    runner = ScriptRunner(title, cmd)
+  def _show_script_runner(self, title: str, instructions: str, script_module: str):
+    """Launch the script runner as a separate process that takes over the screen."""
+    script_path = os.path.join(BASEDIR, "scripts", "nap", "run_script.py")
 
-    def on_script_done(result: int):
-      self._refresh_toggles()
-
-    gui_app.set_modal_overlay(runner, callback=on_script_done)
+    # Launch as detached process — run_script.py will kill the UI and take over
+    subprocess.Popen(
+      ["python", script_path, title, script_module, instructions],
+      cwd=BASEDIR,
+      start_new_session=True  # Detach from parent process
+    )
 
   # ── Action button callbacks ──
 
   def _on_calibrate_pedal(self):
-    def confirm_callback(result: int):
-      if result == DialogResult.CONFIRM:
-        self._launch_script("Calibrate Pedal",
-                            ["python3", "-m", "scripts.nap.calibrate_pedal"])
-
-    content = (
-      "<h1>Calibrate Pedal</h1><br>"
-      "<p>This will calibrate the Comma Pedal interceptor.</p>"
-      "<p><b>Requirements:</b><br>"
-      "- Vehicle must be ON (ignition)<br>"
-      "- Gear in NEUTRAL<br>"
-      "- Brake pedal HELD<br>"
-      "- Accelerator RELEASED</p>"
-      "<p>Openpilot processes will be stopped during calibration.</p>"
+    self._show_script_runner(
+      title="Pedal Calibration",
+      instructions=(
+        "NAP Pedal Calibrator\n\n"
+        "This script calibrates the comma pedal interceptor for your pre-AP Tesla Model S.\n\n"
+        "PRECONDITIONS:\n"
+        "  1. Car must be ON\n"
+        "  2. Gear must be in NEUTRAL\n"
+        "  3. Brake pedal must be PRESSED and held\n"
+        "  4. Do NOT press the accelerator pedal during calibration\n\n"
+        "The calibration process will:\n"
+        "  - Detect pedal zero position\n"
+        "  - Detect pedal maximum position\n"
+        "  - Fine-tune the scale factor\n"
+        "  - Validate the calibration values\n"
+        "  - Save calibration to params\n\n"
+        "Press START when ready to begin calibration."
+      ),
+      script_module="scripts.nap.calibrate_pedal"
     )
-    dlg = ConfirmDialog(content, "Start Calibration", rich=True)
-    gui_app.set_modal_overlay(dlg, callback=confirm_callback)
 
   def _on_calibrate_radar(self):
-    def confirm_callback(result: int):
-      if result == DialogResult.CONFIRM:
-        self._launch_script("Calibrate Radar",
-                            ["python3", "-m", "scripts.nap.calibrate_radar"])
-
-    content = (
-      "<h1>Calibrate Radar</h1><br>"
-      "<p>This will show filtered radar points to help align the Bosch radar.</p>"
-      "<p>Place a calibration target 3-10m ahead, centered on the vehicle axis. "
-      "Adjust radar aim until the target appears at ~0.0m lateral offset.</p>"
-      "<p>Openpilot processes will be stopped during calibration.</p>"
+    self._show_script_runner(
+      title="Radar Calibration",
+      instructions=(
+        "NAP Radar Calibrator\n\n"
+        "This script displays filtered radar points to help align the Bosch radar.\n\n"
+        "PRECONDITIONS:\n"
+        "  1. Vehicle must be safely parked\n"
+        "  2. Radar must be properly mounted and connected\n"
+        "  3. Place a calibration target 3-10m ahead, centered on the vehicle axis\n\n"
+        "The calibration display will show:\n"
+        "  - Radar points within 2.5-14.5m ahead\n"
+        "  - Lateral offset from center\n"
+        "  - Adjust radar aim until target shows ~0.0m lateral\n\n"
+        "Press START when ready to begin."
+      ),
+      script_module="scripts.nap.calibrate_radar"
     )
-    dlg = ConfirmDialog(content, "Start Calibration", rich=True)
-    gui_app.set_modal_overlay(dlg, callback=confirm_callback)
 
   def _on_test_radar(self):
-    self._launch_script("Test Radar",
-                        ["python3", "-m", "scripts.nap.test_radar"])
+    self._show_script_runner(
+      title="Radar Test",
+      instructions=(
+        "NAP Radar Test\n\n"
+        "This script displays live radar data for testing and verification.\n\n"
+        "The test will show:\n"
+        "  - All detected radar points\n"
+        "  - Distance and relative velocity\n"
+        "  - Track status and confidence\n\n"
+        "This is useful for:\n"
+        "  - Verifying radar installation\n"
+        "  - Checking radar alignment\n"
+        "  - Debugging radar issues\n\n"
+        "Press START to begin the radar test."
+      ),
+      script_module="scripts.nap.test_radar"
+    )
 
   def _on_flash_epas(self):
-    def confirm_callback(result: int):
-      if result == DialogResult.CONFIRM:
-        self._launch_script("Flash EPAS",
-                            ["python3", "-m", "scripts.nap.flash_epas"])
-
-    content = (
-      "<h1>Flash EPAS Firmware</h1><br>"
-      "<p><b>WARNING:</b> This will permanently modify the EPAS "
-      "(Electric Power Assisted Steering) firmware to enable openpilot "
-      "steering control.</p>"
-      "<p>A backup of the original firmware will be saved. "
-      "Do NOT interrupt the flashing process.</p>"
-      "<p>Openpilot processes will be stopped during flashing.</p>"
+    self._show_script_runner(
+      title="Flash EPAS Firmware",
+      instructions=(
+        "EPAS Firmware Flash\n\n"
+        "WARNING: This will modify your steering system firmware!\n\n"
+        "This operation:\n"
+        "  - Requires the vehicle to be safely parked\n"
+        "  - May take several minutes to complete\n"
+        "  - Should NOT be interrupted once started\n\n"
+        "RISKS:\n"
+        "  - Incorrect firmware can disable power steering\n"
+        "  - Interrupted flash can brick the EPAS module\n"
+        "  - This modification may void warranties\n\n"
+        "Only proceed if you:\n"
+        "  - Fully understand the implications\n"
+        "  - Have backup EPAS firmware available\n"
+        "  - Are comfortable with the risks involved\n\n"
+        "Press START only if you accept these risks."
+      ),
+      script_module="scripts.nap.flash_epas"
     )
-    dlg = ConfirmDialog(content, "Flash Firmware", rich=True)
-    gui_app.set_modal_overlay(dlg, callback=confirm_callback)
 
   def _on_emergency_disable(self):
     def confirm_callback(result: int):
