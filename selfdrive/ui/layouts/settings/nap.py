@@ -177,6 +177,7 @@ class NAPLayout(Widget):
       "Radar Enabled",
       "Enable the stock Bosch radar for lead car detection. Requires reboot.",
       enabled=ui_state.is_offroad,
+      needs_reboot=True,
     )
 
     self._add_toggle(
@@ -184,6 +185,7 @@ class NAPLayout(Widget):
       "Radar Behind Nosecone",
       "Apply signal attenuation adjustment for radar mounted behind the nosecone. Requires reboot.",
       enabled=ui_state.is_offroad,
+      needs_reboot=True,
     )
 
     self._calibrate_radar_btn = button_item(
@@ -276,16 +278,23 @@ class NAPLayout(Widget):
       "<b>1FrostlySlime</b></p>"
     ))
 
-  def _add_toggle(self, param_key: str, title: str, description: str, enabled: bool | None = None):
+  def _add_toggle(self, param_key: str, title: str, description: str,
+                   enabled: bool | None = None, needs_reboot: bool = False):
     """Helper to add a toggle item and register it for state refresh."""
     kwargs = {}
     if enabled is not None:
       kwargs['enabled'] = enabled
+
+    def on_toggle(state, k=param_key):
+      self._params.put_bool(k, state)
+      if needs_reboot:
+        self._show_reboot_modal()
+
     item = toggle_item(
       title,
       description=description,
       initial_state=self._params.get_bool(param_key),
-      callback=lambda state, k=param_key: self._params.put_bool(k, state),
+      callback=on_toggle,
       **kwargs,
     )
     self._toggle_map[param_key] = item
@@ -301,6 +310,7 @@ class NAPLayout(Widget):
 
   def _on_pedal_can_bus(self, index: int):
     self._params.put(NAPParamKeys.PEDAL_CAN_BUS, PEDAL_CAN_BUS_VALUES[index])
+    self._show_reboot_modal()
 
   def _on_brake_factor(self, index: int):
     self._params.put(NAPParamKeys.BRAKE_FACTOR, BRAKE_FACTOR_PRESETS[index])
@@ -402,6 +412,19 @@ class NAPLayout(Widget):
       ),
       script_module="scripts.nap.flash_epas"
     )
+
+  def _show_reboot_modal(self):
+    """Show a modal prompting the user to reboot for the change to take effect."""
+    def confirm_callback(result: int):
+      if result == DialogResult.CONFIRM:
+        self._params.put_bool("DoReboot", True)
+
+    content = (
+      "<h1>Reboot Required</h1><br>"
+      "<p>This change requires a reboot to take effect.</p>"
+    )
+    dlg = ConfirmDialog(content, "Reboot", cancel_text="Ignore", rich=True)
+    gui_app.set_modal_overlay(dlg, callback=confirm_callback)
 
   def _on_emergency_disable(self):
     def confirm_callback(result: int):
