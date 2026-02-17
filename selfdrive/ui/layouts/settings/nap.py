@@ -162,6 +162,7 @@ class NAPLayout(Widget):
       description="Run the pedal calibration routine. Vehicle must be stationary with ignition on.",
       callback=self._on_calibrate_pedal,
     )
+    self._calibrate_pedal_btn.action_item.set_enabled(ui_state.is_offroad)
     self._all_items.append(self._calibrate_pedal_btn)
 
     # ── Section 3: Radar ──
@@ -189,6 +190,7 @@ class NAPLayout(Widget):
       description="Run the radar calibration routine.",
       callback=self._on_calibrate_radar,
     )
+    self._calibrate_radar_btn.action_item.set_enabled(ui_state.is_offroad)
     self._all_items.append(self._calibrate_radar_btn)
 
     self._test_radar_btn = button_item(
@@ -197,6 +199,7 @@ class NAPLayout(Widget):
       description="Test radar connectivity and verify signals.",
       callback=self._on_test_radar,
     )
+    self._test_radar_btn.action_item.set_enabled(ui_state.is_offroad)
     self._all_items.append(self._test_radar_btn)
 
     # ── Section 4: iBooster / Braking (not yet implemented — greyed out) ──
@@ -242,6 +245,7 @@ class NAPLayout(Widget):
       description="Flash the EPAS (Electric Power Assisted Steering) firmware.",
       callback=self._on_flash_epas,
     )
+    self._flash_epas_btn.action_item.set_enabled(ui_state.is_offroad)
     self._all_items.append(self._flash_epas_btn)
 
     self._emergency_disable_btn = button_item(
