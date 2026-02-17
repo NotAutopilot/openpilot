@@ -1019,6 +1019,14 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       Priority.LOW, VisualAlert.none, AudibleAlert.disengage, 0.8),
   },
 
+  EventName.pedalMaxRegen: {
+    ET.WARNING: Alert(
+      "Max Regen Being Used",
+      "",
+      AlertStatus.userPrompt, AlertSize.small,
+      Priority.HIGH, VisualAlert.steerRequired, AudibleAlert.prompt, 2.),
+  },
+
   EventName.userBookmark: {
     ET.PERMANENT: NormalPermanentAlert("Bookmark Saved", duration=1.5),
   },
