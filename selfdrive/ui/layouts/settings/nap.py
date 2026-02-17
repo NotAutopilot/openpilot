@@ -106,14 +106,9 @@ class NAPLayout(Widget):
     self._add_toggle(
       NAPParamKeys.PEDAL_ENABLED,
       "Pedal Interceptor",
-      "Enable Comma Pedal hardware for direct throttle control.",
-    )
-
-    self._add_toggle(
-      NAPParamKeys.DISABLE_CRUISE_CONTROL,
-      "Disable Stock Cruise Control",
-      "Send CANCEL to prevent stock cruise control from engaging over pedal cruise. (Not yet implemented)",
-      enabled=False,
+      "Enable Comma Pedal hardware for direct throttle control. Requires reboot.",
+      enabled=ui_state.is_offroad,
+      needs_reboot=True,
     )
 
     follow_dist = self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True)
