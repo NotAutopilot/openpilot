@@ -262,6 +262,7 @@ class NAPLayout(Widget):
       description="Reset all NAP settings to factory defaults. This cannot be undone.",
       callback=self._on_reset_defaults,
     )
+    self._reset_defaults_btn.action_item.set_enabled(ui_state.is_offroad)
     self._all_items.append(self._reset_defaults_btn)
 
     # ── Acknowledgments ──
