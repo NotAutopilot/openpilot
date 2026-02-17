@@ -14,6 +14,7 @@ from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets.html_render import HtmlRenderer, ElementType
 from opendbc.car.tesla.nap_params import NAPParamKeys, DEFAULTS
+from openpilot.selfdrive.ui.ui_state import ui_state
 
 # Preset values for float/int params exposed as multiple-button selectors
 BRAKE_FACTOR_PRESETS = [0.5, 1.0, 1.5, 2.0]
@@ -111,18 +112,20 @@ class NAPLayout(Widget):
     self._add_toggle(
       NAPParamKeys.DISABLE_CRUISE_CONTROL,
       "Disable Stock Cruise Control",
-      "Send CANCEL to prevent stock cruise control from engaging over pedal cruise.",
+      "Send CANCEL to prevent stock cruise control from engaging over pedal cruise. (Not yet implemented)",
+      enabled=False,
     )
 
     follow_dist = self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True)
     self._follow_buttons = multiple_button_item(
       "Follow Distance",
-      "Set the following distance behind the lead car.",
+      "Set the following distance behind the lead car. (Not yet implemented)",
       buttons=["Close", "Med", "Far", "Max"],
       button_width=150,
       selected_index=max(0, min(3, follow_dist - 1)),
       callback=self._on_follow_distance,
     )
+    self._follow_buttons.action_item.set_enabled(False)
     self._all_items.append(self._follow_buttons)
 
     # ── Section 2: Pedal Hardware ──
@@ -142,12 +145,13 @@ class NAPLayout(Widget):
     pedal_bus = self._params.get(NAPParamKeys.PEDAL_CAN_BUS, return_default=True)
     self._pedal_bus_buttons = multiple_button_item(
       "Pedal CAN Bus",
-      "Select which CAN bus the Comma Pedal is connected to.",
+      "Select which CAN bus the Comma Pedal is connected to. Requires reboot.",
       buttons=["Bus 0", "Bus 2"],
       button_width=150,
       selected_index=0 if pedal_bus == 0 else 1,
       callback=self._on_pedal_can_bus,
     )
+    self._pedal_bus_buttons.action_item.set_enabled(ui_state.is_offroad)
     self._all_items.append(self._pedal_bus_buttons)
 
     self._pedal_calib_status = text_item(
@@ -171,13 +175,15 @@ class NAPLayout(Widget):
     self._add_toggle(
       NAPParamKeys.RADAR_ENABLED,
       "Radar Enabled",
-      "Enable the stock Bosch radar for lead car detection.",
+      "Enable the stock Bosch radar for lead car detection. Requires reboot.",
+      enabled=ui_state.is_offroad,
     )
 
     self._add_toggle(
       NAPParamKeys.RADAR_BEHIND_NOSECONE,
       "Radar Behind Nosecone",
-      "Apply signal attenuation adjustment for radar mounted behind the nosecone.",
+      "Apply signal attenuation adjustment for radar mounted behind the nosecone. Requires reboot.",
+      enabled=ui_state.is_offroad,
     )
 
     self._calibrate_radar_btn = button_item(
@@ -221,10 +227,13 @@ class NAPLayout(Widget):
     # ── Section 5: Advanced ──
     self._all_items.append(section_header_item("Advanced"))
 
+    # Force Pre-AP is always on for now — greyed out in the ON position
+    self._params.put_bool(NAPParamKeys.FORCE_PRE_AP, True)
     self._add_toggle(
       NAPParamKeys.FORCE_PRE_AP,
       "Force Pre-AP Mode",
       "Force the system to treat this vehicle as a Pre-Autopilot Tesla.",
+      enabled=False,
     )
 
     # ── Section 6: Actions ──
