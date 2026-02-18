@@ -85,12 +85,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LongitudinalPersonality", {PERSISTENT, INT, std::to_string(static_cast<int>(cereal::LongitudinalPersonality::STANDARD))}},
     // NAP (NotAutopilot) Pre-AP Tesla params
     {"NAPBrakeFactor", {PERSISTENT, FLOAT, "1.0"}},
-    {"NAPDisableCruiseControl", {PERSISTENT, BOOL}},
     {"NAPFollowDistance", {PERSISTENT, INT, "2"}},
     {"NAPForcePreAP", {PERSISTENT, BOOL}},
-    {"NAPHAOEnabled", {PERSISTENT, BOOL}},
-    {"NAPHSOEnabled", {PERSISTENT, BOOL, "1"}},
-    {"NAPHSONumbPeriod", {PERSISTENT, FLOAT, "1.5"}},
     {"NAPiBoosterEnabled", {PERSISTENT, BOOL}},
     {"NAPPedalCalibDone", {PERSISTENT, BOOL}},
     {"NAPPedalCalibFactor", {PERSISTENT, FLOAT, "1.0"}},
