@@ -185,13 +185,14 @@ class SelfdriveD:
       self.events.add_from_msg(car_events)
 
       # Tesla Pre-AP pedal-long status alerts (banner + engage/disengage sounds).
-      # Track requested pedal-long mode (software cruise target > 0), not transient
-      # longActive overrides, so gas/brake presses don't spam engage/disengage chimes.
+      # Track pedal-long mode via the explicit pedalLongActive flag from carstate,
+      # not cruiseState.speed (which reads DI_digitalSpeed when long is off and
+      # would wrongly trigger on lateral-only engagement while driving).
       if (self.CP.brand == "tesla"
           and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
           and self.CP.openpilotLongitudinalControl
           and not self.CP.pcmCruise):
-        pedal_long_active = bool(CS.cruiseState.enabled and CS.cruiseState.speed > 1e-3)
+        pedal_long_active = bool(CS.cruiseState.enabled and getattr(CS, 'pedalLongActive', False))
         if pedal_long_active and not self.prev_pedal_long_active:
           self.events.add(EventName.pedalCruiseEnabled)
         elif self.prev_pedal_long_active and not pedal_long_active:
