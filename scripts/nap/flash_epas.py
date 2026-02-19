@@ -136,7 +136,7 @@ def get_security_access_key(seed):
 # ============================================
 def wait_for_ecu(uds_client):
   """Wait for ECU to respond after reboot."""
-  from panda.python.uds import MessageTimeoutError
+  from opendbc.car.uds import MessageTimeoutError
 
   p("  Waiting for ECU .", end="")
   prev_timeout = uds_client.timeout
@@ -155,7 +155,7 @@ def wait_for_ecu(uds_client):
 
 def extract_firmware(uds_client, start_addr, end_addr):
   """Extract firmware from EPAS ECU via UDS."""
-  from panda.python.uds import SESSION_TYPE, ACCESS_TYPE
+  from opendbc.car.uds import SESSION_TYPE, ACCESS_TYPE
 
   p("Starting extended diagnostic session...")
   uds_client.diagnostic_session_control(SESSION_TYPE.EXTENDED_DIAGNOSTIC)
@@ -256,7 +256,7 @@ def patch_firmware(fw, offset, restore=False):
 
 def flash_bootloader(uds_client, bootloader_path, start_addr):
   """Flash bootloader to EPAS ECU."""
-  from panda.python.uds import SESSION_TYPE, ACCESS_TYPE, ROUTINE_CONTROL_TYPE
+  from opendbc.car.uds import SESSION_TYPE, ACCESS_TYPE, ROUTINE_CONTROL_TYPE
 
   p("Reading bootloader...")
   with open(bootloader_path, "rb") as f:
@@ -317,7 +317,7 @@ def flash_bootloader(uds_client, bootloader_path, start_addr):
 
 def flash_firmware(uds_client, fw_slice, start_addr, end_addr):
   """Flash modified firmware to EPAS ECU."""
-  from panda.python.uds import (SESSION_TYPE, ACCESS_TYPE, ROUTINE_CONTROL_TYPE,
+  from opendbc.car.uds import (SESSION_TYPE, ACCESS_TYPE, ROUTINE_CONTROL_TYPE,
                                 ROUTINE_IDENTIFIER_TYPE, RESET_TYPE, MessageTimeoutError)
 
   slice_len = end_addr - start_addr + 1
@@ -421,7 +421,7 @@ def parse_args(cli_args=None):
 
 def main(cli_args=None):
   from panda import Panda
-  from panda.python.uds import UdsClient
+  from opendbc.car.uds import UdsClient
   args = parse_args(cli_args)
 
   p("=" * 60)
