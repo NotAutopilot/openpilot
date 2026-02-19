@@ -473,7 +473,7 @@ def main(cli_args=None):
     panda.set_safety_mode(SafetyModel.elm327)
     p("  Safety mode: ELM327 (UDS)")
 
-    uds_client = UdsClient(panda, args.can_addr, bus=args.can_bus, timeout=1, debug=args.debug)
+    uds_client = UdsClient(panda, args.can_addr, bus=args.can_bus, timeout=1)
     p(f"  UDS client: addr=0x{args.can_addr:03X}, bus={args.can_bus}")
 
     # Step 1: Extract firmware
