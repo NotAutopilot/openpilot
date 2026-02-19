@@ -421,7 +421,9 @@ def parse_args(cli_args=None):
 
 def main(cli_args=None):
   from panda import Panda
+  from cereal import car
   from opendbc.car.uds import UdsClient
+  SafetyModel = car.CarParams.SafetyModel
   args = parse_args(cli_args)
 
   p("=" * 60)
@@ -468,7 +470,7 @@ def main(cli_args=None):
     panda = connect_panda()
     p("  Connected")
 
-    panda.set_safety_mode(Panda.SAFETY_ELM327)
+    panda.set_safety_mode(SafetyModel.elm327)
     p("  Safety mode: ELM327 (UDS)")
 
     uds_client = UdsClient(panda, args.can_addr, bus=args.can_bus, timeout=1, debug=args.debug)
@@ -587,7 +589,7 @@ def main(cli_args=None):
   finally:
     if panda is not None:
       try:
-        panda.set_safety_mode(Panda.SAFETY_SILENT)
+        panda.set_safety_mode(SafetyModel.silent)
         panda.close()
         p("\nPanda connection closed.")
       except Exception:
