@@ -51,7 +51,10 @@ class LongControl:
     self.pid = PIDController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
                              (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              rate=1 / DT_CTRL)
-    self.k_f = CP.longitudinalTuning.kf if CP.longitudinalTuning.kf > 0 else 1.0
+    try:
+      self.k_f = CP.longitudinalTuning.kf if CP.longitudinalTuning.kf > 0 else 1.0
+    except AttributeError:
+      self.k_f = 1.0
     self.last_output_accel = 0.0
 
   def reset(self):
