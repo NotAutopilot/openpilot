@@ -346,28 +346,6 @@ class NAPLayout(Widget):
       start_new_session=True  # Detach from parent process
     )
 
-  def _show_epas_risk_ack(self, on_confirm):
-    """Require explicit user acknowledgment before EPAS flash/restore flows."""
-    def confirm_callback(result: int):
-      if result == DialogResult.CONFIRM:
-        # One-time token consumed by scripts/nap/flash_epas.py
-        self._params.put_bool("NAPEpasRiskAccepted", True)
-        try:
-          on_confirm()
-        except Exception:
-          # Clear token if script runner fails to launch
-          self._params.put_bool("NAPEpasRiskAccepted", False)
-          raise
-
-    content = (
-      "<h1>EPAS Risk Acknowledgment</h1><br>"
-      "<p>Flashing or restoring EPAS firmware modifies a safety-critical steering ECU.</p>"
-      "<p>While unlikely, interruption/power loss or wrong firmware can brick EPAS.</p>"
-      "<p>By pressing <b>I Agree</b>, you confirm you understand and accept this risk.</p>"
-    )
-    dlg = ConfirmDialog(content, "I Agree", cancel_text="Cancel", rich=True)
-    gui_app.set_modal_overlay(dlg, callback=confirm_callback)
-
   # ── Action button callbacks ──
 
   def _on_calibrate_pedal(self):
@@ -431,7 +409,8 @@ class NAPLayout(Widget):
     )
 
   def _on_flash_epas(self):
-    self._show_epas_risk_ack(lambda: self._show_script_runner(
+    self._params.put_bool("NAPEpasRiskAccepted", True)
+    self._show_script_runner(
       title="Flash EPAS Firmware",
       instructions=(
         "EPAS Firmware Flash\n\n"
@@ -451,7 +430,7 @@ class NAPLayout(Widget):
         "Press START only if you accept these risks."
       ),
       script_module="scripts.nap.flash_epas"
-    ))
+    )
 
   def _on_backup_epas(self):
     self._show_script_runner(
@@ -471,7 +450,8 @@ class NAPLayout(Widget):
     )
 
   def _on_restore_epas(self):
-    self._show_epas_risk_ack(lambda: self._show_script_runner(
+    self._params.put_bool("NAPEpasRiskAccepted", True)
+    self._show_script_runner(
       title="Restore EPAS Firmware",
       instructions=(
         "EPAS Firmware Restore\n\n"
@@ -489,7 +469,7 @@ class NAPLayout(Widget):
         "Press START only if you accept these risks."
       ),
       script_module="scripts.nap.restore_epas"
-    ))
+    )
 
   def _show_reboot_modal(self):
     """Show a modal prompting the user to reboot for the change to take effect."""
