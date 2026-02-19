@@ -51,6 +51,7 @@ class LongControl:
     self.pid = PIDController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
                              (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              rate=1 / DT_CTRL)
+    self.k_f = CP.longitudinalTuning.kf if CP.longitudinalTuning.kf > 0 else 1.0
     self.last_output_accel = 0.0
 
   def reset(self):
@@ -82,7 +83,7 @@ class LongControl:
     else:  # LongCtrlState.pid
       error = a_target - CS.aEgo
       output_accel = self.pid.update(error, speed=CS.vEgo,
-                                     feedforward=a_target)
+                                     feedforward=a_target * self.k_f)
 
     self.last_output_accel = np.clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel
