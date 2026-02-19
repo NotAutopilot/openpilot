@@ -239,6 +239,15 @@ class NAPLayout(Widget):
     # ── Section 6: Actions ──
     self._all_items.append(section_header_item("Actions"))
 
+    self._backup_epas_btn = button_item(
+      "Backup EPAS",
+      "Extract",
+      description="Extract and save stock EPAS firmware image without flashing.",
+      callback=self._on_backup_epas,
+    )
+    self._backup_epas_btn.action_item.set_enabled(ui_state.is_offroad)
+    self._all_items.append(self._backup_epas_btn)
+
     self._flash_epas_btn = button_item(
       "Flash EPAS",
       "Flash",
@@ -247,6 +256,15 @@ class NAPLayout(Widget):
     )
     self._flash_epas_btn.action_item.set_enabled(ui_state.is_offroad)
     self._all_items.append(self._flash_epas_btn)
+
+    self._restore_epas_btn = button_item(
+      "Restore EPAS",
+      "Restore",
+      description="Restore stock EPAS firmware image.",
+      callback=self._on_restore_epas,
+    )
+    self._restore_epas_btn.action_item.set_enabled(ui_state.is_offroad)
+    self._all_items.append(self._restore_epas_btn)
 
     self._emergency_disable_btn = button_item(
       "Emergency Disable",
@@ -328,6 +346,28 @@ class NAPLayout(Widget):
       start_new_session=True  # Detach from parent process
     )
 
+  def _show_epas_risk_ack(self, on_confirm):
+    """Require explicit user acknowledgment before EPAS flash/restore flows."""
+    def confirm_callback(result: int):
+      if result == DialogResult.CONFIRM:
+        # One-time token consumed by scripts/nap/flash_epas.py
+        self._params.put_bool("NAPEpasRiskAccepted", True)
+        try:
+          on_confirm()
+        except Exception:
+          # Clear token if script runner fails to launch
+          self._params.put_bool("NAPEpasRiskAccepted", False)
+          raise
+
+    content = (
+      "<h1>EPAS Risk Acknowledgment</h1><br>"
+      "<p>Flashing or restoring EPAS firmware modifies a safety-critical steering ECU.</p>"
+      "<p>While unlikely, interruption/power loss or wrong firmware can brick EPAS.</p>"
+      "<p>By pressing <b>I Agree</b>, you confirm you understand and accept this risk.</p>"
+    )
+    dlg = ConfirmDialog(content, "I Agree", cancel_text="Cancel", rich=True)
+    gui_app.set_modal_overlay(dlg, callback=confirm_callback)
+
   # ── Action button callbacks ──
 
   def _on_calibrate_pedal(self):
@@ -391,7 +431,7 @@ class NAPLayout(Widget):
     )
 
   def _on_flash_epas(self):
-    self._show_script_runner(
+    self._show_epas_risk_ack(lambda: self._show_script_runner(
       title="Flash EPAS Firmware",
       instructions=(
         "EPAS Firmware Flash\n\n"
@@ -411,7 +451,45 @@ class NAPLayout(Widget):
         "Press START only if you accept these risks."
       ),
       script_module="scripts.nap.flash_epas"
+    ))
+
+  def _on_backup_epas(self):
+    self._show_script_runner(
+      title="Backup EPAS Firmware",
+      instructions=(
+        "EPAS Firmware Backup\n\n"
+        "This action only extracts and saves the stock EPAS firmware image.\n"
+        "No flashing or firmware modifications are performed.\n\n"
+        "Use this before any flash operation so you have a local backup.\n\n"
+        "PRECONDITIONS:\n"
+        "  - Vehicle safely parked\n"
+        "  - Stable 12V power\n"
+        "  - Do not power-cycle during extraction\n\n"
+        "Press START to extract the EPAS firmware backup."
+      ),
+      script_module="scripts.nap.extract_epas"
     )
+
+  def _on_restore_epas(self):
+    self._show_epas_risk_ack(lambda: self._show_script_runner(
+      title="Restore EPAS Firmware",
+      instructions=(
+        "EPAS Firmware Restore\n\n"
+        "WARNING: This will reflash your steering system firmware!\n\n"
+        "This operation:\n"
+        "  - Uses the extracted stock EPAS firmware image\n"
+        "  - May take several minutes to complete\n"
+        "  - Should NOT be interrupted once started\n\n"
+        "RISKS:\n"
+        "  - Interrupted flash can brick the EPAS module\n"
+        "  - Incorrect image can disable power steering\n\n"
+        "Only proceed if you:\n"
+        "  - Need to return to stock EPAS firmware\n"
+        "  - Understand and accept the risks\n\n"
+        "Press START only if you accept these risks."
+      ),
+      script_module="scripts.nap.restore_epas"
+    ))
 
   def _show_reboot_modal(self):
     """Show a modal prompting the user to reboot for the change to take effect."""

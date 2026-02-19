@@ -117,7 +117,8 @@ class ScriptRunnerApp:
     self._state = ScriptState.RUNNING
     self._output_lines = ["Starting script...", ""]
 
-    # Set NAPScriptRunning so manager doesn't restart processes
+    # Set NAPScriptRunning before spawn so manager stops pandad before
+    # the child process tries to open Panda USB.
     self._params.put_bool("NAPScriptRunning", True)
 
     try:
@@ -134,6 +135,7 @@ class ScriptRunnerApp:
       self._reader_thread.start()
 
     except Exception as e:
+      self._params.put_bool("NAPScriptRunning", False)
       self._output_lines.append(f"Error starting script: {e}")
       self._state = ScriptState.ERROR
 
@@ -169,6 +171,8 @@ class ScriptRunnerApp:
 
     # Clear NAPScriptRunning so manager resumes normal operation
     self._params.put_bool("NAPScriptRunning", False)
+    # Clear one-time EPAS risk token on runner exit so consent does not linger.
+    self._params.put_bool("NAPEpasRiskAccepted", False)
 
     gui_app.request_close()
     if not PC:

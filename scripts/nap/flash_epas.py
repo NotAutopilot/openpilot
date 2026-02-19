@@ -16,6 +16,7 @@ CRITICAL: This permanently modifies EPAS firmware. Ensure you have a backup.
 Uses direct Panda access with UDS protocol (stops pandad via ScriptRunner).
 """
 
+import argparse
 import os
 import sys
 import time
@@ -35,15 +36,19 @@ BOOTLOADER_ADDR = 0x3ff7000
 # UDS defaults
 DEFAULT_CAN_ADDR = 0x730
 DEFAULT_CAN_BUS = 0
+DEFAULT_BOOTLOADER_FILE = "epas-bootloader-0x3ff7000-0x3ffacbd.bin"
+BOOTLOADER_MD5SUM = "09cdd03705692725290942f4065c2706"
+BOOTLOADER_SIZE = 15550
+RISK_ACK_PARAM_KEY = "NAPEpasRiskAccepted"
 
 # Panda connection
 PANDA_CONNECT_RETRIES = 5
 PANDA_CONNECT_DELAY = 2.0
 
 
-def p(msg):
+def p(msg="", end="\n"):
   """Print with flush for real-time ScriptRunner display."""
-  print(msg, flush=True)
+  print(msg, end=end, flush=True)
 
 
 def progress_bar(current, total, prefix="", width=40):
@@ -52,6 +57,47 @@ def progress_bar(current, total, prefix="", width=40):
   filled = int(width * pct)
   bar = "#" * filled + "-" * (width - filled)
   p(f"  {prefix}[{bar}] {pct*100:.1f}%")
+
+
+def _consume_ui_risk_ack() -> bool:
+  """
+  Consume one-time EPAS risk acknowledgment set by UI.
+
+  Returns True when a valid acknowledgment token was present.
+  """
+  try:
+    from openpilot.common.params import Params
+    params = Params()
+    accepted = params.get_bool(RISK_ACK_PARAM_KEY)
+    if accepted:
+      params.put_bool(RISK_ACK_PARAM_KEY, False)
+    return accepted
+  except Exception:
+    return False
+
+
+def _ensure_risk_ack(args) -> bool:
+  """
+  Require explicit risk acknowledgment for operations that write EPAS firmware.
+  """
+  if args.extract_only:
+    return True
+
+  if args.accept_risk:
+    return True
+
+  if _consume_ui_risk_ack():
+    return True
+
+  p("")
+  p("RISK ACKNOWLEDGMENT REQUIRED")
+  p("- Flashing/restoring EPAS firmware modifies a safety-critical steering ECU.")
+  p("- While unlikely, interruption/power loss or wrong image can brick EPAS.")
+  p("- By proceeding, you assume this risk.")
+  p("")
+  p("Re-run with --accept-risk to continue from CLI,")
+  p("or start from UI and press the explicit risk agreement prompt.")
+  return False
 
 
 # ============================================
@@ -90,6 +136,8 @@ def get_security_access_key(seed):
 # ============================================
 def wait_for_ecu(uds_client):
   """Wait for ECU to respond after reboot."""
+  from panda.python.uds import MessageTimeoutError
+
   p("  Waiting for ECU .", end="")
   prev_timeout = uds_client.timeout
   uds_client.timeout = 0.1
@@ -99,7 +147,7 @@ def wait_for_ecu(uds_client):
       uds_client.timeout = prev_timeout
       p("")
       return
-    except Exception:
+    except MessageTimeoutError:
       p(".", end="")
   uds_client.timeout = prev_timeout
   raise Exception("ECU did not respond after reboot!")
@@ -217,6 +265,13 @@ def flash_bootloader(uds_client, bootloader_path, start_addr):
   end_addr = start_addr + fw_len - 1
   p(f"  Size: {fw_len} bytes")
 
+  bl_md5 = hashlib.md5(fw).hexdigest()
+  p(f"  MD5:  {bl_md5}")
+  if fw_len != BOOTLOADER_SIZE or bl_md5 != BOOTLOADER_MD5SUM:
+    raise Exception(f"Bootloader integrity check failed! "
+                    f"Expected md5={BOOTLOADER_MD5SUM} size={BOOTLOADER_SIZE}, "
+                    f"got md5={bl_md5} size={fw_len}")
+
   p("Starting programming session...")
   uds_client.diagnostic_session_control(SESSION_TYPE.PROGRAMMING)
   wait_for_ecu(uds_client)
@@ -239,6 +294,8 @@ def flash_bootloader(uds_client, bootloader_path, start_addr):
   p("Transferring bootloader...")
   p(f"  Block size: {block_size}")
   chunk_size = block_size - 2
+  if chunk_size <= 0:
+    raise Exception(f"Invalid block size {block_size} returned by ECU")
   cnt = 0
   total_chunks = (fw_len + chunk_size - 1) // chunk_size
   report_every = max(1, total_chunks // 10)
@@ -283,6 +340,8 @@ def flash_firmware(uds_client, fw_slice, start_addr, end_addr):
   p("Transferring firmware...")
   p(f"  Block size: {block_size}")
   chunk_size = block_size - 2
+  if chunk_size <= 0:
+    raise Exception(f"Invalid block size {block_size} returned by ECU")
   cnt = 0
   total_chunks = (slice_len + chunk_size - 1) // chunk_size
   report_every = max(1, total_chunks // 20)
@@ -339,9 +398,31 @@ def connect_panda():
         raise
 
 
-def main():
+def parse_args(cli_args=None):
+  parser = argparse.ArgumentParser(
+    description="Patch/restore Tesla Pre-AP EPAS firmware via Panda UDS",
+  )
+  parser.add_argument("--extract-only", action="store_true",
+                      help="Extract firmware only; do not flash")
+  parser.add_argument("--restore", action="store_true",
+                      help="Flash stock firmware image (no patch modifications)")
+  parser.add_argument("--debug", action="store_true",
+                      help="Enable UDS debug logging")
+  parser.add_argument("--accept-risk", action="store_true",
+                      help="Acknowledge EPAS flashing risk and allow write operations")
+  parser.add_argument("--bootloader", type=str, default=DEFAULT_BOOTLOADER_FILE,
+                      help="Bootloader filename/path (relative paths are resolved under scripts/nap/firmware)")
+  parser.add_argument("--can-addr", type=lambda x: int(x, 0), default=DEFAULT_CAN_ADDR,
+                      help="UDS transmit CAN address (default: 0x730)")
+  parser.add_argument("--can-bus", type=int, default=DEFAULT_CAN_BUS,
+                      help="CAN bus number (default: 0)")
+  return parser.parse_args(cli_args)
+
+
+def main(cli_args=None):
   from panda import Panda
   from panda.python.uds import UdsClient
+  args = parse_args(cli_args)
 
   p("=" * 60)
   p("EPAS FIRMWARE FLASHER")
@@ -350,34 +431,48 @@ def main():
   p("This tool will:")
   p("  1. Extract the current EPAS firmware")
   p("  2. Verify the firmware checksum")
-  p("  3. Apply steering control patches")
-  p("  4. Flash the patched firmware")
+  if args.extract_only:
+    p("  3. Save backup image and exit")
+  elif args.restore:
+    p("  3. Flash stock firmware image")
+  else:
+    p("  3. Apply steering control patches")
+    p("  4. Flash the patched firmware")
   p("")
   p("WARNING: This permanently modifies the EPAS firmware.")
   p("A backup of the original firmware will be saved.")
   p("=" * 60)
 
+  if not _ensure_risk_ack(args):
+    return 1
+
   # Resolve paths relative to script location
   script_dir = os.path.dirname(os.path.realpath(__file__))
   firmware_dir = os.path.join(script_dir, "firmware")
-  bootloader_path = os.path.join(firmware_dir, "epas-bootloader-0x3ff7000-0x3ffacbd.bin")
+  bootloader_path = args.bootloader
+  if not os.path.isabs(bootloader_path):
+    bootloader_path = os.path.join(firmware_dir, bootloader_path)
   fw_fn = os.path.join(firmware_dir, f"epas-firmware-{hex(FW_START_ADDR)}-{hex(FW_END_ADDR)}.bin")
 
-  if not os.path.exists(bootloader_path):
+  if not args.extract_only and not os.path.exists(bootloader_path):
     p(f"\nERROR: Bootloader not found at: {bootloader_path}")
     return 1
 
   panda = None
   try:
-    p("\nConnecting to Panda...")
+    # Allow time for manager to see NAPScriptRunning and stop pandad
+    p("\nWaiting for pandad to release Panda USB...")
+    time.sleep(2)
+
+    p("Connecting to Panda...")
     panda = connect_panda()
     p("  Connected")
 
     panda.set_safety_mode(Panda.SAFETY_ELM327)
     p("  Safety mode: ELM327 (UDS)")
 
-    uds_client = UdsClient(panda, DEFAULT_CAN_ADDR, bus=DEFAULT_CAN_BUS, timeout=1, debug=False)
-    p(f"  UDS client: addr=0x{DEFAULT_CAN_ADDR:03X}, bus={DEFAULT_CAN_BUS}")
+    uds_client = UdsClient(panda, args.can_addr, bus=args.can_bus, timeout=1, debug=args.debug)
+    p(f"  UDS client: addr=0x{args.can_addr:03X}, bus={args.can_bus}")
 
     # Step 1: Extract firmware
     p("\n" + "=" * 40)
@@ -385,16 +480,7 @@ def main():
     p("=" * 40)
 
     fw_slice = None
-    if os.path.exists(fw_fn):
-      p(f"  Loading cached firmware: {fw_fn}")
-      with open(fw_fn, "rb") as f:
-        fw_slice = f.read()
-      md5 = hashlib.md5(fw_slice).hexdigest()
-      if md5 != FW_MD5SUM or len(fw_slice) != FW_SIZE:
-        p(f"  Cached firmware invalid (md5={md5}), re-extracting...")
-        fw_slice = None
-
-    if fw_slice is None:
+    if args.extract_only or not os.path.exists(fw_fn):
       fw_slice = extract_firmware(uds_client, FW_START_ADDR, FW_END_ADDR)
       # Undo any previous patches to get clean firmware
       fw_slice = patch_firmware(fw_slice, FW_START_ADDR, restore=True)
@@ -403,6 +489,21 @@ def main():
       os.makedirs(os.path.dirname(fw_fn), exist_ok=True)
       with open(fw_fn, "wb") as f:
         f.write(fw_slice)
+    else:
+      p(f"  Loading cached firmware: {fw_fn}")
+      with open(fw_fn, "rb") as f:
+        fw_slice = f.read()
+      md5 = hashlib.md5(fw_slice).hexdigest()
+      if md5 != FW_MD5SUM or len(fw_slice) != FW_SIZE:
+        p(f"  Cached firmware invalid (md5={md5}), re-extracting...")
+        fw_slice = extract_firmware(uds_client, FW_START_ADDR, FW_END_ADDR)
+        # Undo any previous patches to get clean firmware
+        fw_slice = patch_firmware(fw_slice, FW_START_ADDR, restore=True)
+        fw_slice = update_checksums(fw_slice, FW_START_ADDR, restore=True)
+        p(f"  Saving backup: {fw_fn}")
+        os.makedirs(os.path.dirname(fw_fn), exist_ok=True)
+        with open(fw_fn, "wb") as f:
+          f.write(fw_slice)
 
     # Step 2: Verify firmware
     p("\n" + "=" * 40)
@@ -425,21 +526,29 @@ def main():
 
     p("  Firmware verified OK")
 
-    # Step 3: Patch firmware
+    if args.extract_only:
+      p("\n" + "=" * 60)
+      p("EXTRACT COMPLETE")
+      p("=" * 60)
+      p(f"Backup saved to: {fw_fn}")
+      return 0
+
+    # Step 3: Patch or Restore firmware payload
     p("\n" + "=" * 40)
-    p("STEP 3: Patch Firmware")
+    p("STEP 3: Prepare Firmware Payload")
     p("=" * 40)
 
-    p("Applying patches...")
-    fw_slice = patch_firmware(fw_slice, FW_START_ADDR)
-
-    p("Updating checksums...")
-    fw_slice = update_checksums(fw_slice, FW_START_ADDR)
-
-    mod_fn = os.path.join(firmware_dir, f"{FW_MD5SUM}.modified.bin")
-    p(f"  Saving modified firmware: {mod_fn}")
-    with open(mod_fn, "wb") as f:
-      f.write(fw_slice)
+    if args.restore:
+      p("Restore mode enabled: flashing stock firmware image.")
+    else:
+      p("Applying patches...")
+      fw_slice = patch_firmware(fw_slice, FW_START_ADDR)
+      p("Updating checksums...")
+      fw_slice = update_checksums(fw_slice, FW_START_ADDR)
+      mod_fn = os.path.join(firmware_dir, f"{FW_MD5SUM}.modified.bin")
+      p(f"  Saving modified firmware: {mod_fn}")
+      with open(mod_fn, "wb") as f:
+        f.write(fw_slice)
 
     # Step 4: Flash
     p("\n" + "=" * 40)
@@ -458,7 +567,10 @@ def main():
     p("EPAS FLASH COMPLETE!")
     p("=" * 60)
     p("")
-    p("The EPAS firmware has been patched for openpilot steering control.")
+    if args.restore:
+      p("The stock EPAS firmware image has been restored.")
+    else:
+      p("The EPAS firmware has been patched for openpilot steering control.")
     p("Please restart the vehicle to apply changes.")
 
     return 0
@@ -475,7 +587,7 @@ def main():
   finally:
     if panda is not None:
       try:
-        panda.set_safety_mode(0)  # SAFETY_SILENT
+        panda.set_safety_mode(Panda.SAFETY_SILENT)
         panda.close()
         p("\nPanda connection closed.")
       except Exception:
