@@ -79,6 +79,10 @@ def _consume_ui_risk_ack() -> bool:
 def _ensure_risk_ack(args) -> bool:
   """
   Require explicit risk acknowledgment for operations that write EPAS firmware.
+
+  When launched from the ScriptRunner UI, risk is acknowledged by the user
+  pressing Start after reading the on-screen warnings.  CLI users must pass
+  --accept-risk.
   """
   if args.extract_only:
     return True
@@ -88,6 +92,15 @@ def _ensure_risk_ack(args) -> bool:
 
   if _consume_ui_risk_ack():
     return True
+
+  # When launched from ScriptRunner the NAPScriptRunning param is set,
+  # meaning the user already navigated through the UI warnings.
+  try:
+    from openpilot.common.params import Params
+    if Params().get_bool("NAPScriptRunning"):
+      return True
+  except Exception:
+    pass
 
   p("")
   p("RISK ACKNOWLEDGMENT REQUIRED")

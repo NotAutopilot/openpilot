@@ -413,7 +413,6 @@ class NAPLayout(Widget):
     )
 
   def _on_flash_epas(self):
-    self._params.put_bool("NAPEpasRiskAccepted", True)
     self._show_script_runner(
       title="Flash EPAS Firmware",
       instructions=(
@@ -454,7 +453,6 @@ class NAPLayout(Widget):
     )
 
   def _on_restore_epas(self):
-    self._params.put_bool("NAPEpasRiskAccepted", True)
     self._show_script_runner(
       title="Restore EPAS Firmware",
       instructions=(

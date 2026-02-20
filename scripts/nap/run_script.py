@@ -171,8 +171,6 @@ class ScriptRunnerApp:
 
     # Clear NAPScriptRunning so manager resumes normal operation
     self._params.put_bool("NAPScriptRunning", False)
-    # Clear one-time EPAS risk token on runner exit so consent does not linger.
-    self._params.put_bool("NAPEpasRiskAccepted", False)
 
     gui_app.request_close()
     if not PC:
