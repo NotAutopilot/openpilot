@@ -239,6 +239,15 @@ class NAPLayout(Widget):
     # ── Section 6: Actions ──
     self._all_items.append(section_header_item("Actions"))
 
+    self._backup_epas_btn = button_item(
+      "Backup EPAS",
+      "Extract",
+      description="Extract and save stock EPAS firmware image without flashing.",
+      callback=self._on_backup_epas,
+    )
+    self._backup_epas_btn.action_item.set_enabled(ui_state.is_offroad)
+    self._all_items.append(self._backup_epas_btn)
+
     self._flash_epas_btn = button_item(
       "Flash EPAS",
       "Flash",
@@ -247,6 +256,15 @@ class NAPLayout(Widget):
     )
     self._flash_epas_btn.action_item.set_enabled(ui_state.is_offroad)
     self._all_items.append(self._flash_epas_btn)
+
+    self._restore_epas_btn = button_item(
+      "Restore EPAS",
+      "Restore",
+      description="Restore stock EPAS firmware image.",
+      callback=self._on_restore_epas,
+    )
+    self._restore_epas_btn.action_item.set_enabled(ui_state.is_offroad)
+    self._all_items.append(self._restore_epas_btn)
 
     self._emergency_disable_btn = button_item(
       "Emergency Disable",
@@ -320,13 +338,17 @@ class NAPLayout(Widget):
   def _show_script_runner(self, title: str, instructions: str, script_module: str):
     """Launch the script runner as a separate process that takes over the screen."""
     script_path = os.path.join(BASEDIR, "scripts", "nap", "run_script.py")
+    log_path = "/tmp/nap_script_runner.log"
 
     # Launch as detached process — run_script.py will kill the UI and take over
-    subprocess.Popen(
-      ["python", script_path, title, script_module, instructions],
-      cwd=BASEDIR,
-      start_new_session=True  # Detach from parent process
-    )
+    with open(log_path, "w") as log_file:
+      subprocess.Popen(
+        ["python", script_path, title, script_module, instructions],
+        cwd=BASEDIR,
+        start_new_session=True,  # Detach from parent process
+        stdout=log_file,
+        stderr=log_file,
+      )
 
   # ── Action button callbacks ──
 
@@ -411,6 +433,44 @@ class NAPLayout(Widget):
         "Press START only if you accept these risks."
       ),
       script_module="scripts.nap.flash_epas"
+    )
+
+  def _on_backup_epas(self):
+    self._show_script_runner(
+      title="Backup EPAS Firmware",
+      instructions=(
+        "EPAS Firmware Backup\n\n"
+        "This action only extracts and saves the stock EPAS firmware image.\n"
+        "No flashing or firmware modifications are performed.\n\n"
+        "Use this before any flash operation so you have a local backup.\n\n"
+        "PRECONDITIONS:\n"
+        "  - Vehicle safely parked\n"
+        "  - Stable 12V power\n"
+        "  - Do not power-cycle during extraction\n\n"
+        "Press START to extract the EPAS firmware backup."
+      ),
+      script_module="scripts.nap.extract_epas"
+    )
+
+  def _on_restore_epas(self):
+    self._show_script_runner(
+      title="Restore EPAS Firmware",
+      instructions=(
+        "EPAS Firmware Restore\n\n"
+        "WARNING: This will reflash your steering system firmware!\n\n"
+        "This operation:\n"
+        "  - Uses the extracted stock EPAS firmware image\n"
+        "  - May take several minutes to complete\n"
+        "  - Should NOT be interrupted once started\n\n"
+        "RISKS:\n"
+        "  - Interrupted flash can brick the EPAS module\n"
+        "  - Incorrect image can disable power steering\n\n"
+        "Only proceed if you:\n"
+        "  - Need to return to stock EPAS firmware\n"
+        "  - Understand and accept the risks\n\n"
+        "Press START only if you accept these risks."
+      ),
+      script_module="scripts.nap.restore_epas"
     )
 
   def _show_reboot_modal(self):
