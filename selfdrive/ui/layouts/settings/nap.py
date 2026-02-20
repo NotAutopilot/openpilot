@@ -338,13 +338,17 @@ class NAPLayout(Widget):
   def _show_script_runner(self, title: str, instructions: str, script_module: str):
     """Launch the script runner as a separate process that takes over the screen."""
     script_path = os.path.join(BASEDIR, "scripts", "nap", "run_script.py")
+    log_path = "/tmp/nap_script_runner.log"
 
     # Launch as detached process — run_script.py will kill the UI and take over
-    subprocess.Popen(
-      ["python", script_path, title, script_module, instructions],
-      cwd=BASEDIR,
-      start_new_session=True  # Detach from parent process
-    )
+    with open(log_path, "w") as log_file:
+      subprocess.Popen(
+        ["python", script_path, title, script_module, instructions],
+        cwd=BASEDIR,
+        start_new_session=True,  # Detach from parent process
+        stdout=log_file,
+        stderr=log_file,
+      )
 
   # ── Action button callbacks ──
 
