@@ -486,6 +486,12 @@ def main(cli_args=None):
     panda.set_safety_mode(SafetyModel.elm327)
     p("  Safety mode: ELM327 (UDS)")
 
+    # Flush stale CAN messages left by pandad / other processes
+    p("  Flushing CAN buffers...")
+    panda.can_clear(0xFFFF)
+    time.sleep(0.1)
+    panda.can_recv()
+
     uds_client = UdsClient(panda, args.can_addr, bus=args.can_bus, timeout=1)
     p(f"  UDS client: addr=0x{args.can_addr:03X}, bus={args.can_bus}")
 
