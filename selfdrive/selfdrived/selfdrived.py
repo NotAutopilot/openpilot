@@ -401,8 +401,13 @@ class SelfdriveD(CruiseHelper):
       self.events.add(EventName.sensorDataInvalid)
 
     if not REPLAY:
-      # Check for mismatch between openpilot and car's PCM
-      cruise_mismatch = CS.cruiseState.enabled and (not self.enabled or not self.CP.pcmCruise)
+      # Check for mismatch between openpilot and car's PCM.
+      # Pre-AP Tesla manages cruiseState.enabled via software FSM (not hardware PCM),
+      # so treat it the same as pcmCruise for this check.
+      preap_sw_cruise = (self.CP.brand == "tesla" and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+                         and self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise)
+      effective_pcm_cruise = self.CP.pcmCruise or preap_sw_cruise
+      cruise_mismatch = CS.cruiseState.enabled and (not self.enabled or not effective_pcm_cruise)
       self.cruise_mismatch_counter = self.cruise_mismatch_counter + 1 if cruise_mismatch else 0
       if self.cruise_mismatch_counter > int(6. / DT_CTRL):
         self.events.add(EventName.cruiseMismatch)

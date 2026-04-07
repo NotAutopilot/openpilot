@@ -276,4 +276,21 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TorqueParamsOverrideEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"TorqueParamsOverrideFriction", {PERSISTENT | BACKUP, FLOAT, "0.1"}},
     {"TorqueParamsOverrideLatAccelFactor", {PERSISTENT | BACKUP, FLOAT, "2.5"}},
+
+    // --- NAP (NotAutopilot) Pre-AP Tesla params --- //
+    {"NAPBrakeFactor", {PERSISTENT, FLOAT, "1.0"}},
+    {"NAPFollowDistance", {PERSISTENT, INT, "4"}},
+    {"NAPForcePreAP", {PERSISTENT, BOOL, "1"}},
+    {"NAPiBoosterEnabled", {PERSISTENT, BOOL}},
+    {"NAPPedalCalibDone", {PERSISTENT, BOOL}},
+    {"NAPPedalCalibFactor", {PERSISTENT, FLOAT, "1.0"}},
+    {"NAPPedalCalibMax", {PERSISTENT, FLOAT, "99.6"}},
+    {"NAPPedalCalibMin", {PERSISTENT, FLOAT, "-3.0"}},
+    {"NAPPedalCalibZero", {PERSISTENT, FLOAT, "0.0"}},
+    {"NAPPedalCanBus", {PERSISTENT, INT, "2"}},
+    {"NAPPedalEnabled", {PERSISTENT, BOOL}},
+    {"NAPPedalProfile", {PERSISTENT, INT, "4"}},
+    {"NAPRadarBehindNosecone", {PERSISTENT, BOOL}},
+    {"NAPRadarEnabled", {PERSISTENT, BOOL}},
+    {"NAPScriptRunning", {CLEAR_ON_MANAGER_START, BOOL}},
 };
