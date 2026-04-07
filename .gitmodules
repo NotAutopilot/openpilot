@@ -1,9 +1,11 @@
 [submodule "panda"]
   path = panda
-  url = https://github.com/sunnyhaibin/panda.git
+  url = https://github.com/NotAutopilot/panda.git
+  branch = naponsp-dev
 [submodule "opendbc"]
   path = opendbc_repo
-  url = https://github.com/sunnypilot/opendbc.git
+  url = https://github.com/NotAutopilot/opendbc.git
+  branch = naponsp-dev
 [submodule "msgq"]
   path = msgq_repo
   url = https://github.com/commaai/msgq.git
