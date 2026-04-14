@@ -111,6 +111,12 @@ class NAPLayout(Widget):
       needs_reboot=True,
     )
 
+    self._add_toggle(
+      NAPParamKeys.PEDAL_PASSTHROUGH,
+      "Pedal Passthrough",
+      "When gas is pressed during long control, pass driver's pedal input through instead of disabling. The system takes over smoothly as you lift off.",
+    )
+
     follow_dist = self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True)
     self._follow_buttons = multiple_button_item(
       "Follow Distance",

@@ -142,6 +142,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"NAPPedalCalibZero", {PERSISTENT, FLOAT, "0.0"}},
     {"NAPPedalCanBus", {PERSISTENT, INT, "2"}},
     {"NAPPedalEnabled", {PERSISTENT, BOOL}},
+    {"NAPPedalPassthrough", {PERSISTENT, BOOL}},
     {"NAPPedalProfile", {PERSISTENT, INT, "4"}},
     {"NAPRadarBehindNosecone", {PERSISTENT, BOOL}},
     {"NAPRadarEnabled", {PERSISTENT, BOOL}},
