@@ -21,6 +21,14 @@ def get_expected_signature() -> bytes:
     cloudlog.exception("Error computing expected signature")
     return b""
 
+def check_panda_support(panda) -> bool:
+  """Return True if this panda hardware type is in the supported list."""
+  hw_type = panda.get_type()
+  if hw_type in Panda.SUPPORTED_DEVICES:
+    return True
+  return False
+
+
 def flash_panda(panda_serial: str) -> Panda:
   try:
     panda = Panda(panda_serial)
@@ -28,6 +36,11 @@ def flash_panda(panda_serial: str) -> Panda:
     cloudlog.warning("detected protocol mismatch, reflashing panda")
     HARDWARE.recover_internal_panda()
     raise
+
+  # skip flashing if the detected panda is not supported
+  if not check_panda_support(panda):
+    cloudlog.warning(f"Panda {panda_serial} is not supported (hw_type: {panda.get_type()}), skipping flash...")
+    return panda
 
   fw_signature = get_expected_signature()
   internal_panda = panda.is_internal()
@@ -123,6 +136,12 @@ def main() -> None:
 
       # log panda fw version
       params.put("PandaSignatures", panda.get_signature())
+
+      # skip health check if the detected panda is not supported
+      if not check_panda_support(panda):
+        cloudlog.warning(f"Panda {panda.get_usb_serial()} is not supported (hw_type: {panda.get_type()}), skipping health check...")
+        panda.close()
+        continue
 
       # check health for lost heartbeat
       health = panda.health()
