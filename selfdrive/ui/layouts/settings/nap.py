@@ -117,6 +117,12 @@ class NAPLayout(Widget):
       "When gas is pressed during long control, pass driver's pedal input through instead of disabling. The system takes over smoothly as you lift off.",
     )
 
+    self._add_toggle(
+      NAPParamKeys.ADAPTIVE_ACCEL,
+      "Adaptive Accel Limits",
+      "Reduces acceleration authority when close to a lead car to prevent overshoot. Full accel on open road or when closing a large gap.",
+    )
+
     follow_dist = self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True)
     self._follow_buttons = multiple_button_item(
       "Follow Distance",

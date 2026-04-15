@@ -18,6 +18,21 @@ from openpilot.common.swaglog import cloudlog
 
 A_CRUISE_MAX_VALS = [1.6, 1.2, 0.8, 0.6]
 A_CRUISE_MAX_BP = [0., 10.0, 25., 40.]
+
+# Pre-AP follow-mode accel cap: imported lazily to avoid circular deps
+_preap_follow_cache = None
+def _get_preap_follow_limit(v_ego):
+  global _preap_follow_cache
+  if _preap_follow_cache is None:
+    try:
+      from opendbc.car.tesla.preap.constants import ACCEL_PREAP_BP, ACCEL_PREAP_FOLLOW
+      _preap_follow_cache = (ACCEL_PREAP_BP, ACCEL_PREAP_FOLLOW)
+    except ImportError:
+      _preap_follow_cache = (None, None)
+  bp, v = _preap_follow_cache
+  if bp is None:
+    return None
+  return float(np.interp(v_ego, bp, v))
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 ALLOW_THROTTLE_THRESHOLD = 0.4
 MIN_ALLOW_THROTTLE_SPEED = 2.5
@@ -58,6 +73,7 @@ class LongitudinalPlanner:
                        and CP.openpilotLongitudinalControl and not CP.pcmCruise)
     self._params = Params()
     self.nap_follow_dist = self._params.get("NAPFollowDistance", return_default=True) if self._is_preap else None
+    self.nap_adaptive_accel = self._params.get_bool("NAPAdaptiveAccel") if self._is_preap else False
     self._frame = 0
 
     self.a_desired = init_a
@@ -94,6 +110,7 @@ class LongitudinalPlanner:
     self._frame += 1
     if self._is_preap and self._frame % 20 == 0:
       self.nap_follow_dist = self._params.get("NAPFollowDistance", return_default=True)
+      self.nap_adaptive_accel = self._params.get_bool("NAPAdaptiveAccel")
 
     if len(sm['carControl'].orientationNED) == 3:
       accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])
@@ -138,6 +155,25 @@ class LongitudinalPlanner:
 
     if force_slow_decel:
       v_cruise = 0.0
+
+    # Pre-AP adaptive accel: only limit accel when close to a lead.
+    # When the lead is far (>1.5x safe distance), full profile for gap closing.
+    # When the lead is close (<1.2x safe distance), cap to follow limits to
+    # prevent overshoot → regen → overshoot oscillation. Blend in between.
+    if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP" and self.nap_adaptive_accel and sm['radarState'].leadOne.status:
+      follow_limit = _get_preap_follow_limit(v_ego)
+      if follow_limit is not None:
+        from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import get_safe_obstacle_distance, get_T_FOLLOW
+        t_follow = get_T_FOLLOW(sm['selfdriveState'].personality, self.nap_follow_dist)
+        safe_dist = get_safe_obstacle_distance(v_ego, t_follow)
+        lead_dist = sm['radarState'].leadOne.dRel
+        # ratio: 1.0 = at safe distance, <1.0 = closer, >1.0 = further
+        ratio = lead_dist / max(safe_dist, 1.0)
+        # Blend: full cap below 1.2x, no cap above 1.5x, linear between
+        cap_strength = float(np.clip(1.0 - (ratio - 1.2) / 0.3, 0.0, 1.0))
+        if cap_strength > 0:
+          blended = accel_clip[1] * (1.0 - cap_strength) + follow_limit * cap_strength
+          accel_clip[1] = min(accel_clip[1], blended)
 
     self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)

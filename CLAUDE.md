@@ -23,6 +23,19 @@ source .venv/bin/activate
 python -m pytest opendbc_repo/opendbc/safety/tests/test_tesla_preap.py -v
 ```
 
+## Release notes
+
+When pushing user-facing changes to nap-dev, update the top section of `RELEASES.md`. The comma updater shows this on the device's Software update screen. Format:
+
+```
+Version X.Y.Z (YYYY-MM-DD)
+========================
+* Short description of change
+* Another change
+```
+
+Only the text before the first blank line (`\n\n`) is displayed. Keep it concise. The file is parsed by `system/updated/updated.py:parse_release_notes()`.
+
 ## Branch structure
 
 | openpilot branch | opendbc branch | purpose |
