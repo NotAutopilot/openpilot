@@ -10,6 +10,12 @@ venv/
 .overlay_init
 .overlay_consistent
 .sconsign.dblite
+
+# AI/assistant config — local only
+CLAUDE.md
+.claude/
+.cursor/
+.copilot/
 a.out
 .hypothesis
 .cache/
