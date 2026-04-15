@@ -1,111 +1,108 @@
-<div align="center" style="text-align: center;">
+<div align="center">
 
-<h1>openpilot</h1>
+<h1>NotAutopilot</h1>
 
 <p>
-  <b>openpilot is an operating system for robotics.</b>
+  <b>Self driving for pre-Autopilot Tesla Model S.</b>
   <br>
-  Currently, it upgrades the driver assistance system in 300+ supported cars.
+  Lane keeping, adaptive cruise, and driver monitoring for the 25,000+ pre-AP vehicles Tesla left behind.
 </p>
 
 <h3>
-  <a href="https://docs.comma.ai">Docs</a>
+  <a href="https://notautopilot.com">Website</a>
   <span> · </span>
-  <a href="https://docs.comma.ai/contributing/roadmap/">Roadmap</a>
+  <a href="https://notautopilot.com/wiki">Wiki</a>
   <span> · </span>
-  <a href="https://github.com/commaai/openpilot/blob/master/docs/CONTRIBUTING.md">Contribute</a>
+  <a href="https://discord.gg/notautopilot">Discord</a>
   <span> · </span>
-  <a href="https://discord.comma.ai">Community</a>
-  <span> · </span>
-  <a href="https://comma.ai/shop">Try it on a comma 3X</a>
+  <a href="https://notautopilot.com/how-it-works">How It Works</a>
 </h3>
 
-Quick start: `bash <(curl -fsSL openpilot.comma.ai)`
+Install on your comma 3X: `https://installer.comma.ai/NotAutopilot/openpilot/nap-release`
 
-[![openpilot tests](https://github.com/commaai/openpilot/actions/workflows/tests.yaml/badge.svg)](https://github.com/commaai/openpilot/actions/workflows/tests.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![X Follow](https://img.shields.io/twitter/follow/comma_ai)](https://x.com/comma_ai)
-[![Discord](https://img.shields.io/discord/469524606043160576)](https://discord.comma.ai)
 
 </div>
 
-<table>
-  <tr>
-    <td><a href="https://youtu.be/NmBfgOanCyk" title="Video By Greer Viau"><img src="https://github.com/commaai/openpilot/assets/8762862/2f7112ae-f748-4f39-b617-fabd689c3772"></a></td>
-    <td><a href="https://youtu.be/VHKyqZ7t8Gw" title="Video By Logan LeGrand"><img src="https://github.com/commaai/openpilot/assets/8762862/92351544-2833-40d7-9e0b-7ef7ae37ec4c"></a></td>
-    <td><a href="https://youtu.be/SUIZYzxtMQs" title="A drive to Taco Bell"><img src="https://github.com/commaai/openpilot/assets/8762862/05ceefc5-2628-439c-a9b2-89ce77dc6f63"></a></td>
-  </tr>
-</table>
+---
 
+## What is NotAutopilot?
 
-Using openpilot in a car
-------
+NotAutopilot (NAP) is a fork of [comma.ai's openpilot](https://github.com/commaai/openpilot) that brings driver assistance to 2012–2014 pre-Autopilot Tesla Model S vehicles. These cars shipped without forward-facing cameras, radar, or any driver assistance — NAP adds all of it.
 
-To use openpilot in a car, you need four things:
-1. **Supported Device:** a comma 3X, available at [comma.ai/shop](https://comma.ai/shop/comma-3x).
-2. **Software:** The setup procedure for the comma 3X allows users to enter a URL for custom software. Use the URL `openpilot.comma.ai` to install the release version.
-3. **Supported Car:** Ensure that you have one of [the 275+ supported cars](docs/CARS.md).
-4. **Car Harness:** You will also need a [car harness](https://comma.ai/shop/car-harness) to connect your comma 3X to your car.
+Built on the foundation of the [Tinkla project](https://tinkla.us/t/index) (which first proved openpilot could work on pre-AP Teslas) and [xnor-tech's openpilot](https://github.com/xnor-tech/openpilot) (which added working AP1 Model S support), NAP extends support to pre-Autopilot vehicles with a standalone safety model, Bosch radar integration, and Comma Pedal longitudinal control.
 
-We have detailed instructions for [how to install the harness and device in a car](https://comma.ai/setup). Note that it's possible to run openpilot on [other hardware](https://blog.comma.ai/self-driving-car-for-free/), although it's not plug-and-play.
+### Features
 
+- **Lateral control** — Steering via EPAS with full panda safety validation
+- **Longitudinal control** — Comma Pedal interceptor with zero-torque learning, smooth engagement, and three driving profiles (Aggressive, Standard, Chill)
+- **Radar** — Bosch radar support with GTW emulation for lead car detection and adaptive following
+- **Driver monitoring** — Stock openpilot driver monitoring camera
+- **On-device settings** — Full NAP settings panel for pedal calibration, radar configuration, EPAS firmware management, and tuning
 
-### Branches
+### Hardware Required
 
-Running `master` and other branches directly is supported, but it's recommended to run one of the following prebuilt branches:
+1. **2012–2014 Tesla Model S** (pre-Autopilot, no AP ECU)
+2. **[comma 3X](https://comma.ai/shop)** (or comma 3)
+3. **[Tesla Model S HW1 harness](https://comma.ai/shop/car-harness)** 
+4. **[Comma Pedal](https://github.com/commaai/openpilot/wiki/Comma-Pedal)** — for longitudinal (throttle/regen) control
+5. **Bosch radar** *(optional)* — for adaptive cruise with lead car following
 
-| comma four branch      | comma 3X branch        | URL                                    | description                                                                         |
-|------------------------|------------------------|----------------------------------------|-------------------------------------------------------------------------------------|
-| `release-mici`         | `release-tizi`         | openpilot.comma.ai                     | This is openpilot's release branch.                                                 |
-| `release-mici-staging` | `release-tizi-staging` | openpilot-test.comma.ai                | This is the staging branch for releases. Use it to get new releases slightly early. |
-| `nightly`              | `nightly`              | openpilot-nightly.comma.ai             | This is the bleeding edge development branch. Do not expect this to be stable.      |
-| `nightly-dev`          | `nightly-dev`          | installer.comma.ai/commaai/nightly-dev | Same as nightly, but includes experimental development features for some cars.      |
+## Installation
 
-To start developing openpilot
-------
+On your comma device, enter this URL during setup or in Software settings under Custom Fork:
 
-openpilot is developed by [comma](https://comma.ai/) and by users like you. We welcome both pull requests and issues on [GitHub](http://github.com/commaai/openpilot).
+```
+https://installer.comma.ai/NotAutopilot/openpilot/nap-release
+```
 
-* Join the [community Discord](https://discord.comma.ai)
-* Check out [the contributing docs](docs/CONTRIBUTING.md)
-* Check out the [openpilot tools](tools/)
-* Code documentation lives at https://docs.comma.ai
-* Information about running openpilot lives on the [community wiki](https://github.com/commaai/openpilot/wiki)
+## Branches
 
-Want to get paid to work on openpilot? [comma is hiring](https://comma.ai/jobs#open-positions) and offers lots of [bounties](https://comma.ai/bounties) for external contributors.
+| Branch | Install URL | Description |
+|--------|------------|-------------|
+| `nap-release` | `NotAutopilot/openpilot/nap-release` | **Recommended.** Stable release for daily driving. |
+| `nap-staging` | — | Pre-release testing. Coming soon. |
+| `nap-alpha` | `NotAutopilot/openpilot/nap-alpha` | Alpha builds for testers. May have rough edges. |
+| `nap-dev` | — | Active development. Expect things to break. |
 
-Safety and Testing
-----
+## Lineage
 
-* openpilot observes [ISO26262](https://en.wikipedia.org/wiki/ISO_26262) guidelines, see [SAFETY.md](docs/SAFETY.md) for more details.
-* openpilot has software-in-the-loop [tests](.github/workflows/tests.yaml) that run on every commit.
-* The code enforcing the safety model lives in panda and is written in C, see [code rigor](https://github.com/commaai/panda#code-rigor) for more details.
-* panda has software-in-the-loop [safety tests](https://github.com/commaai/panda/tree/master/tests/safety).
-* Internally, we have a hardware-in-the-loop Jenkins test suite that builds and unit tests the various processes.
-* panda has additional hardware-in-the-loop [tests](https://github.com/commaai/panda/blob/master/Jenkinsfile).
-* We run the latest openpilot in a testing closet containing 10 comma devices continuously replaying routes.
+```
+comma.ai/openpilot
+  └── sunnypilot/sunnypilot
+        └── xnor-tech/openpilot (AP1 Model S support)
+              └── NotAutopilot/openpilot (Pre-AP Model S support)
 
-<details>
-<summary>MIT Licensed</summary>
+boggyver/openpilot (Tinkla — the original Pre-AP Tesla fork)
+  └── inspiration, radar emulation, pedal architecture → NotAutopilot
+```
 
-openpilot is released under the MIT license. Some parts of the software are released under other licenses as specified.
+## Acknowledgments
 
-Any user of this software shall indemnify and hold harmless Comma.ai, Inc. and its directors, officers, employees, agents, stockholders, affiliates, subcontractors and customers from and against all allegations, claims, actions, suits, demands, damages, liabilities, obligations, losses, settlements, judgments, costs and expenses (including without limitation attorneys’ fees and costs) which arise out of, relate to or result from any use of this software by user.
+NotAutopilot wouldn't exist without:
 
-**THIS IS ALPHA QUALITY SOFTWARE FOR RESEARCH PURPOSES ONLY. THIS IS NOT A PRODUCT.
-YOU ARE RESPONSIBLE FOR COMPLYING WITH LOCAL LAWS AND REGULATIONS.
-NO WARRANTY EXPRESSED OR IMPLIED.**
-</details>
+- **[Boggyver](https://github.com/boggyver) and the [Tinkla Project](https://tinkla.us/t/index)** — First proved openpilot could work on pre-AP Teslas. The foundation everything is built on.
+- **[Lukas Loetkolben](https://github.com/lukasloetkolben)** — Clean isolated safety model approach that inspired the SAFETY_TESLA_PREAP refactor.
+- **[xnor-tech](https://github.com/xnor-tech)** — Working AP1/HW1-4 Tesla support in openpilot.
+- **[comma.ai](https://comma.ai)** — openpilot itself. The hard parts were already solved.
+- **Johnmr1, SeriouslySerious, Pod042, 1FrostlySlime** — Early testers who drove broken builds so others wouldn't have to.
 
-<details>
-<summary>User Data and comma Account</summary>
+## Contributing
 
-By default, openpilot uploads the driving data to our servers. You can also access your data through [comma connect](https://connect.comma.ai/). We use your data to train better models and improve openpilot for everyone.
+Pull requests are welcome against the `nap-dev` branch. See the `CLAUDE.md` for build instructions, pre-push checklist, and safety invariants.
 
-openpilot is open source software: the user is free to disable data collection if they wish to do so.
+## User Data
 
-openpilot logs the road-facing cameras, CAN, GPS, IMU, magnetometer, thermal sensors, crashes, and operating system logs.
-The driver-facing camera and microphone are only logged if you explicitly opt-in in settings.
+By default, openpilot uploads driving data to comma servers. You can access your data through [comma connect](https://connect.comma.ai/). Data collection can be disabled in settings.
 
-By using openpilot, you agree to [our Privacy Policy](https://comma.ai/privacy). You understand that use of this software or its related services will generate certain types of user data, which may be logged and stored at the sole discretion of comma. By accepting this agreement, you grant an irrevocable, perpetual, worldwide right to comma for the use of this data.
-</details>
+## Licensing
+
+NotAutopilot is released under the [MIT License](LICENSE). This repository includes original work as well as code derived from [openpilot by comma.ai](https://github.com/commaai/openpilot) and the [Tinkla project by boggyver](https://github.com/boggyver/openpilot), both released under the MIT license.
+
+> **THIS IS ALPHA QUALITY SOFTWARE FOR RESEARCH PURPOSES ONLY. THIS IS NOT A PRODUCT.
+> YOU ARE RESPONSIBLE FOR COMPLYING WITH LOCAL LAWS AND REGULATIONS.
+> NO WARRANTY EXPRESSED OR IMPLIED.**
+
+Any user of this software shall indemnify and hold harmless Comma.ai, Inc. and its directors, officers, employees, agents, stockholders, affiliates, subcontractors and customers from and against all allegations, claims, actions, suits, demands, damages, liabilities, obligations, losses, settlements, judgments, costs and expenses (including without limitation attorneys' fees and costs) which arise out of, relate to or result from any use of this software by user.
+
+Any user of this software shall also indemnify and hold harmless the NotAutopilot project, its contributors, maintainers, and affiliates from and against all allegations, claims, actions, suits, demands, damages, liabilities, obligations, losses, settlements, judgments, costs and expenses (including without limitation attorneys' fees and costs) which arise out of, relate to or result from any use of this software by user.
