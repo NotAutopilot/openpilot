@@ -160,13 +160,13 @@ class LongitudinalPlanner:
     # When the lead is far (>1.5x safe distance), full profile for gap closing.
     # When the lead is close (<1.2x safe distance), cap to follow limits to
     # prevent overshoot → regen → overshoot oscillation. Blend in between.
-    if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP" and self.nap_adaptive_accel and sm['radarState'].leadOne.status:
+    if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP" and self.nap_adaptive_accel and sm['modelV2'].leadsV3[0].prob > 0.5:
       follow_limit = _get_preap_follow_limit(v_ego)
       if follow_limit is not None:
         from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import get_safe_obstacle_distance, get_T_FOLLOW
         t_follow = get_T_FOLLOW(sm['selfdriveState'].personality, self.nap_follow_dist)
         safe_dist = get_safe_obstacle_distance(v_ego, t_follow)
-        lead_dist = sm['radarState'].leadOne.dRel
+        lead_dist = sm['modelV2'].leadsV3[0].x[0]
         # ratio: 1.0 = at safe distance, <1.0 = closer, >1.0 = further
         ratio = lead_dist / max(safe_dist, 1.0)
         # Blend: full cap below 1.2x, no cap above 1.5x, linear between
@@ -177,7 +177,7 @@ class LongitudinalPlanner:
 
     self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
-    self.mpc.update(sm['radarState'], v_cruise, personality=sm['selfdriveState'].personality, nap_follow_dist=self.nap_follow_dist)
+    self.mpc.update(v_cruise, sm['modelV2'], personality=sm['selfdriveState'].personality, nap_follow_dist=self.nap_follow_dist)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
@@ -216,7 +216,7 @@ class LongitudinalPlanner:
   def publish(self, sm, pm):
     plan_send = messaging.new_message('longitudinalPlan')
 
-    plan_send.valid = sm.all_checks(service_list=['carState', 'controlsState', 'selfdriveState', 'radarState'])
+    plan_send.valid = sm.all_checks(service_list=['carState', 'controlsState', 'selfdriveState'])
 
     longitudinalPlan = plan_send.longitudinalPlan
     longitudinalPlan.modelMonoTime = sm.logMonoTime['modelV2']
@@ -227,7 +227,7 @@ class LongitudinalPlanner:
     longitudinalPlan.accels = self.a_desired_trajectory.tolist()
     longitudinalPlan.jerks = self.j_desired_trajectory.tolist()
 
-    longitudinalPlan.hasLead = sm['radarState'].leadOne.status
+    longitudinalPlan.hasLead = sm['modelV2'].leadsV3[0].prob > 0.5
     longitudinalPlan.longitudinalPlanSource = self.mpc.source
     longitudinalPlan.fcw = self.fcw
 
