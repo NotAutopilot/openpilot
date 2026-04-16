@@ -121,6 +121,7 @@ class SelfdriveD:
     self.recalibrating_seen = False
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
+    self.prev_pedal_long_active = False
 
     # some comma three with NVMe experience NVMe dropouts mid-drive that
     # cause loggerd to crash on write, so ignore it only on that platform
@@ -191,17 +192,50 @@ class SelfdriveD:
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
       self.events.add_from_msg(car_events)
 
+      # Tesla Pre-AP pedal-long status alerts (banner + engage/disengage sounds).
+      if (self.CP.brand == "tesla"
+          and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+          and self.CP.openpilotLongitudinalControl
+          and not self.CP.pcmCruise):
+        pedal_long_active = bool(CS.cruiseState.enabled and getattr(CS, 'pedalLongActive', False))
+        if pedal_long_active and not self.prev_pedal_long_active:
+          self.events.add(EventName.pedalCruiseEnabled)
+        elif self.prev_pedal_long_active and not pedal_long_active:
+          self.events.add(EventName.pedalCruiseDisabled)
+        self.prev_pedal_long_active = pedal_long_active
+
+        # Max regen warning: pedal is at limit, driver should use brake for more decel
+        if getattr(CS, 'pedalMaxRegen', False):
+          self.events.add(EventName.pedalMaxRegen)
+      else:
+        self.prev_pedal_long_active = False
+
       if self.CP.notCar:
         # wait for everything to init first
         if self.sm.frame > int(5. / DT_CTRL) and self.initialized:
           # body always wants to enable
           self.events.add(EventName.pcmEnable)
 
-      # Disable on rising edge of accelerator or brake. Also disable on brake when speed > 0
-      if (CS.gasPressed and not self.CS_prev.gasPressed and self.disengage_on_accelerator) or \
-        (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or \
-        (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
+      # Disable on rising edge of accelerator or brake. Also disable on brake when speed > 0.
+      # Tesla Pre-AP: on brake/regen press, keep lateral active but drop longitudinal only.
+      gas_disable = CS.gasPressed and not self.CS_prev.gasPressed and self.disengage_on_accelerator
+      brake_or_regen_disable = (
+        (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or
+        (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill))
+      )
+      preap_steering_only_brake = (
+        self.CP.brand == "tesla"
+        and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+        and self.CP.openpilotLongitudinalControl
+        and not self.CP.pcmCruise
+      )
+      if gas_disable:
         self.events.add(EventName.pedalPressed)
+      elif brake_or_regen_disable:
+        if preap_steering_only_brake:
+          self.events.add(EventName.gasPressedOverride)
+        else:
+          self.events.add(EventName.pedalPressed)
 
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.red:
@@ -357,8 +391,13 @@ class SelfdriveD:
       self.events.add(EventName.sensorDataInvalid)
 
     if not REPLAY:
-      # Check for mismatch between openpilot and car's PCM
-      cruise_mismatch = CS.cruiseState.enabled and (not self.enabled or not self.CP.pcmCruise)
+      # Check for mismatch between openpilot and car's PCM.
+      # Pre-AP Tesla manages cruiseState.enabled via software FSM (not hardware PCM),
+      # so treat it the same as pcmCruise for this check.
+      preap_sw_cruise = (self.CP.brand == "tesla" and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+                         and self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise)
+      effective_pcm_cruise = self.CP.pcmCruise or preap_sw_cruise
+      cruise_mismatch = CS.cruiseState.enabled and (not self.enabled or not effective_pcm_cruise)
       self.cruise_mismatch_counter = self.cruise_mismatch_counter + 1 if cruise_mismatch else 0
       if self.cruise_mismatch_counter > int(6. / DT_CTRL):
         self.events.add(EventName.cruiseMismatch)

@@ -8,7 +8,7 @@
 
 #ifndef CAPNP_VERSION
 #error "CAPNP_VERSION is not defined, is capnp/generated-header-support.h missing?"
-#elif CAPNP_VERSION != 1000002
+#elif CAPNP_VERSION != 1000001
 #error "Version mismatch between generated code and library headers.  You must use the same version of the Cap'n Proto compiler and library."
 #endif
 
@@ -125,6 +125,9 @@ enum class EventName_91f1992a1f77fb03: uint16_t {
   USER_BOOKMARK,
   EXCESSIVE_ACTUATION,
   AUDIO_FEEDBACK,
+  PEDAL_CRUISE_ENABLED,
+  PEDAL_CRUISE_DISABLED,
+  PEDAL_MAX_REGEN,
 };
 CAPNP_DECLARE_ENUM(EventName, 91f1992a1f77fb03);
 CAPNP_DECLARE_SCHEMA(d692e23d1a247d99);

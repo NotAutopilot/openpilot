@@ -51,6 +51,10 @@ def manager_init() -> None:
   except PermissionError:
     print(f"WARNING: failed to make {Paths.shm_path()}")
 
+  # NAP: ensure Pre-AP fingerprint is forced on first boot
+  if params.get("NAPForcePreAP") is None:
+    params.put_bool("NAPForcePreAP", True)
+
   # set params
   serial = HARDWARE.get_serial()
   params.put("Version", build_metadata.openpilot.version)
@@ -149,7 +153,13 @@ def manager_thread() -> None:
     started_prev = started
     ignition_prev = ignition
 
-    ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore)
+    # NAP: when a script is running (e.g. pedal calibration), stop conflicting processes
+    nap_ignore = []
+    if params.get_bool("NAPScriptRunning"):
+      nap_ignore = ["pandad", "card", "controlsd", "selfdrived", "plannerd", "radard",
+                     "calibrationd", "torqued", "locationd", "modeld", "dmonitoringmodeld"]
+
+    ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore + nap_ignore)
 
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)

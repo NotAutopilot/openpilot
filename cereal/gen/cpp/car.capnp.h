@@ -8,7 +8,7 @@
 
 #ifndef CAPNP_VERSION
 #error "CAPNP_VERSION is not defined, is capnp/generated-header-support.h missing?"
-#elif CAPNP_VERSION != 1000002
+#elif CAPNP_VERSION != 1000001
 #error "Version mismatch between generated code and library headers.  You must use the same version of the Cap'n Proto compiler and library."
 #endif
 
@@ -276,6 +276,9 @@ enum class SafetyModel_95551e5b1edaf451: uint16_t {
   FCA_GIORGIO,
   RIVIAN,
   VOLKSWAGEN_MEB,
+  MG_D_E_P_R_E_C_A_T_E_D,
+  TESLA_LEGACY,
+  TESLA_PREAP,
 };
 CAPNP_DECLARE_ENUM(SafetyModel, 95551e5b1edaf451);
 CAPNP_DECLARE_SCHEMA(d661512be2def77f);
@@ -1011,6 +1014,10 @@ public:
 
   inline bool getBlockPcmEnable() const;
 
+  inline bool getPedalMaxRegen() const;
+
+  inline bool getPedalLongActive() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -1247,6 +1254,12 @@ public:
 
   inline bool getBlockPcmEnable();
   inline void setBlockPcmEnable(bool value);
+
+  inline bool getPedalMaxRegen();
+  inline void setPedalMaxRegen(bool value);
+
+  inline bool getPedalLongActive();
+  inline void setPedalLongActive(bool value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -5283,6 +5296,34 @@ inline bool CarState::Builder::getBlockPcmEnable() {
 inline void CarState::Builder::setBlockPcmEnable(bool value) {
   _builder.setDataField<bool>(
       ::capnp::bounded<371>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CarState::Reader::getPedalMaxRegen() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<372>() * ::capnp::ELEMENTS);
+}
+
+inline bool CarState::Builder::getPedalMaxRegen() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<372>() * ::capnp::ELEMENTS);
+}
+inline void CarState::Builder::setPedalMaxRegen(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<372>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CarState::Reader::getPedalLongActive() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<373>() * ::capnp::ELEMENTS);
+}
+
+inline bool CarState::Builder::getPedalLongActive() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<373>() * ::capnp::ELEMENTS);
+}
+inline void CarState::Builder::setPedalLongActive(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<373>() * ::capnp::ELEMENTS, value);
 }
 
 inline float CarState::WheelSpeeds::Reader::getFl() const {
