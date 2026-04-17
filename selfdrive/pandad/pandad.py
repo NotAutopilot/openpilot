@@ -13,20 +13,22 @@ from openpilot.system.hardware import HARDWARE
 from openpilot.common.swaglog import cloudlog
 
 
-def get_expected_signature() -> bytes:
+def get_expected_signature(panda=None) -> bytes:
   try:
-    fn = os.path.join(FW_PATH, McuType.H7.config.app_fn)
+    # C3_F4_PANDA: use F4 firmware signature for F4/DOS panda, H7 otherwise
+    if panda is not None and panda.get_type() in Panda.DEPRECATED_DEVICES:
+      fn = os.path.join(FW_PATH, McuType.F4.config.app_fn)
+    else:
+      fn = os.path.join(FW_PATH, McuType.H7.config.app_fn)
     return Panda.get_signature_from_firmware(fn)
   except Exception:
     cloudlog.exception("Error computing expected signature")
     return b""
 
 def check_panda_support(panda) -> bool:
-  """Return True if this panda hardware type is in the supported list."""
   hw_type = panda.get_type()
-  if hw_type in Panda.SUPPORTED_DEVICES:
-    return True
-  return False
+  # C3_F4_PANDA: F4/DOS panda is in DEPRECATED_DEVICES, not SUPPORTED_DEVICES
+  return hw_type in Panda.SUPPORTED_DEVICES or hw_type in Panda.DEPRECATED_DEVICES
 
 
 def flash_panda(panda_serial: str) -> Panda:
@@ -42,7 +44,7 @@ def flash_panda(panda_serial: str) -> Panda:
     cloudlog.warning(f"Panda {panda_serial} is not supported (hw_type: {panda.get_type()}), skipping flash...")
     return panda
 
-  fw_signature = get_expected_signature()
+  fw_signature = get_expected_signature(panda)
   internal_panda = panda.is_internal()
 
   panda_version = "bootstub" if panda.bootstub else panda.get_version()

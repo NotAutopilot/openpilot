@@ -166,6 +166,10 @@ def hw_state_thread(end_event, hw_queue):
 def hardware_thread(end_event, hw_queue) -> None:
   pm = messaging.PubMaster(['deviceState'])
   sm = messaging.SubMaster(["peripheralState", "gpsLocationExternal", "selfdriveState", "pandaStates"], poll="pandaStates")
+  # C3_IGNITION_CAN: Tesla pre-AP ignition via 0x348 (GTW_status) byte0 bit0
+  _tesla_ign_can = False
+  _tesla_ign_last_ts = float("inf")
+  _tesla_can_sock = messaging.sub_sock("can", timeout=0)
 
   count = 0
 
@@ -215,6 +219,17 @@ def hardware_thread(end_event, hw_queue) -> None:
   while not end_event.is_set():
     sm.update(PANDA_STATES_TIMEOUT)
 
+    # C3_IGNITION_CAN: drain raw can socket, look for 0x348 (GTW_status) byte0 bit0
+    _now = time.monotonic()
+    for _batch in messaging.drain_sock(_tesla_can_sock):
+      for _m in _batch.can:
+        if _m.address == 0x348 and _m.src in (0, 1) and len(_m.dat) >= 8:
+          _tesla_ign_can = bool(_m.dat[0] & 0x1)
+          _tesla_ign_last_ts = _now
+          break
+    if _tesla_ign_last_ts != float("inf") and _now - _tesla_ign_last_ts > 2.0:
+      _tesla_ign_can = False
+
     pandaStates = sm['pandaStates']
     peripheralState = sm['peripheralState']
 
@@ -227,7 +242,8 @@ def hardware_thread(end_event, hw_queue) -> None:
     if sm.updated['pandaStates'] and len(pandaStates) > 0:
 
       # Set ignition based on any panda connected
-      onroad_conditions["ignition"] = any(ps.ignitionLine or ps.ignitionCan for ps in pandaStates if ps.pandaType != log.PandaState.PandaType.unknown)
+      # C3_IGNITION_CAN: Tesla pre-AP 0x348 GTW_status OR standard ignitionLine/Can
+      onroad_conditions["ignition"] = any(ps.ignitionLine or ps.ignitionCan for ps in pandaStates if ps.pandaType != log.PandaState.PandaType.unknown) or _tesla_ign_can
 
       pandaState = pandaStates[0]
 

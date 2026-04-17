@@ -995,7 +995,9 @@ bool SpectraCamera::openSensor() {
   };
 
   // Figure out which sensor we have
-  if (!init_sensor_lambda(new OS04C10) &&
+  // C3_AR0231: probe AR0231 first (C3 driver camera), then C3X sensors
+  if (!init_sensor_lambda(new AR0231) &&
+      !init_sensor_lambda(new OS04C10) &&
       !init_sensor_lambda(new OX03C10)) {
     LOGE("** sensor %d FAILED bringup, disabling", cc.camera_num);
     enabled = false;

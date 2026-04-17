@@ -28,6 +28,12 @@ function agnos_init {
 }
 
 function launch {
+  # Run first-time setup on fresh install
+  if [ ! -f /data/c3_first_run ]; then
+    echo "C3: running first-time setup..."
+    bash "${DIR}/setup_c3_preap.sh"
+  fi
+
   # Remove orphaned git lock if it exists on boot
   [ -f "$DIR/.git/index.lock" ] && rm -f $DIR/.git/index.lock
 
@@ -72,19 +78,6 @@ function launch {
   # hardware specific init
   if [ -f /AGNOS ]; then
     agnos_init
-  fi
-
-  # NotAutopilot: block comma 3 (tici) — this build requires comma 3X (tizi) or newer
-  if [ -f /sys/firmware/devicetree/base/model ]; then
-    DEVICE_TYPE=$(cat /sys/firmware/devicetree/base/model | tr -d '\0' | awk -F'comma ' '{print $2}')
-    if [ "$DEVICE_TYPE" = "tici" ]; then
-      echo "============================================="
-      echo "NotAutopilot does not support comma 3 (tici)."
-      echo "Please use a comma 3X or newer device."
-      echo "============================================="
-      sleep 30
-      exit 1
-    fi
   fi
 
   # write tmux scrollback to a file
