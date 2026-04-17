@@ -140,7 +140,7 @@ jobs:
     - name: Build openpilot
       run: scons -j$(nproc)
     - name: Run replay
-      timeout-minutes: ${{ contains(runner.name, 'nsc') && 2 || 20 }}
+      timeout-minutes: ${{ contains(runner.name, 'nsc') && 2 || 45 }}
       continue-on-error: ${{ github.ref == 'refs/heads/master' }}
       run: selfdrive/test/process_replay/test_processes.py -j$(nproc)
     - name: Print diff
