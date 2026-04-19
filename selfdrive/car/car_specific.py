@@ -90,6 +90,15 @@ class CarSpecificEvents:
       # if CC.eps_timer_soft_disable_alert:
       #   events.add(EventName.steerTimeLimit)
 
+    elif self.CP.brand == 'tesla':
+      if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP" and self.CP.pcmCruise:
+        if getattr(CS, 'teslaCCEngaged', False):
+          events.add(EventName.teslaCCEngaged)
+        if getattr(CS, 'teslaCCDisengaged', False):
+          events.add(EventName.teslaCCDisengaged)
+        if getattr(CS, 'teslaCCNotArmed', False):
+          events.add(EventName.teslaCCNotArmed)
+
     return events
 
   def create_common_events(self, CS: structs.CarState, CS_prev: car.CarState):
