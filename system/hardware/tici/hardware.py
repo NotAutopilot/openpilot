@@ -496,9 +496,13 @@ class Tici(HardwareBase):
       except Exception:
         pass
 
-    # eSIM prime
+    # eSIM prime (no-op on C3 without Comma eSIM)
     dest = "/etc/NetworkManager/system-connections/esim.nmconnection"
-    if self.get_sim_lpa().is_comma_profile(sim_id) and not os.path.exists(dest):
+    try:
+      lpa_check = self.get_sim_lpa().is_comma_profile(sim_id)
+    except Exception:
+      lpa_check = False
+    if lpa_check and not os.path.exists(dest):
       with open(Path(__file__).parent/'esim.nmconnection') as f, tempfile.NamedTemporaryFile(mode='w') as tf:
         dat = f.read()
         dat = dat.replace("sim-id=", f"sim-id={sim_id}")
