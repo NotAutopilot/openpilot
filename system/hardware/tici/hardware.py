@@ -406,7 +406,7 @@ class Tici(HardwareBase):
 
   def initialize_hardware(self):
     if self.amplifier is not None:
-      self.amplifier.initialize_configuration()
+      self.amplifier.initialize_configuration(get_device_type())
 
     # Allow hardwared to write engagement status to kmsg
     os.system("sudo chmod a+w /dev/kmsg")
