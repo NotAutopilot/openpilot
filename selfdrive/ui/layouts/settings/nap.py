@@ -4,6 +4,7 @@ import pyray as rl
 from openpilot.common.params import Params
 from openpilot.common.basedir import BASEDIR
 from openpilot.system.ui.widgets import Widget, DialogResult
+from openpilot.system.ui.widgets.keyboard import Keyboard
 from openpilot.system.ui.widgets.list_view import (
   toggle_item, multiple_button_item, button_item, text_item,
   ITEM_PADDING,
@@ -19,10 +20,12 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 # Preset values for float/int params exposed as multiple-button selectors
 BRAKE_FACTOR_PRESETS = [0.5, 1.0, 1.5, 2.0]
 PEDAL_CAN_BUS_VALUES = [0, 2]
-# Radar lateral offset (m). Positive shifts lead position to the right
-# of current radar reading. Use negative values to pull a right-biased
-# radar back toward vehicle centerline.
-RADAR_OFFSET_PRESETS = [-1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0]
+
+# Radar lateral offset bounds (meters). Added to radar yRel in
+# radar_interface.py. Negative = shift toward left; positive = toward right.
+# ~0.27 is typical for the 3D-printed factory-location mount.
+RADAR_OFFSET_MIN = -2.0
+RADAR_OFFSET_MAX = 2.0
 
 
 def _find_preset_index(presets, value, default=0):
@@ -183,20 +186,14 @@ class NAPLayout(Widget):
       needs_reboot=True,
     )
 
-    radar_offset = self._params.get(NAPParamKeys.RADAR_OFFSET, return_default=True)
-    try:
-      radar_offset = float(radar_offset) if radar_offset is not None else 0.0
-    except (TypeError, ValueError):
-      radar_offset = 0.0
-    self._radar_offset_buttons = multiple_button_item(
+    self._radar_offset_keyboard = Keyboard(max_text_size=10)
+    self._radar_offset_btn = button_item(
       "Radar Lateral Offset",
-      "Shifts reported lead lateral position. Negative = pull leads toward the left (center a right-biased radar). Try -0.5m if the lead triangle appears shifted right of actual leads.",
-      buttons=["-1.0m", "-0.5m", "-0.25m", "0m", "+0.25m", "+0.5m", "+1.0m"],
-      button_width=110,
-      selected_index=_find_preset_index(RADAR_OFFSET_PRESETS, radar_offset),
-      callback=self._on_radar_offset,
+      self._get_radar_offset_text,
+      description="Lateral offset in meters added to radar yRel. Negative shifts leads toward the left of current radar reading; positive shifts right. Example: -0.27 for the 3D-printed factory-location mount.",
+      callback=self._on_radar_offset_click,
     )
-    self._all_items.append(self._radar_offset_buttons)
+    self._all_items.append(self._radar_offset_btn)
 
     self._calibrate_radar_btn = button_item(
       "Calibrate Radar",
@@ -343,8 +340,33 @@ class NAPLayout(Widget):
   def _on_brake_factor(self, index: int):
     self._params.put(NAPParamKeys.BRAKE_FACTOR, BRAKE_FACTOR_PRESETS[index])
 
-  def _on_radar_offset(self, index: int):
-    self._params.put(NAPParamKeys.RADAR_OFFSET, str(RADAR_OFFSET_PRESETS[index]))
+  def _get_radar_offset(self) -> float:
+    raw = self._params.get(NAPParamKeys.RADAR_OFFSET, return_default=True)
+    try:
+      return float(raw) if raw is not None else 0.0
+    except (TypeError, ValueError):
+      return 0.0
+
+  def _get_radar_offset_text(self) -> str:
+    return f"{self._get_radar_offset():+.2f}m"
+
+  def _on_radar_offset_click(self):
+    self._radar_offset_keyboard.reset(min_text_size=1)
+    self._radar_offset_keyboard.set_title("Radar Lateral Offset (m)")
+    self._radar_offset_keyboard.set_text(f"{self._get_radar_offset():.2f}")
+    self._radar_offset_keyboard.set_callback(self._on_radar_offset_submit)
+    gui_app.push_widget(self._radar_offset_keyboard)
+
+  def _on_radar_offset_submit(self, result: DialogResult):
+    if result != DialogResult.CONFIRM:
+      return
+    text = self._radar_offset_keyboard.text.strip()
+    try:
+      value = float(text)
+    except ValueError:
+      return  # silently reject non-numeric input; label stays at prior value
+    value = max(RADAR_OFFSET_MIN, min(RADAR_OFFSET_MAX, value))
+    self._params.put(NAPParamKeys.RADAR_OFFSET, str(value))
 
   # ── Script runner ──
 
