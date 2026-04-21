@@ -112,12 +112,6 @@ class NAPLayout(Widget):
     )
 
     self._add_toggle(
-      NAPParamKeys.PEDAL_PASSTHROUGH,
-      "Pedal Passthrough",
-      "When gas is pressed during long control, pass driver's pedal input through instead of disabling. The system takes over smoothly as you lift off.",
-    )
-
-    self._add_toggle(
       NAPParamKeys.ADAPTIVE_ACCEL,
       "Adaptive Accel Limits",
       "Reduces acceleration authority when close to a lead car to prevent overshoot. Full accel on open road or when closing a large gap.",
