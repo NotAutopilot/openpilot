@@ -31,14 +31,24 @@ MISSING=()
 "$VENV_PIP" show jeepney > /dev/null 2>&1 || MISSING+=("jeepney")
 "$VENV_PIP" show kaitaistruct > /dev/null 2>&1 || MISSING+=("kaitaistruct")
 
-if [ ${#MISSING[@]} -gt 0 ]; then
-  echo "Installing: ${MISSING[*]}"
+# Install missing system packages
+SYS_MISSING=()
+command -v bzip2 > /dev/null 2>&1 || SYS_MISSING+=("bzip2")
+
+if [ ${#MISSING[@]} -gt 0 ] || [ ${#SYS_MISSING[@]} -gt 0 ]; then
   sudo mount -o remount,rw /
-  sudo "$VENV_PIP" install -q "${MISSING[@]}"
+  if [ ${#SYS_MISSING[@]} -gt 0 ]; then
+    echo "Installing system packages: ${SYS_MISSING[*]}"
+    sudo apt-get install -yq "${SYS_MISSING[@]}"
+  fi
+  if [ ${#MISSING[@]} -gt 0 ]; then
+    echo "Installing pip packages: ${MISSING[*]}"
+    sudo "$VENV_PIP" install -q "${MISSING[@]}"
+  fi
   sudo mount -o remount,ro /
-  echo "Installed: ${MISSING[*]}"
+  echo "Installed: ${SYS_MISSING[*]} ${MISSING[*]}"
 else
-  echo "jeepney and kaitaistruct already installed"
+  echo "jeepney, kaitaistruct, and bzip2 already installed"
 fi
 
 touch "$MARKER"
