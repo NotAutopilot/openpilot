@@ -360,13 +360,22 @@ class NAPLayout(Widget):
   def _on_radar_offset_submit(self, result: DialogResult):
     if result != DialogResult.CONFIRM:
       return
-    text = self._radar_offset_keyboard.text.strip()
     try:
+      text = (self._radar_offset_keyboard.text or "").strip()
       value = float(text)
-    except ValueError:
-      return  # silently reject non-numeric input; label stays at prior value
+    except (TypeError, ValueError, AttributeError):
+      return  # silently reject blank/non-numeric input; label stays at prior value
     value = max(RADAR_OFFSET_MIN, min(RADAR_OFFSET_MAX, value))
-    self._params.put(NAPParamKeys.RADAR_OFFSET, str(value))
+    # Pass raw float (matches the BRAKE_FACTOR put pattern). Params
+    # previously got str(value) which threw inside Params for FLOAT-typed
+    # keys; exception propagated out of the Keyboard Enter callback,
+    # crashing the UI and leaving the Params value unset (label stuck at
+    # the 0.0 default). Keep the try/except so no future value ever kills
+    # the UI.
+    try:
+      self._params.put(NAPParamKeys.RADAR_OFFSET, value)
+    except Exception:
+      pass
 
   # ── Script runner ──
 
