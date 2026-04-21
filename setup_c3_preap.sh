@@ -4,13 +4,7 @@
 #
 # Run once after cloning onto the device:
 #   bash /data/openpilot/setup_c3_preap.sh
-#
-# This script installs pip packages that are missing on AGNOS 12.8
-# but required by openpilot: jeepney and kaitaistruct.
-# The root filesystem is read-only on AGNOS, so it is temporarily
-# remounted rw for the install.
 
-VENV_PIP="/usr/local/venv/bin/pip"
 MARKER="/data/c3_first_run"
 
 if [ ! -f /AGNOS ]; then
@@ -25,31 +19,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 echo "Initialising submodules..."
 cd "$DIR"
 git submodule update --init --depth 1 panda opendbc_repo
-
-# Install missing pip packages
-MISSING=()
-"$VENV_PIP" show jeepney > /dev/null 2>&1 || MISSING+=("jeepney")
-"$VENV_PIP" show kaitaistruct > /dev/null 2>&1 || MISSING+=("kaitaistruct")
-
-# Install missing system packages
-SYS_MISSING=()
-command -v bzip2 > /dev/null 2>&1 || SYS_MISSING+=("bzip2")
-
-if [ ${#MISSING[@]} -gt 0 ] || [ ${#SYS_MISSING[@]} -gt 0 ]; then
-  sudo mount -o remount,rw /
-  if [ ${#SYS_MISSING[@]} -gt 0 ]; then
-    echo "Installing system packages: ${SYS_MISSING[*]}"
-    sudo apt-get install -yq "${SYS_MISSING[@]}"
-  fi
-  if [ ${#MISSING[@]} -gt 0 ]; then
-    echo "Installing pip packages: ${MISSING[*]}"
-    sudo "$VENV_PIP" install -q "${MISSING[@]}"
-  fi
-  sudo mount -o remount,ro /
-  echo "Installed: ${SYS_MISSING[*]} ${MISSING[*]}"
-else
-  echo "jeepney, kaitaistruct, and bzip2 already installed"
-fi
 
 touch "$MARKER"
 echo ""

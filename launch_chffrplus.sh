@@ -73,7 +73,7 @@ function launch {
 
   # handle pythonpath
   ln -sfn $(pwd) /data/pythonpath
-  export PYTHONPATH="$PWD"
+  export PYTHONPATH="$PWD/c3_third_party:$PWD"
 
   # hardware specific init
   if [ -f /AGNOS ]; then
