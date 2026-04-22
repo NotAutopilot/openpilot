@@ -138,6 +138,7 @@ With **"Always On Lateral"**, lane-centering stays active whenever cruise contro
 **"Conditional Experimental Mode"** switches into **"Experimental Mode"** when conditions like these are met:
 - Approaching curves and turns
 - Detecting slower or stopped lead vehicles
+- Detecting when the model wants to slowdown
 - Driving below a set speed
 - Predicting an upcoming stop (e.g. stoplight or stop sign)
 

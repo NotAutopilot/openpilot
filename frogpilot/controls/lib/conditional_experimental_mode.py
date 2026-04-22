@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
+from openpilot.selfdrive.modeld.constants import ModelConstants
 
-from openpilot.frogpilot.common.frogpilot_variables import CRUISING_SPEED, THRESHOLD
+from openpilot.frogpilot.common.frogpilot_variables import CRUISING_SPEED, SLOWDOWN_PERCENTAGE, THRESHOLD
 
 CEStatus = {
   "OFF": 0,              # Off
@@ -13,7 +14,7 @@ CEStatus = {
   "SIGNAL": 5,           # Turn signal condition
   "SPEED": 6,            # Speed condition
   "SPEED_LIMIT": 7,      # Speed limit controller condition
-  "STOP_LIGHT": 8        # Stop light or sign condition
+  "STOP_LIGHT": 8,       # Stop light or sign condition
 }
 
 class ConditionalExperimentalMode:
@@ -24,6 +25,7 @@ class ConditionalExperimentalMode:
     self.slow_lead_filter = FirstOrderFilter(0, 1, DT_MDL)
     self.stop_light_filter = FirstOrderFilter(0, 0.5, DT_MDL)
 
+    self.curve_detected = False
     self.experimental_mode = False
     self.stop_light_detected = False
 
@@ -95,5 +97,9 @@ class ConditionalExperimentalMode:
       self.slow_lead_detected = False
 
   def stop_sign_and_light(self, v_ego, sm, model_time):
-    self.stop_light_filter.update((self.frogpilot_planner.model_length < v_ego * model_time) or self.frogpilot_planner.model_stopped)
+    slow_hint_window = [velocity for time_index, velocity in zip(ModelConstants.T_IDXS, sm["modelV2"].velocity.x) if time_index > model_time]
+    slow_hint_detected = any(velocity <= SLOWDOWN_PERCENTAGE * v_ego for velocity in slow_hint_window) and not self.curve_detected
+    stop_time_detected = self.frogpilot_planner.model_length < v_ego * model_time
+
+    self.stop_light_filter.update(self.frogpilot_planner.model_stopped or slow_hint_detected or stop_time_detected)
     self.stop_light_detected = self.stop_light_filter.x >= THRESHOLD and not self.frogpilot_planner.tracking_lead
