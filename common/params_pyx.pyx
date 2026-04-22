@@ -20,6 +20,9 @@ cdef extern from "common/params.h":
     CLEAR_ON_IGNITION_ON
     ALL
 
+    # FrogPilot variables
+    DONT_LOG
+
   cpdef enum ParamKeyType:
     STRING
     BOOL
@@ -46,6 +49,8 @@ cdef extern from "common/params.h":
     vector[string] allKeys()
 
     # FrogPilot variables
+    ParamKeyFlag getKeyFlag(string) nogil
+
     optional[string] getStockValue(string) nogil
 
     int getTuningLevel(string) nogil
@@ -214,6 +219,9 @@ cdef class Params:
     return self._cpp2python(t, value, None, key)
 
   # FrogPilot variables
+  def get_key_flag(self, key):
+    return self.p.getKeyFlag(self.check_key(key))
+
   def get_stock_value(self, key):
     cdef string k = self.check_key(key)
     cdef ParamKeyType t = self.p.getKeyType(k)

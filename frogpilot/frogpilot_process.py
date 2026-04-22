@@ -30,7 +30,7 @@ def check_assets(now, theme_manager, thread_manager, params, params_memory, frog
 
   report_data = params_memory.get("IssueReported")
   if report_data:
-    capture_report(report_data["DiscordUser"], report_data["Issue"], vars(frogpilot_toggles))
+    capture_report(report_data["DiscordUser"], report_data["Issue"], params, vars(frogpilot_toggles))
     params_memory.remove("IssueReported")
 
   if params_memory.get_bool("DownloadMaps"):

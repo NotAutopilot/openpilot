@@ -240,6 +240,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ForceStops", {PERSISTENT, BOOL, "0", "0", 2}},
     {"ForceTorqueController", {PERSISTENT, BOOL, "0", "0", 3}},
     {"FPSCounter", {PERSISTENT, BOOL, "1", "0", 3}},
+    {"FrogPilotApiToken", {PERSISTENT | DONT_LOG, STRING, "", "", 0}},
     {"FrogPilotCarParams", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BYTES, "", ""}},
     {"FrogPilotCarParamsPersistent", {PERSISTENT, BYTES, "", ""}},
     {"FrogPilotDongleId", {PERSISTENT | DONT_LOG, STRING, "", "", 0}},

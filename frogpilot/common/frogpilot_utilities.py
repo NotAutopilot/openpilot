@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import dataclasses
 import json
 import math
 import numpy as np
@@ -17,10 +18,13 @@ import openpilot.system.sentry as sentry
 from cereal import log, messaging
 from opendbc.can.parser import CANParser
 from opendbc.car.toyota.carcontroller import LOCK_CMD
+from openpilot.common.params import Params
 from openpilot.common.realtime import DT_DMON, DT_HW
+from openpilot.system.hardware import HARDWARE
+from openpilot.system.version import get_build_metadata
 from panda import Panda
 
-from openpilot.frogpilot.common.frogpilot_variables import EARTH_RADIUS, FROGS_GO_MOO_PATH, KONIK_PATH
+from openpilot.frogpilot.common.frogpilot_variables import EARTH_RADIUS, FROGPILOT_API, FROGS_GO_MOO_PATH, KONIK_PATH
 
 class ThreadManager:
   def __init__(self):
@@ -164,6 +168,17 @@ def flash_panda(params_memory):
       sentry.capture_exception(exception)
 
   params_memory.remove("FlashPanda")
+
+
+def get_frogpilot_api_info():
+  params = Params()
+
+  api_token = params.get("FrogPilotApiToken")
+  build_metadata = dataclasses.asdict(get_build_metadata())
+  device_type = HARDWARE.get_device_type()
+  dongle_id = params.get("FrogPilotDongleId")
+
+  return api_token, build_metadata, device_type, dongle_id
 
 
 def get_lock_status(can_parser, can_sock):

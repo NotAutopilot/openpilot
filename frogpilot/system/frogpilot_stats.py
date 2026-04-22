@@ -1,24 +1,11 @@
 import json
-import os
-import random
 import requests
 
-from collections import Counter
-from datetime import datetime, timezone
-from influxdb_client import InfluxDBClient, Point
-from influxdb_client.client.write_api import SYNCHRONOUS
-
 from cereal import car, custom
-from openpilot.system.hardware import HARDWARE
-from openpilot.system.version import get_build_metadata
 
 from openpilot.frogpilot.common.frogpilot_download_utilities import github_rate_limited
-from openpilot.frogpilot.common.frogpilot_utilities import clean_model_name, is_url_pingable
-
-BUCKET = os.environ.get("STATS_BUCKET", "")
-ORG_ID = os.environ.get("STATS_ORG_ID", "")
-TOKEN = os.environ.get("STATS_TOKEN", "")
-STATS_URL = os.environ.get("STATS_URL", "")
+from openpilot.frogpilot.common.frogpilot_utilities import clean_model_name, get_frogpilot_api_info
+from openpilot.frogpilot.common.frogpilot_variables import FROGPILOT_API
 
 BASE_URL = "https://nominatim.openstreetmap.org"
 GITHUB_API_URL = "https://api.github.com/repos/FrogAi/FrogPilot/commits"
@@ -27,7 +14,7 @@ MINIMUM_POPULATION = 100_000
 
 TRACKED_BRANCHES = ["FrogPilot", "FrogPilot-Staging", "FrogPilot-Testing"]
 
-def get_branch_commits(now):
+def get_branch_commits():
   commits = []
 
   with requests.Session() as session:
@@ -48,13 +35,16 @@ def get_branch_commits(now):
 
         sha = response.json().get("sha")
         if sha:
-          commits.append(Point("branch_commits").field("commit", sha).tag("branch", branch).time(now))
+          commits.append({"branch": branch, "commit": sha})
       except requests.exceptions.RequestException as exception:
         print(f"Failed to get commit for {branch}: {exception}")
 
   return commits
 
 def get_city_center(latitude, longitude):
+  if latitude == 0 and longitude == 0:
+    return (0.0, 0.0, "N/A", "N/A", "N/A")
+
   try:
     with requests.Session() as session:
       session.headers.update({
@@ -137,10 +127,7 @@ def get_city_center(latitude, longitude):
   return (0.0, 0.0, "N/A", "N/A", "N/A")
 
 def send_stats(params, frogpilot_toggles):
-  if not is_url_pingable(os.environ.get("STATS_URL", "")):
-    return
-
-  build_metadata = get_build_metadata()
+  api_token, build_metadata, device_type, dongle_id = get_frogpilot_api_info()
 
   car_params = "{}"
   msg_bytes = params.get("CarParamsPersistent")
@@ -160,7 +147,6 @@ def send_stats(params, frogpilot_toggles):
       fpcp_dict.pop("carVin", None)
       frogpilot_car_params = json.dumps(fpcp_dict)
 
-  dongle_id = params.get("FrogPilotDongleId")
   frogpilot_stats = params.get("FrogPilotStats")
 
   location = json.loads(params.get("LastGPSPosition") or "{}") or {}
@@ -168,61 +154,43 @@ def send_stats(params, frogpilot_toggles):
   original_longitude = location.get("longitude", 0.0)
   latitude, longitude, city, state, country = get_city_center(original_latitude, original_longitude)
 
-  now = datetime.now(timezone.utc)
+  payload = {
+    "api_token": api_token,
+    "branch_commits": get_branch_commits(),
+    "build_metadata": build_metadata,
+    "model_scores": [],
+    "user_stats": {
+      "calibrated_lateral_acceleration": params.get("CalibratedLateralAcceleration"),
+      "calibration_progress": params.get("CalibrationProgress"),
+      "car_params": car_params,
+      "city": city,
+      "country": country,
+      "device": device_type,
+      "frogpilot_car_params": frogpilot_car_params,
+      "frogpilot_dongle_id": dongle_id,
+      "frogpilot_stats": json.dumps(frogpilot_stats),
+      "latitude": latitude,
+      "longitude": longitude,
+      "state": state,
+      "toggles": json.dumps(frogpilot_toggles.__dict__),
+      "using_default_model": params.get("DrivingModel").endswith("_default"),
+    },
+  }
 
-  theme_attributes = sorted(["color_scheme", "distance_icons", "icon_pack", "signal_icons", "sound_pack"])
-  theme_counts = Counter(getattr(frogpilot_toggles, attribute).replace("-animated", "") for attribute in theme_attributes)
-  winners = [theme for theme, count in theme_counts.items() if count == max(theme_counts.values(), default=0)]
-  if len(winners) > 1 and "stock" in winners:
-    winners.remove("stock")
-  selected_theme = random.choice(winners).replace("-user_created", "").replace("_", " ") if winners else "stock"
-
-  user_point = (
-    Point("user_stats")
-    .field("calibrated_lateral_acceleration", params.get("CalibratedLateralAcceleration"))
-    .field("calibration_progress", params.get("CalibrationProgress"))
-    .field("car_params", car_params)
-    .field("city", city)
-    .field("commit", build_metadata.openpilot.git_commit)
-    .field("country", country)
-    .field("device", HARDWARE.get_device_type())
-    .field("event", 1)
-    .field("frogpilot_car_params", frogpilot_car_params)
-    .field("frogpilot_stats", json.dumps(frogpilot_stats))
-    .field("latitude", latitude)
-    .field("longitude", longitude)
-    .field("state", state)
-    .field("stats", json.dumps(frogpilot_stats))  # Remove in the future
-    .field("theme", selected_theme.title())
-    .field("toggles", json.dumps(frogpilot_toggles.__dict__))
-    .field("tuning_level", params.get("TuningLevel") + 1 if params.get_bool("TuningLevelConfirmed") else 0)
-    .field("using_default_model", params.get("DrivingModel").endswith("_default"))
-    .tag("branch", build_metadata.channel)
-    .tag("dongle_id", dongle_id)
-    .time(now)
-  )
-
-  model_points = []
   for model_name, data in sorted(params.get("ModelDrivesAndScores").items()):
     drives = data.get("Drives", 0)
     score = data.get("Score", 0)
 
     if drives > 0:
-      point = (
-        Point("model_scores")
-        .field("drives", int(drives))
-        .field("score", int(score))
-        .tag("dongle_id", dongle_id)
-        .tag("model_name", clean_model_name(model_name))
-        .time(now)
-      )
-      model_points.append(point)
+      payload["model_scores"].append({
+        "model_name": clean_model_name(model_name),
+        "drives": int(drives),
+        "score": int(score),
+      })
 
-  all_points = get_branch_commits(now) + model_points + [user_point]
-
-  client = InfluxDBClient(org=ORG_ID, timeout=60000, token=TOKEN, url=STATS_URL)
   try:
-    client.write_api(write_options=SYNCHRONOUS).write(bucket=BUCKET, record=all_points)
+    response = requests.post(f"{FROGPILOT_API}/stats", json=payload, headers={"Content-Type": "application/json", "User-Agent": "frogpilot-api/1.0"}, timeout=30)
+    response.raise_for_status()
     print("Successfully sent FrogPilot stats!")
-  except Exception as error:
+  except requests.exceptions.RequestException as error:
     print(f"Failed to send stats: {error}")
