@@ -205,6 +205,11 @@ struct CarState {
   vehicleSensorsInvalid @52 :Bool;  # invalid steering angle readings, etc.
   lowSpeedAlert @56 :Bool;  # lost steering control due to a dynamic min steering speed
   blockPcmEnable @60 :Bool;  # whether to allow PCM to enable this frame
+  pedalMaxRegen @61 :Bool;  # pedal at max regen, driver should use brake for more decel
+  pedalLongActive @62 :Bool;  # Pre-AP pedal longitudinal mode is active (enableLongControl)
+  teslaCCEngaged @63 :Bool;     # NAP: rising edge of stock Tesla CC engaging (no-pedal mode)
+  teslaCCDisengaged @64 :Bool;  # NAP: falling edge of stock Tesla CC
+  teslaCCNotArmed @65 :Bool;    # NAP: lateral engaged but DI_cruiseState != STANDBY/ENABLED
 
   # cruise state
   cruiseState @10 :CruiseState;
@@ -564,7 +569,7 @@ struct CarParams {
     kpV @1 :List(Float32);
     kiBP @2 :List(Float32);
     kiV @3 :List(Float32);
-    kfDEPRECATED @6 :Float32;
+    kf @6 :Float32;
     deadzoneBPDEPRECATED @4 :List(Float32);
     deadzoneVDEPRECATED @5 :List(Float32);
   }
@@ -635,6 +640,9 @@ struct CarParams {
     fcaGiorgio @32;
     rivian @33;
     volkswagenMeb @34;
+    mg @35;
+    teslaLegacy @36;
+    teslaPreap @37;
   }
 
   enum SteerControlType {

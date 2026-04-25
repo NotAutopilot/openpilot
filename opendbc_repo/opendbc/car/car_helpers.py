@@ -94,6 +94,18 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
   fixed_fingerprint = os.environ.get('FINGERPRINT', "")
   skip_fw_query = os.environ.get('SKIP_FW_QUERY', False)
   disable_fw_cache = os.environ.get('DISABLE_FW_CACHE', False)
+
+  # NAP: Force Pre-AP fingerprint when NAPForcePreAP is set.
+  if not fixed_fingerprint:
+    try:
+      from openpilot.common.params import Params
+      if Params().get_bool("NAPForcePreAP"):
+        fixed_fingerprint = "TESLA_MODEL_S_PREAP"
+        skip_fw_query = True
+        carlog.warning("NAPForcePreAP enabled — forcing TESLA_MODEL_S_PREAP fingerprint")
+    except Exception:
+      pass
+
   ecu_rx_addrs = set()
 
   start_time = time.monotonic()

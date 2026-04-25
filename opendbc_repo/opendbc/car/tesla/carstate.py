@@ -5,6 +5,10 @@ from opendbc.car import Bus, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_THRESHOLD, CAR
+from opendbc.car.tesla.preap.nap_conf import nap_conf
+from opendbc.car.tesla.preap.engagement import PreAPEngagement
+from opendbc.car.tesla.preap.pedal_feedback import PedalFeedback
+from opendbc.car.tesla.preap.carstate import update_preap, get_preap_can_parsers
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
@@ -21,6 +25,41 @@ class CarState(CarStateBase):
 
     self.hands_on_level = 0
     self.das_control = None
+    self.cruise_buttons = 0
+    self.prev_cruise_buttons = 0
+    self.msg_stw_actn_req = None  # Full STW_ACTN_RQ message for spoofing cancel commands
+
+    # Follow distance stalk tracking
+    self.prev_stalk_follow = 0
+    self.speed_units = "MPH"  # Updated from DI_state each frame
+
+    # Pre-AP state (only instantiated for Pre-AP cars)
+    if self.CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
+      self.engagement = PreAPEngagement(
+        double_pull_enabled=nap_conf.double_pull_enabled,
+        double_pull_window_ms=nap_conf.double_pull_window_ms,
+      )
+      # Bridge attributes: carcontroller reads these via getattr(CS, 'X', default)
+      self.cruiseEnabled = False
+      self.enableLongControl = False
+      self.enableJustCC = False
+      self.pedal_speed_kph = 0.0
+      self.longCtrlEvent = None
+      self.preap_cc_cancel_needed = False
+      self.preap_cc_engage_needed = False
+
+      self.pedal = PedalFeedback()
+      self.pedal_interceptor_value = 0.0
+      self.pedal_timeout = True
+      self.pccEvent = None
+
+  def update_button_enable(self, buttonEvents):
+    # Pre-AP engagement is managed entirely by the PreAPEngagement FSM.
+    # The base class method triggers on accelCruise/decelCruise release,
+    # which would let up/down stalk engage openpilot independently of our FSM.
+    if self.CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
+      return False
+    return super().update_button_enable(buttonEvents)
 
   def update_autopark_state(self, autopark_state: str, cruise_enabled: bool):
     autopark_now = autopark_state in ("ACTIVE", "COMPLETE", "SELFPARK_STARTED")
@@ -32,6 +71,11 @@ class CarState(CarStateBase):
     self.cruise_enabled_prev = cruise_enabled
 
   def update(self, can_parsers, frogpilot_toggles) -> structs.CarState:
+    if self.CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
+      ret = update_preap(self, can_parsers)
+      fp_ret = custom.FrogPilotCarState.new_message()
+      return ret, fp_ret
+
     cp_party = can_parsers[Bus.party]
     cp_ap_party = can_parsers[Bus.ap_party]
     ret = structs.CarState()
@@ -45,7 +89,7 @@ class CarState(CarStateBase):
 
     # Brake pedal
     ret.brake = 0
-    ret.brakePressed = cp_party.vl["IBST_status"]["IBST_driverBrakeApply"] == 2
+    ret.brakePressed = cp_party.vl["ESP_status"]["ESP_driverBrakeApply"] == 2
 
     # Steering wheel
     epas_status = cp_party.vl["EPAS3S_sysStatus"]
@@ -109,7 +153,7 @@ class CarState(CarStateBase):
     ret.stockLkas = cp_ap_party.vl["DAS_steeringControl"]["DAS_steeringControlType"] == 2  # LANE_KEEP_ASSIST
 
     # Stock Autosteer should be off (includes FSD)
-    if self.CP.carFingerprint in (CAR.TESLA_MODEL_3, CAR.TESLA_MODEL_Y):
+    if self.CP.carFingerprint in (CAR.TESLA_MODEL_3, CAR.TESLA_MODEL_Y, CAR.TESLA_MODEL_Y_JUNIPER):
       ret.invalidLkasSetting = cp_ap_party.vl["DAS_settings"]["DAS_autosteerEnabled"] != 0
     else:
       pass
@@ -125,6 +169,9 @@ class CarState(CarStateBase):
 
   @staticmethod
   def get_can_parsers(CP):
+    if CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
+      return get_preap_can_parsers(CP)
+
     return {
       Bus.party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.party),
       Bus.ap_party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.autopilot_party)

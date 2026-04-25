@@ -90,7 +90,7 @@ class Bus(StrEnum):
   main = auto()
   party = auto()
   ap_party = auto()
-
+  ap_pt = auto()
 
 def rate_limit(new_value, last_value, dw_step, up_step):
   return float(np.clip(new_value, last_value + dw_step, last_value + up_step))

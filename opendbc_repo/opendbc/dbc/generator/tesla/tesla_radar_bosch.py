@@ -45,7 +45,7 @@ BS_:
 BU_:  Autopilot Radar Diag
 
 
-BO_ 769 TeslaRadarSguInfo: 8 Radar
+BO_ 769 TeslaRadarSguInfo: 6 Radar
  SG_ RADC_VerticalMisalignment : 0|8@1+ (1,0) [0|255] ""  Autopilot
  SG_ RADC_SCUTemperature : 8|8@1+ (1,-128) [-128|127] ""  Autopilot
  SG_ RADC_VMA_Plaus : 16|8@1+ (1,0) [0|255] ""  Autopilot

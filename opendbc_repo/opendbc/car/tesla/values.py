@@ -56,9 +56,69 @@ class CAR(Platforms):
      ],
     CarSpecs(mass=2072., wheelbase=2.890, steerRatio=12.0),
   )
+  TESLA_MODEL_Y_JUNIPER = TeslaPlatformConfig(
+    [
+      TeslaCarDocsHW4("Tesla Model Y JUNIPER (with HW4) 2025-26"),
+     ],
+    CarSpecs(mass=2072., wheelbase=2.890, steerRatio=12.0),
+  )
   TESLA_MODEL_X = TeslaPlatformConfig(
     [TeslaCarDocsHW4("Tesla Model X (with HW4) 2024")],
     CarSpecs(mass=2495., wheelbase=2.960, steerRatio=12.0),
+  )
+  TESLA_MODEL_X_HW1 = TeslaPlatformConfig(
+    [CarDocs("Tesla Model X (with HW1) 2014-16", "All", car_parts=CarParts.common([CarHarness.tesla_model_x_hw1]))],
+    CarSpecs(mass=2447., wheelbase=2.960, steerRatio=15.0),
+    {
+      Bus.chassis: 'tesla_can',
+      Bus.party: 'tesla_can',
+      Bus.pt: 'tesla_can',
+      Bus.radar: 'tesla_radar_bosch_generated',
+    },
+  )
+  TESLA_MODEL_S = TeslaPlatformConfig(
+    [TeslaCarDocsHW4("Tesla Model S (with HW4) 2024")],
+    CarSpecs(mass=2166., wheelbase=2.960, steerRatio=12.0),
+  )
+  TESLA_MODEL_S_HW1 = TeslaPlatformConfig(
+    [CarDocs("Tesla Model S (with HW1) 2014-16", "All", car_parts=CarParts.common([CarHarness.tesla_model_s_hw1]))],
+    CarSpecs(mass=2100., wheelbase=2.960, steerRatio=15.0),
+    {
+      Bus.chassis: 'tesla_can',
+      Bus.party: 'tesla_can',
+      Bus.pt: 'tesla_can',
+      Bus.radar: 'tesla_radar_bosch_generated',
+    },
+  )
+  TESLA_MODEL_S_HW2 = TeslaPlatformConfig(
+    [CarDocs("Tesla Model S (with HW2) 2017-19", "All", car_parts=CarParts.common([CarHarness.tesla_model_sx_hw2]))],
+    CarSpecs(mass=2100., wheelbase=2.960, steerRatio=15.0),
+    {
+      Bus.chassis: 'tesla_can',
+      Bus.party: 'tesla_can',
+      Bus.pt: 'tesla_powertrain',
+      Bus.radar: 'tesla_radar_bosch_generated',
+    },
+  )
+  TESLA_MODEL_S_HW3 = TeslaPlatformConfig(
+    [CarDocs("Tesla Model S (with HW3) 2020-23", "All", car_parts=CarParts.common([CarHarness.tesla_model_sx_hw3]))],
+    CarSpecs(mass=2100., wheelbase=2.960, steerRatio=15.0),
+    {
+      Bus.chassis: 'tesla_can',
+      Bus.party: 'tesla_raven_party',
+      Bus.pt: 'tesla_powertrain',
+      Bus.radar: 'tesla_radar_continental_generated',
+    },
+  )
+  TESLA_MODEL_S_PREAP = TeslaPlatformConfig(
+    [CarDocs("Tesla Model S (Pre-AP) 2012-14", "All", car_parts=CarParts.common([CarHarness.tesla_model_s_hw1]))],
+    CarSpecs(mass=2100., wheelbase=2.960, steerRatio=15.0),
+    {
+      Bus.chassis: 'tesla_preap',
+      Bus.party: 'tesla_preap',
+      Bus.pt: 'tesla_preap',
+      Bus.radar: 'tesla_radar_bosch_generated',
+    },
   )
 
 
@@ -68,15 +128,32 @@ FW_QUERY_CONFIG = FwQueryConfig(
       [StdQueries.TESTER_PRESENT_REQUEST, StdQueries.SUPPLIER_SOFTWARE_VERSION_REQUEST],
       [StdQueries.TESTER_PRESENT_RESPONSE, StdQueries.SUPPLIER_SOFTWARE_VERSION_RESPONSE],
       bus=0,
-    )
+    ),
+    Request(
+      [StdQueries.TESTER_PRESENT_REQUEST, StdQueries.UDS_VERSION_REQUEST],
+      [StdQueries.TESTER_PRESENT_RESPONSE, StdQueries.UDS_VERSION_RESPONSE],
+      rx_offset=0x08,
+      bus=0,
+    ),
+    Request(
+      [StdQueries.TESTER_PRESENT_REQUEST, StdQueries.MANUFACTURER_SOFTWARE_VERSION_REQUEST],
+      [StdQueries.TESTER_PRESENT_RESPONSE, StdQueries.MANUFACTURER_SOFTWARE_VERSION_RESPONSE],
+      rx_offset=0x08,
+      bus=0,
+    ),
   ]
 )
 
 
 class CANBUS:
   party = 0
-  vehicle = 1
+  radar = 1
   autopilot_party = 2
+
+  # only needed on raven
+  powertrain = 4
+  chassis = 5
+  autopilot_powertrain = 6
 
 
 GEAR_MAP = {
@@ -117,14 +194,56 @@ class CarControllerParams:
   JERK_LIMIT_MIN = -4.9  # m/s^3, ACC faults at 5.0
 
 
+class TeslaLegacyParams(IntFlag):
+  NO_SDM1 = 1
+
+
 class TeslaSafetyFlags(IntFlag):
   LONG_CONTROL = 1
+  FLAG_EXTERNAL_PANDA = 2
+  FLAG_HW1 = 4
+  FLAG_HW2 = 8
+  FLAG_HW3 = 16
+  FLAG_PREAP = 32
+  FLAG_ENABLE_PEDAL = 64
+  FLAG_RADAR_BEHIND_NOSECONE = 128
+  FLAG_RADAR_EMULATION = 256
 
 
 class TeslaFlags(IntFlag):
   LONG_CONTROL = 1
 
 
+class CruiseButtons:
+  """
+  Cruise stalk button values from STW_ACTN_RQ.SpdCtrlLvr_Stat
+  From DBC: VAL_ 69 SpdCtrlLvr_Stat 32 "DN_1ST" 16 "UP_1ST" 8 "DN_2ND" 4 "UP_2ND" 2 "RWD" 1 "FWD" 0 "IDLE"
+  """
+  IDLE = 0            # No input
+  CANCEL = 1          # FWD - Push away from driver
+  MAIN = 2            # RWD - Pull toward driver (engagement)
+  SET_ACCEL = 16      # UP_1ST - First detent up; from STANDBY: sets cruise at current speed
+  RES_ACCEL = 16      # UP_1ST - Alias; from ENABLED: +1 unit / resume at last speed
+  RES_ACCEL_2ND = 4   # UP_2ND - Second detent up (faster)
+  DECEL_SET = 32      # DN_1ST - First detent down
+  DECEL_2ND = 8       # DN_2ND - Second detent down (faster)
+
+  @classmethod
+  def is_accel(cls, btn):
+    return btn in (cls.RES_ACCEL, cls.RES_ACCEL_2ND)
+
+  @classmethod
+  def is_decel(cls, btn):
+    return btn in (cls.DECEL_SET, cls.DECEL_2ND)
+
+
+# Pull the cruise stalk twice in this many ms for a 'double pull'
+# Matches Tinkla's PCC_module.py exactly
+STALK_DOUBLE_PULL_MS = 750
+
+
 DBC = CAR.create_dbc_map()
 
 STEER_THRESHOLD = 1
+
+LEGACY_CARS = (CAR.TESLA_MODEL_S_HW1, CAR.TESLA_MODEL_S_HW2, CAR.TESLA_MODEL_S_HW3, CAR.TESLA_MODEL_X_HW1, CAR.TESLA_MODEL_S_PREAP)

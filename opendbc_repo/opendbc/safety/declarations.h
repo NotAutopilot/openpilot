@@ -33,6 +33,9 @@
 #define SAFETY_PSA 31U
 #define SAFETY_RIVIAN 33U
 #define SAFETY_VOLKSWAGEN_MEB 34U
+#define SAFETY_MG 35U
+#define SAFETY_TESLA_LEGACY 36U
+#define SAFETY_TESLA_PREAP 37U
 
 #define GET_BIT(msg, b) ((bool)!!(((msg)->data[((b) / 8U)] >> ((b) % 8U)) & 0x1U))
 #define GET_FLAG(value, mask) (((value) & (mask)) == (mask))
@@ -215,6 +218,7 @@ typedef bool (*fwd_hook)(int bus_num, int addr);      // returns true if the mes
 typedef struct {
   safety_hook_init init;
   rx_hook rx;
+  rx_hook rx_all;  // called for ALL received messages, before whitelist check (for CAN forwarding)
   tx_hook tx;
   fwd_hook fwd;
   get_checksum_t get_checksum;
@@ -358,3 +362,5 @@ extern const safety_hooks volkswagen_mqb_hooks;
 extern const safety_hooks volkswagen_pq_hooks;
 extern const safety_hooks rivian_hooks;
 extern const safety_hooks psa_hooks;
+extern const safety_hooks tesla_preap_hooks;
+extern const safety_hooks tesla_legacy_hooks;
