@@ -77,6 +77,19 @@ function launch {
     agnos_init
   fi
 
+  # NotAutopilot: block comma 3 (tici) — Pre-AP requires comma 3X (tizi) or newer
+  if [ -f /sys/firmware/devicetree/base/model ]; then
+    DEVICE_TYPE=$(cat /sys/firmware/devicetree/base/model | tr -d '\0' | awk -F'comma ' '{print $2}')
+    if [ "$DEVICE_TYPE" = "tici" ]; then
+      echo "============================================="
+      echo "NotAutopilot does not support comma 3 (tici)."
+      echo "Please use a comma 3X or newer device."
+      echo "============================================="
+      sleep 30
+      exit 1
+    fi
+  fi
+
   # write tmux scrollback to a file
   tmux capture-pane -pq -S-1000 > /tmp/launch_log
 
