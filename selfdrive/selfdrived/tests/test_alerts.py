@@ -2,6 +2,7 @@ import copy
 import json
 import os
 import random
+from types import SimpleNamespace
 from PIL import Image, ImageDraw, ImageFont
 
 from cereal import log, car
@@ -61,9 +62,10 @@ class TestAlerts:
                       ImageFont.truetype(regular_font_path, 66)],
     }
 
+    fp_toggles = SimpleNamespace(has_cc_long=False, current_holiday_theme="", startup_alert_bottom="")
     for alert in ALERTS:
       if not isinstance(alert, Alert):
-        alert = alert(self.CP, self.CS, self.sm, metric=False, soft_disable_time=100, personality=log.LongitudinalPersonality.standard)
+        alert = alert(self.CP, self.CS, self.sm, metric=False, soft_disable_time=100, personality=log.LongitudinalPersonality.standard, frogpilot_toggles=fp_toggles)
 
       # for full size alerts, both text fields wrap the text,
       # so it's unlikely that they  would go past the max width
