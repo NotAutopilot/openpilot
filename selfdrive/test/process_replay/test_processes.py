@@ -61,8 +61,9 @@ segments = [
   ("TESLA", "2c912ca5de3b1ee9|0000025d--6eb6bcbca4--4"),
 ]
 
-# dashcamOnly makes don't need to be tested until a full port is done
-excluded_interfaces = ["mock", "body", "psa"]
+# dashcamOnly makes don't need to be tested until a full port is done.
+# "mg" excluded because xnor-tech's MG ZS EV port doesn't have test routes.
+excluded_interfaces = ["mock", "body", "psa", "mg"]
 
 BASE_URL = "https://commadataci.blob.core.windows.net/openpilotci/"
 REF_COMMIT_FN = os.path.join(PROC_REPLAY_DIR, "ref_commit")

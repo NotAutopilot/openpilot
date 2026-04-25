@@ -98,8 +98,13 @@ Params::Params(const std::string &path, bool memory) {
   // FrogPilot variables
   std::string params_folder;
   if (memory) {
-    // /dev/shm exists on Linux; macOS dev workflows fall back to /tmp.
-    params_folder = (access("/dev/shm", W_OK) == 0) ? "/dev/shm/params" : "/tmp/openpilot_params_memory";
+#ifdef __APPLE__
+    // macOS dev workflow: no /dev/shm. The device build is Linux-only,
+    // so this branch never compiles into a deployed binary.
+    params_folder = "/tmp/openpilot_params_memory";
+#else
+    params_folder = "/dev/shm/params";
+#endif
   } else {
     cache_path = "/cache/params" + params_prefix + "/";
     params_folder = path;
