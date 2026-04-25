@@ -9,10 +9,11 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, get_T_FOLLOW
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan
-from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
+from openpilot.selfdrive.car.cruise import V_CRUISE_UNSET
+from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.frogpilot.common.frogpilot_variables import MINIMUM_LATERAL_ACCELERATION
@@ -64,6 +65,12 @@ class LongitudinalPlanner:
     self.dt = dt
     self.allow_throttle = True
 
+    self._is_preap = (CP.brand == "tesla" and CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+                       and CP.openpilotLongitudinalControl and not CP.pcmCruise)
+    self._params = Params()
+    self.nap_follow_dist = self._params.get("NAPFollowDistance", return_default=True) if self._is_preap else None
+    self._frame = 0
+
     self.a_desired = init_a
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
     self.prev_accel_clip = [ACCEL_MIN, ACCEL_MAX]
@@ -105,6 +112,11 @@ class LongitudinalPlanner:
 
   def update(self, sm, frogpilot_toggles):
     mode = 'blended' if sm['selfdriveState'].experimentalMode else 'acc'
+
+    # NAP: refresh follow-distance toggle every 200 ms (avoid hot-path Params hits)
+    self._frame += 1
+    if self._is_preap and self._frame % 20 == 0:
+      self.nap_follow_dist = self._params.get("NAPFollowDistance", return_default=True)
 
     if len(sm['carControl'].orientationNED) == 3:
       accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])
@@ -155,7 +167,12 @@ class LongitudinalPlanner:
 
     self.mpc.set_weights(sm['frogpilotPlan'].accelerationJerk, sm['frogpilotPlan'].dangerJerk, sm['frogpilotPlan'].speedJerk, prev_accel_constraint, personality=sm['selfdriveState'].personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
-    self.mpc.update(sm['radarState'], v_cruise, x, v, a, j, sm['frogpilotPlan'].dangerFactor, sm['frogpilotPlan'].tFollow, personality=sm['selfdriveState'].personality)
+
+    # On Pre-AP, override frogpilotPlan's tFollow with NAP's stalk-dial value.
+    t_follow = sm['frogpilotPlan'].tFollow
+    if self._is_preap and self.nap_follow_dist is not None:
+      t_follow = get_T_FOLLOW(nap_follow_dist=self.nap_follow_dist)
+    self.mpc.update(sm['radarState'], v_cruise, x, v, a, j, sm['frogpilotPlan'].dangerFactor, t_follow, personality=sm['selfdriveState'].personality)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)

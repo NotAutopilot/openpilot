@@ -82,7 +82,13 @@ def get_jerk_factor(aggressive_jerk_acceleration=0.5, aggressive_jerk_danger=0.5
       raise NotImplementedError("Longitudinal personality not supported")
 
 
-def get_T_FOLLOW(aggressive_follow=1.25, standard_follow=1.45, relaxed_follow=1.75, custom_personalities=False, personality=log.LongitudinalPersonality.standard):
+def get_T_FOLLOW(aggressive_follow=1.25, standard_follow=1.45, relaxed_follow=1.75, custom_personalities=False,
+                 personality=log.LongitudinalPersonality.standard, nap_follow_dist=None):
+  # NAP configurable follow distance: 1-7 maps to 0.7s - 1.9s in 0.2s steps,
+  # overrides personality. Caller passes nap_follow_dist only for Pre-AP cars.
+  if nap_follow_dist is not None and 1 <= nap_follow_dist <= 7:
+    return 0.7 + (nap_follow_dist - 1) * 0.2
+
   if custom_personalities:
     if personality==log.LongitudinalPersonality.relaxed:
       return relaxed_follow
