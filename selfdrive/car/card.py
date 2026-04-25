@@ -12,6 +12,7 @@ from openpilot.common.realtime import config_realtime_process, Priority, Ratekee
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
 
 from opendbc.car import DT_CTRL, ButtonType, structs
+from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
 from opendbc.car.carlog import carlog
 from opendbc.car.fw_versions import ObdCallback
@@ -214,10 +215,31 @@ class Car:
     if can_rcv_valid and REPLAY:
       self.can_log_mono_time = messaging.log_from_bytes(can_strs[0]).logMonoTime
 
-    self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric, self.frogpilot_toggles)
-    if self.sm['carControl'].enabled and not self.CC_prev.enabled:
-      # Use CarState w/ buttons from the step selfdrived enables on
-      self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.experimental_mode, self.resume_prev_button, self.frogpilot_toggles)
+    try:
+      preap_software_cruise = (
+        self.CP.brand == "tesla"
+        and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+        and self.CP.openpilotLongitudinalControl
+        and not self.CP.pcmCruise
+      )
+
+      if not preap_software_cruise:
+        self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric, self.frogpilot_toggles)
+        if self.sm['carControl'].enabled and not self.CC_prev.enabled:
+          # Use CarState w/ buttons from the step selfdrived enables on
+          self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.experimental_mode, self.resume_prev_button, self.frogpilot_toggles)
+      else:
+        # Pre-AP pedal mode owns set-speed in carstate via pedal_speed_kph.
+        # Keep planner target aligned to that software-managed target.
+        preap_v_cruise_kph = float(CS.cruiseState.speed * CV.MS_TO_KPH)
+        self.v_cruise_helper.v_cruise_kph_last = self.v_cruise_helper.v_cruise_kph
+        self.v_cruise_helper.v_cruise_kph = preap_v_cruise_kph
+        self.v_cruise_helper.v_cruise_cluster_kph = preap_v_cruise_kph
+    except Exception:
+      cloudlog.exception("Pre-AP software cruise target update failed, falling back to VCruiseHelper default")
+      self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric, self.frogpilot_toggles)
+      if self.sm['carControl'].enabled and not self.CC_prev.enabled:
+        self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.experimental_mode, self.resume_prev_button, self.frogpilot_toggles)
 
     # TODO: mirror the carState.cruiseState struct?
     CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)

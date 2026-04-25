@@ -487,4 +487,24 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"WheelIcon", {PERSISTENT, STRING, "frog", "stock", 0}},
     {"WheelSpeed", {PERSISTENT, BOOL, "0", "0", 2}},
     {"WheelToDownload", {CLEAR_ON_MANAGER_START, STRING, "", ""}},
+
+    // NAP (NotAutopilot) Pre-AP Tesla params.
+    // Use comma's narrow form: {flags, type, default}. FrogPilot's extra
+    // (stock_value, tuning_level) default to nullopt/0 — we don't surface
+    // these as user-tunable toggles in FrogPilot's settings UI yet.
+    {"NAPBrakeFactor", {PERSISTENT, FLOAT, "1.0"}},
+    {"NAPFollowDistance", {PERSISTENT, INT, "4"}},
+    {"NAPForcePreAP", {PERSISTENT, BOOL, "1"}},
+    {"NAPiBoosterEnabled", {PERSISTENT, BOOL}},
+    {"NAPPedalCalibDone", {PERSISTENT, BOOL}},
+    {"NAPPedalCalibFactor", {PERSISTENT, FLOAT, "1.0"}},
+    {"NAPPedalCalibMax", {PERSISTENT, FLOAT, "99.6"}},
+    {"NAPPedalCalibMin", {PERSISTENT, FLOAT, "-3.0"}},
+    {"NAPPedalCalibZero", {PERSISTENT, FLOAT, "0.0"}},
+    {"NAPPedalCanBus", {PERSISTENT, INT, "2"}},
+    {"NAPPedalEnabled", {PERSISTENT, BOOL}},
+    {"NAPPedalProfile", {PERSISTENT, INT, "4"}},
+    {"NAPRadarBehindNosecone", {PERSISTENT, BOOL}},
+    {"NAPRadarEnabled", {PERSISTENT, BOOL}},
+    {"NAPScriptRunning", {CLEAR_ON_MANAGER_START, BOOL}},
 };
