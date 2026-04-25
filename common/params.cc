@@ -2,6 +2,7 @@
 
 #include <dirent.h>
 #include <sys/file.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cassert>
@@ -97,7 +98,8 @@ Params::Params(const std::string &path, bool memory) {
   // FrogPilot variables
   std::string params_folder;
   if (memory) {
-    params_folder = "/dev/shm/params";
+    // /dev/shm exists on Linux; macOS dev workflows fall back to /tmp.
+    params_folder = (access("/dev/shm", W_OK) == 0) ? "/dev/shm/params" : "/tmp/openpilot_params_memory";
   } else {
     cache_path = "/cache/params" + params_prefix + "/";
     params_folder = path;

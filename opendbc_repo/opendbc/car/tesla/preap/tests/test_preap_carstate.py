@@ -12,7 +12,9 @@ See vault/lessons/agent-failure-modes/capnp-schema-write-without-field.md
 and the regression report d0cdc986c5d023f5|4a5ffc1c21 (2026-04-20).
 """
 import unittest
+from types import SimpleNamespace
 
+from cereal import custom
 from opendbc.car.car_helpers import interfaces
 
 
@@ -23,21 +25,26 @@ class TestPreAPCarStateUpdate(unittest.TestCase):
     CP = CarInterface.get_params("TESLA_MODEL_S_PREAP",
                                  {i: {} for i in range(8)},
                                  [],
-                                 alpha_long=False, is_release=False, docs=False)
-    return CarInterface(CP)
+                                 alpha_long=False, is_release=False, docs=False,
+                                 frogpilot_toggles=SimpleNamespace())
+    FPCP = custom.FrogPilotCarParams.new_message()
+    return CarInterface(CP, FPCP)
 
   def test_update_runs_without_crashing(self):
     """update() with empty CAN must not raise — exercises every ret.X write path."""
     CI = self._make_interface()
+    fp_toggles = SimpleNamespace()
     # Ten iterations; mirrors upstream test_car_interfaces pattern and catches
     # issues that only appear after state has accumulated.
     for _ in range(10):
-      CI.update([])
+      CI.update([], fp_toggles)
 
   def test_nap_specific_fields_on_carstate(self):
     """NAP-specific booleans written by update_preap must exist on the schema."""
     CI = self._make_interface()
-    CS = CI.update([])
+    # FrogPilot's update returns (CarState, FrogPilotCarState) tuple.
+    result = CI.update([], SimpleNamespace())
+    CS = result[0] if isinstance(result, tuple) else result
     for field in ("teslaCCEngaged", "teslaCCDisengaged", "teslaCCNotArmed",
                   "pedalMaxRegen", "pedalLongActive"):
       self.assertTrue(hasattr(CS, field), f"CarState schema missing {field}")

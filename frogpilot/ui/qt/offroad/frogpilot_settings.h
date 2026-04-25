@@ -42,6 +42,7 @@ public:
   bool isToyota = true;
   bool isTSK = false;
   bool isVolt = true;
+  bool isPreAPTesla = false;
   bool keepScreenOn = false;
   bool lkasAllowedForAOL = false;
   bool openpilotLongitudinalControlDisabled = false;

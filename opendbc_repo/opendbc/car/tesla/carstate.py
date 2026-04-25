@@ -17,7 +17,14 @@ class CarState(CarStateBase):
   def __init__(self, CP, FPCP):
     super().__init__(CP, FPCP)
     self.can_define = CANDefine(DBC[CP.carFingerprint][Bus.party])
-    self.shifter_values = self.can_define.dv["DI_systemStatus"]["DI_gear"]
+    # Pre-AP DBC defines DI_torque2 instead of DI_systemStatus; gear lookup
+    # happens via update_preap, which keys off the right message and reads
+    # can_defines (plural) — a merged view across the buses.
+    if CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
+      self.can_defines = self.can_define.dv
+      self.shifter_values = self.can_defines["DI_torque2"]["DI_gear"]
+    else:
+      self.shifter_values = self.can_define.dv["DI_systemStatus"]["DI_gear"]
 
     self.autopark = False
     self.autopark_prev = False

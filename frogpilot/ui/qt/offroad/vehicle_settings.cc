@@ -157,18 +157,21 @@ FrogPilotVehiclesPanel::FrogPilotVehiclesPanel(FrogPilotSettingsWindow *parent, 
   FrogPilotListWidget *hkgList = new FrogPilotListWidget(this);
   FrogPilotListWidget *subaruList = new FrogPilotListWidget(this);
   FrogPilotListWidget *toyotaList = new FrogPilotListWidget(this);
+  FrogPilotListWidget *teslaList = new FrogPilotListWidget(this);
   FrogPilotListWidget *vehicleInfoList = new FrogPilotListWidget(this);
 
   ScrollView *gmPanel = new ScrollView(gmList, this);
   ScrollView *hkgPanel = new ScrollView(hkgList, this);
   ScrollView *subaruPanel = new ScrollView(subaruList, this);
   ScrollView *toyotaPanel = new ScrollView(toyotaList, this);
+  ScrollView *teslaPanel = new ScrollView(teslaList, this);
   ScrollView *vehicleInfoPanel = new ScrollView(vehicleInfoList, this);
 
   vehiclesLayout->addWidget(gmPanel);
   vehiclesLayout->addWidget(hkgPanel);
   vehiclesLayout->addWidget(subaruPanel);
   vehiclesLayout->addWidget(toyotaPanel);
+  vehiclesLayout->addWidget(teslaPanel);
   vehiclesLayout->addWidget(vehicleInfoPanel);
 
   std::vector<std::tuple<QString, QString, QString, QString>> vehicleToggles {
@@ -187,6 +190,14 @@ FrogPilotVehiclesPanel::FrogPilotVehiclesPanel(FrogPilotSettingsWindow *parent, 
     {"FrogsGoMoosTweak", tr("FrogsGoMoo's Personal Tweaks"), tr("<b>Personal tweaks by FrogsGoMoo for quicker acceleration and smoother braking.</b>"), ""},
     {"LockDoorsTimer", tr("Lock Doors On Ignition Off After"), tr("<b>Automatically lock the doors on ignition off</b> when no one is detected in the front seats."), ""},
     {"SNGHack", tr("Stop-and-Go Hack"), tr("<b>Force stop-and-go</b> on Lexus/Toyota vehicles without stock stop-and-go functionality."), ""},
+
+    {"TeslaToggles", tr("Pre-AP Tesla Settings"), tr("<b>NotAutopilot features for 2012-2014 Pre-Autopilot Tesla Model S vehicles.</b>"), ""},
+    {"NAPPedalEnabled", tr("Comma Pedal"), tr("<b>Enable Comma Pedal interceptor</b> for openpilot longitudinal control on Pre-AP Tesla."), ""},
+    {"NAPPedalProfile", tr("Pedal Profile"), tr("<b>Comma Pedal profile (1-7).</b> Higher values are more aggressive."), ""},
+    {"NAPRadarEnabled", tr("Bosch Radar"), tr("<b>Enable Bosch radar</b> as a lead-vehicle source. Requires retrofitted Bosch front radar."), ""},
+    {"NAPRadarOffset", tr("Radar Lateral Offset"), tr("<b>Lateral offset of Bosch radar mount</b> in meters. Negative = left of centerline."), ""},
+    {"NAPFollowDistance", tr("Follow Distance"), tr("<b>Following gap (1-7).</b> 1 = closest, 7 = farthest. Driven by stalk dial on the wheel."), ""},
+    {"NAPForcePreAP", tr("Force Pre-AP Fingerprint"), tr("<b>Treat the connected vehicle as a Pre-AP Tesla Model S.</b> Required for first boot when fingerprinting cannot tell Pre-AP apart from later Model S hardware."), ""},
 
     {"VehicleInfo", tr("Vehicle Info"), tr("<b>Information about your vehicle in regards to openpilot support and functionality.</b>"), ""},
     {"HardwareDetected", tr("3rd Party Hardware Detected"), tr("<b>Detected 3rd party hardware.</b>"), ""},
@@ -232,6 +243,19 @@ FrogPilotVehiclesPanel::FrogPilotVehiclesPanel(FrogPilotSettingsWindow *parent, 
         vehiclesLayout->setCurrentWidget(toyotaPanel);
       });
       vehicleToggle = toyotaButton;
+    } else if (param == "TeslaToggles") {
+      ButtonControl *teslaButton = new ButtonControl(title, tr("MANAGE"), desc);
+      QObject::connect(teslaButton, &ButtonControl::clicked, [vehiclesLayout, teslaPanel, this]() {
+        openDescriptions(forceOpenDescriptions, toggles);
+        vehiclesLayout->setCurrentWidget(teslaPanel);
+      });
+      vehicleToggle = teslaButton;
+    } else if (param == "NAPPedalProfile") {
+      vehicleToggle = new FrogPilotParamValueControl(param, title, desc, icon, 1, 7, QString(), std::map<float, QString>(), 1);
+    } else if (param == "NAPFollowDistance") {
+      vehicleToggle = new FrogPilotParamValueControl(param, title, desc, icon, 1, 7, QString(), std::map<float, QString>(), 1);
+    } else if (param == "NAPRadarOffset") {
+      vehicleToggle = new FrogPilotParamValueControl(param, title, desc, icon, -2.0f, 2.0f, " m", std::map<float, QString>(), 0.05f, false);
     } else if (param == "ToyotaDoors") {
       std::vector<QString> lockToggles{"LockDoors", "UnlockDoors"};
       std::vector<QString> lockToggleNames{tr("Lock"), tr("Unlock")};
@@ -275,6 +299,8 @@ FrogPilotVehiclesPanel::FrogPilotVehiclesPanel(FrogPilotSettingsWindow *parent, 
       subaruList->addItem(vehicleToggle);
     } else if (toyotaKeys.contains(param)) {
       toyotaList->addItem(vehicleToggle);
+    } else if (teslaKeys.contains(param)) {
+      teslaList->addItem(vehicleToggle);
     } else if (vehicleInfoKeys.contains(param)) {
       vehicleInfoList->addItem(vehicleToggle);
     } else {
@@ -386,6 +412,8 @@ void FrogPilotVehiclesPanel::updateToggles() {
       setVisible &= parent->isSubaru;
     } else if (toyotaKeys.contains(key)) {
       setVisible &= parent->isToyota;
+    } else if (teslaKeys.contains(key)) {
+      setVisible &= parent->isPreAPTesla;
     } else if (vehicleInfoKeys.contains(key)) {
       setVisible = true;
     }
@@ -421,6 +449,8 @@ void FrogPilotVehiclesPanel::updateToggles() {
         toggles["SubaruToggles"]->setVisible(true);
       } else if (toyotaKeys.contains(key)) {
         toggles["ToyotaToggles"]->setVisible(true);
+      } else if (teslaKeys.contains(key)) {
+        toggles["TeslaToggles"]->setVisible(true);
       } else if (vehicleInfoKeys.contains(key)) {
         toggles["VehicleInfo"]->setVisible(true);
       }

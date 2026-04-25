@@ -28,6 +28,7 @@ private:
   QSet<QString> longitudinalKeys = {"FrogsGoMoosTweak", "SNGHack", "VoltSNG"};
   QSet<QString> subaruKeys = {"SubaruSNG"};
   QSet<QString> toyotaKeys = {"ClusterOffset", "FrogsGoMoosTweak", "LockDoorsTimer", "SNGHack", "ToyotaDoors"};
+  QSet<QString> teslaKeys = {"NAPPedalEnabled", "NAPPedalProfile", "NAPRadarEnabled", "NAPRadarOffset", "NAPFollowDistance", "NAPForcePreAP"};
   QSet<QString> vehicleInfoKeys = {"BlindSpotSupport", "HardwareDetected", "OpenpilotLongitudinal", "PedalSupport", "RadarSupport", "SDSUSupport", "SNGSupport"};
 
   QSet<QString> parentKeys;

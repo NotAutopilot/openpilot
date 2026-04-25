@@ -341,6 +341,7 @@ void FrogPilotSettingsWindow::updateVariables() {
     isToyota = carMake == "toyota";
     isTSK = CP.getSecOcRequired();
     isVolt = carFingerprint == "CHEVROLET_VOLT";
+    isPreAPTesla = carFingerprint == "TESLA_MODEL_S_PREAP";
     latAccelFactor = CP.getLateralTuning().getTorque().getLatAccelFactor();
     lkasAllowedForAOL = frogpilot_toggles.value("lkas_allowed_for_aol").toBool();
     longitudinalActuatorDelay = CP.getLongitudinalActuatorDelay();
