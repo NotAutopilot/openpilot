@@ -11,9 +11,13 @@ if arch != "larch64":
 if arch == "Darwin":
   # fix OpenCL
   del libs[libs.index('OpenCL')]
-  env['FRAMEWORKS'] = ['OpenCL']
+  # macOS frameworks: OpenCL plus ffmpeg's VideoToolbox HW encoding chain
+  env['FRAMEWORKS'] = ['OpenCL', 'VideoToolbox', 'CoreVideo', 'CoreMedia', 'CoreFoundation', 'Security']
   # exclude v4l
   del src[src.index('encoder/v4l_encoder.cc')]
+elif arch != "larch64":
+  # Ubuntu runners need explicit VA-API link flags (Namespace runners have these pre-linked)
+  libs += ['va', 'va-drm', 'drm']
 
 logger_lib = env.Library('logger', src)
 libs.insert(0, logger_lib)
