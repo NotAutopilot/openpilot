@@ -9,11 +9,15 @@ from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_THRESHOLD
 from opendbc.car.tesla.preap.nap_params import NAPParamKeys
 from opendbc.car.tesla.preap.nap_conf import nap_conf, PEDAL_DI_PRESSED
 
+_nap_params = None
 try:
   from openpilot.common.params import Params as _NAPParams
-  _nap_params = _NAPParams()
+  try:
+    _nap_params = _NAPParams()
+  except Exception:
+    pass
 except ImportError:
-  _nap_params = None
+  pass
 
 # Pre-AP door signal names from GTW_carState
 _DOORS = ("DOOR_STATE_FL", "DOOR_STATE_FR", "DOOR_STATE_RL", "DOOR_STATE_RR", "DOOR_STATE_FrontTrunk", "BOOT_STATE")

@@ -133,6 +133,7 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     pedalCruiseEnabled @98;
     pedalCruiseDisabled @99;
     pedalMaxRegen @100;
+    pedalNotCalibrated @101;
 
     soundsUnavailableDEPRECATED @47;
   }

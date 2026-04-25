@@ -13,11 +13,16 @@ from opendbc.car.tesla.preap.constants import (
   PEDAL_LONG_K_BP, PEDAL_LONG_KP_V, PEDAL_LONG_KI_V,
 )
 
+_params = None
 try:
   from openpilot.common.params import Params as _Params
-  _params = _Params()
+  try:
+    _params = _Params()
+  except Exception:
+    # Params backing store may not exist (codegen / build context).
+    pass
 except ImportError:
-  _params = None
+  pass
 
 
 def get_preap_accel_limits(current_speed):

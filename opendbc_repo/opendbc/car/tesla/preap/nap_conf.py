@@ -7,12 +7,19 @@ import tempfile
 from opendbc.car.carlog import carlog
 from opendbc.car.tesla.preap.nap_params import NAPParamKeys
 
+_params = None
+_PARAMS_AVAILABLE = False
 try:
   from openpilot.common.params import Params
-  _params = Params()
-  _PARAMS_AVAILABLE = True
+  try:
+    _params = Params()
+    _PARAMS_AVAILABLE = True
+  except Exception:
+    # Params backing store may not exist in build/import contexts (scons
+    # codegen runs car_helpers.interfaces import without /data writable).
+    pass
 except ImportError:
-  _PARAMS_AVAILABLE = False
+  pass
 
 carlog.info("nap_conf: _PARAMS_AVAILABLE=%s", _PARAMS_AVAILABLE)
 
