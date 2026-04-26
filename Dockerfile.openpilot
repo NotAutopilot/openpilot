@@ -2,6 +2,17 @@ FROM ghcr.io/commaai/openpilot-base:latest
 
 ENV PYTHONUNBUFFERED=1
 
+# OpenCL headers + ICD loader: needed by common/clutil.cc. The base image
+# installs the Intel OpenCL runtime ICD but not the dev headers; without
+# these, scons fails on `fatal error: 'CL/cl.h' file not found`.
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    opencl-headers \
+    ocl-icd-opencl-dev \
+  && rm -rf /var/lib/apt/lists/*
+USER batman
+
 ENV OPENPILOT_PATH=/home/batman/openpilot
 
 RUN mkdir -p ${OPENPILOT_PATH}
