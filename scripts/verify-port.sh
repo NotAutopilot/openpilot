@@ -53,8 +53,13 @@ grep -q "done building targets" <(scons cereal selfdrive -j1 -u 2>&1 | tail -2) 
   || fail "scons not clean"
 
 step "9. Docker Linux scons"
-docker build -t naponfp-ci -f Dockerfile.openpilot . >/dev/null 2>&1 || fail "docker build"
-docker run --rm naponfp-ci bash -c "source .venv/bin/activate && scons -j\$(nproc)" \
+# The Dockerfile's final RUN is `uv run scons --cache-readonly -j$(nproc)`,
+# so a clean `docker build` exit *is* a clean Linux scons. The follow-up
+# `docker run scons` re-verifies inside the built image; venv lives at
+# $VIRTUAL_ENV (=/home/batman/.venv), not relative to the working dir.
+docker build -t naponfp-ci -f Dockerfile.openpilot . >/tmp/naponfp-docker-build.log 2>&1 \
+  || fail "docker build (see /tmp/naponfp-docker-build.log)"
+docker run --rm naponfp-ci bash -c 'source $VIRTUAL_ENV/bin/activate && scons -j$(nproc)' \
   >/tmp/naponfp-docker.log 2>&1 || fail "docker scons (see /tmp/naponfp-docker.log)"
 grep -q "done building targets" /tmp/naponfp-docker.log || fail "docker did not finish cleanly"
 

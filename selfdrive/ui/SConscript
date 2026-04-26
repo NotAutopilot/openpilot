@@ -6,8 +6,9 @@ base_libs = [common, messaging, visionipc, transformations,
 
 # FrogPilot variables
 base_libs += ['avcodec', 'avformat', 'avutil', 'yuv']
-if arch != "Darwin":
-  # OmxCore is the OpenMAX HW-encoding library; comma device only.
+if arch == 'larch64':
+  # OmxCore is the Snapdragon OpenMAX HW-encoding library; only present
+  # on the comma device's BSP. Linux x86_64 CI and macOS dev hosts both lack it.
   base_libs.append('OmxCore')
 
 if arch == 'larch64':
@@ -16,6 +17,11 @@ if arch == 'larch64':
 if arch == "Darwin":
   del base_libs[base_libs.index('OpenCL')]
   qt_env['FRAMEWORKS'] += ['OpenCL']
+
+# OMX is only on the comma device's Snapdragon BSP. Stub the encoder on
+# every other build (macOS dev hosts and Linux x86_64 CI alike).
+if arch != 'larch64':
+  qt_env['CXXFLAGS'] += ["-DSTUB_OMX_ENCODER"]
 
 # FIXME: remove this once we're on 5.15 (24.04)
 qt_env['CXXFLAGS'] += ["-Wno-deprecated-declarations"]

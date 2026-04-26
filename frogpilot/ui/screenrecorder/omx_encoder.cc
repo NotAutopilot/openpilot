@@ -1,7 +1,9 @@
 #include "frogpilot/ui/screenrecorder/omx_encoder.h"
 
-#ifdef __APPLE__
-// Stub OmxEncoder on macOS dev hosts: OMX is comma-device only.
+#ifdef STUB_OMX_ENCODER
+// OMX is comma-device-only (Snapdragon BSP). Stub on macOS dev hosts and
+// Linux x86_64 CI; ScreenRecorder still compiles+links, the record button
+// becomes a no-op. Real implementation runs only on larch64.
 OmxEncoder::OmxEncoder(const char*, int, int, int, int) {}
 OmxEncoder::~OmxEncoder() {}
 int OmxEncoder::encode_frame_rgba(const uint8_t*, int, int, uint64_t) { return 0; }
