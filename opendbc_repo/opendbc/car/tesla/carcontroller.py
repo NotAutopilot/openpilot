@@ -35,6 +35,15 @@ class CarController(CarControllerBase):
       self.stock_cc = StockCCSpoofer()
       self.tesla_can = init_preap_can(dbc_names, self.packers)
 
+      # Override VM with MODEL_S geometry: panda PREAP_STEERING_PARAMS
+      # (slip_factor=-0.0005666, steer_ratio=15.0, wheelbase=2.96) is for
+      # the Pre-AP Model S. The default get_safety_CP() returns MODEL_Y
+      # geometry, which gives a different slip_factor — mismatched Python /
+      # panda VMs cause apply_steer_angle_limits_vm to emit commands EPAS
+      # rejects with EAC_ERROR_TMP_FAULT (steering never reaches EAC_ACTIVE).
+      from opendbc.car.tesla.interface import CarInterface
+      self.VM = VehicleModel(CarInterface.get_non_essential_params("TESLA_MODEL_S_HW3"))
+
   def update(self, CC, CS, now_nanos, frogpilot_toggles):
     if self.CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
       return self._update_preap(CC, CS)
