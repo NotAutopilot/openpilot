@@ -5,7 +5,10 @@ base_libs = [common, messaging, visionipc, transformations,
              'm', 'OpenCL', 'ssl', 'crypto', 'pthread'] + qt_env["LIBS"]
 
 # FrogPilot variables
-base_libs += ['avcodec', 'avformat', 'avutil', 'yuv', 'OmxCore']
+base_libs += ['avcodec', 'avformat', 'avutil', 'yuv']
+if arch != "Darwin":
+  # OmxCore is the OpenMAX HW-encoding library; comma device only.
+  base_libs.append('OmxCore')
 
 if arch == 'larch64':
   base_libs.append('EGL')
@@ -54,7 +57,8 @@ frogpilot_src = ["../../frogpilot/ui/frogpilot_ui.cc", "../../frogpilot/ui/qt/of
                  "../../frogpilot/ui/qt/widgets/developer_sidebar.cc", "../../frogpilot/ui/qt/widgets/drive_stats.cc",
                  "../../frogpilot/ui/qt/widgets/drive_summary.cc",
                  "../../frogpilot/ui/qt/widgets/navigation_functions.cc",
-                 "../../frogpilot/ui/screenrecorder/omx_encoder.cc", "../../frogpilot/ui/screenrecorder/screenrecorder.cc"]
+                 "../../frogpilot/ui/screenrecorder/omx_encoder.cc",
+                 "../../frogpilot/ui/screenrecorder/screenrecorder.cc"]
 qt_src += frogpilot_src
 
 # build translation files

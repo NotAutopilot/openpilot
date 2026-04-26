@@ -1,5 +1,14 @@
 #include "frogpilot/ui/screenrecorder/omx_encoder.h"
 
+#ifdef __APPLE__
+// Stub OmxEncoder on macOS dev hosts: OMX is comma-device only.
+OmxEncoder::OmxEncoder(const char*, int, int, int, int) {}
+OmxEncoder::~OmxEncoder() {}
+int OmxEncoder::encode_frame_rgba(const uint8_t*, int, int, uint64_t) { return 0; }
+void OmxEncoder::encoder_open(const char*) {}
+void OmxEncoder::encoder_close() {}
+#else
+
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -426,3 +435,5 @@ OmxEncoder::~OmxEncoder() {
   OMX_FreeHandle(handle);
   OMX_Deinit();
 }
+
+#endif  // __APPLE__

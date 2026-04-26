@@ -34,7 +34,15 @@ FrogPilotDataPanel::FrogPilotDataPanel(FrogPilotSettingsWindow *parent, bool for
 
           for (const QFileInfo &entry : dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
             char preserveValue[10] = {0};
-            bool isPreserved = (getxattr(entry.absoluteFilePath().toUtf8().constData(), "user.preserve", preserveValue, sizeof(preserveValue)) > 0 && strcmp(preserveValue, "1") == 0);
+#ifdef __APPLE__
+            // macOS getxattr takes (path, name, value, size, position, options).
+            // The "user.preserve" xattr is a Linux-only convention; on macOS dev
+            // hosts the preserve flag never applies, so isPreserved stays false.
+            ssize_t got = getxattr(entry.absoluteFilePath().toUtf8().constData(), "user.preserve", preserveValue, sizeof(preserveValue), 0, 0);
+#else
+            ssize_t got = getxattr(entry.absoluteFilePath().toUtf8().constData(), "user.preserve", preserveValue, sizeof(preserveValue));
+#endif
+            bool isPreserved = (got > 0 && strcmp(preserveValue, "1") == 0);
             if (!isPreserved) {
               QDir(entry.absoluteFilePath()).removeRecursively();
             }
