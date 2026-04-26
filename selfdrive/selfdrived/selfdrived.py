@@ -56,7 +56,7 @@ class SelfdriveD:
     self.params = Params()
 
     # Ensure the current branch is cached, otherwise the first cycle lags
-    build_metadata = get_build_metadata()
+    _build_metadata = get_build_metadata()
 
     if CP is None:
       cloudlog.info("selfdrived is waiting for CarParams")

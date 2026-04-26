@@ -65,7 +65,9 @@ class TestAlerts:
     fp_toggles = SimpleNamespace(has_cc_long=False, current_holiday_theme="", startup_alert_bottom="")
     for alert in ALERTS:
       if not isinstance(alert, Alert):
-        alert = alert(self.CP, self.CS, self.sm, metric=False, soft_disable_time=100, personality=log.LongitudinalPersonality.standard, frogpilot_toggles=fp_toggles)
+        alert = alert(self.CP, self.CS, self.sm, metric=False, soft_disable_time=100,
+                      personality=log.LongitudinalPersonality.standard,
+                      frogpilot_toggles=fp_toggles)
 
       # for full size alerts, both text fields wrap the text,
       # so it's unlikely that they  would go past the max width

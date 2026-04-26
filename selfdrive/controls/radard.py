@@ -159,7 +159,9 @@ def laplacian_pdf(x: float, mu: float, b: float):
   return math.exp(-abs(x-mu)/b)
 
 
-def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, model_data: capnp._DynamicStructReader, tracks: dict[int, Track], frogpilot_toggles: SimpleNamespace):
+def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader,
+                          model_data: capnp._DynamicStructReader,
+                          tracks: dict[int, Track], frogpilot_toggles: SimpleNamespace):
   # FrogPilot variables
   if model_data.meta.laneChangeState == LaneChangeState.laneChangeStarting and frogpilot_toggles.human_lane_changes:
     direction = model_data.meta.laneChangeDirection
@@ -332,8 +334,12 @@ class RadarD:
       model_v_ego = self.v_ego
     leads_v3 = sm['modelV2'].leadsV3
     if len(leads_v3) > 1:
-      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, sm['modelV2'], sm['frogpilotPlan'], self.frogpilot_toggles, low_speed_override=True)
-      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, sm['modelV2'], sm['frogpilotPlan'], self.frogpilot_toggles, low_speed_override=False)
+      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0],
+                                          model_v_ego, sm['modelV2'], sm['frogpilotPlan'],
+                                          self.frogpilot_toggles, low_speed_override=True)
+      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1],
+                                          model_v_ego, sm['modelV2'], sm['frogpilotPlan'],
+                                          self.frogpilot_toggles, low_speed_override=False)
 
     # FrogPilot variables
     if self.ready and (self.frogpilot_toggles.adjacent_lead_tracking or self.frogpilot_toggles.human_lane_changes):
