@@ -20,6 +20,7 @@ from msgq.visionipc import VisionIpcServer, get_endpoint_name as vipc_get_endpoi
 from opendbc.car.can_definitions import CanData
 from opendbc.car.car_helpers import get_car, interfaces
 from openpilot.common.params import Params
+from openpilot.frogpilot.common.frogpilot_variables import get_frogpilot_toggles
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.common.timeout import Timeout
 from openpilot.common.realtime import DT_CTRL
@@ -354,7 +355,7 @@ def get_car_params_callback(rc, pm, msgs, fingerprint):
       with car.CarParams.from_bytes(cached_params_raw) as _cached_params:
         cached_params = _cached_params
 
-    CP = get_car(can_recv, lambda _msgs: None, lambda obd: None, params.get_bool("AlphaLongitudinalEnabled"), False, cached_params=cached_params).CP
+    CP = get_car(can_recv, lambda _msgs: None, lambda obd: None, params.get_bool("AlphaLongitudinalEnabled"), False, params, cached_params=cached_params, frogpilot_toggles=get_frogpilot_toggles()).CP
 
   params.put("CarParams", CP.to_bytes())
 
