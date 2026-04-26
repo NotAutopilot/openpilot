@@ -61,6 +61,14 @@ AddOption('--minimal',
           default=os.path.exists(File('#.lfsconfig').abspath), # minimal by default on release branch (where there's no LFS)
           help='the minimum build to run openpilot. no tests, tools, etc.')
 
+# Explicit positive form of the same flag — comma upstream historically had
+# both. Lets CI write `scons --extras` to force the test surface (libsafety,
+# tools/cabana, ...) regardless of .lfsconfig presence.
+AddOption('--extras',
+          action='store_true',
+          dest='extras',
+          help='build the test/tools surface (libsafety.so, cabana, etc.)')
+
 ## Architecture name breakdown (arch)
 ## - larch64: linux tici aarch64
 ## - aarch64: linux pc aarch64
