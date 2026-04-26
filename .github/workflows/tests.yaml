@@ -157,11 +157,7 @@ jobs:
     - uses: ./.github/workflows/setup-with-retry
       id: setup-step
     - name: Build openpilot
-      # --extras builds the test-only targets (opendbc/safety/tests/libsafety
-      # /libsafety.so) the unit tests below need. Comma upstream gets the
-      # equivalent via opendbc's setuptools wheel build during op.sh setup;
-      # our Docker-based flow runs scons directly so we have to ask for it.
-      run: ${{ env.RUN }} "scons -j$(nproc) --extras"
+      run: ${{ env.RUN }} "scons -j$(nproc)"
     - name: Run unit tests
       timeout-minutes: ${{ contains(runner.name, 'nsc') && ((steps.setup-step.outputs.duration < 18) && 1 || 2) || 20 }}
       run: |

@@ -1,5 +1,8 @@
 SConscript(['opendbc/dbc/SConscript'])
 
-# test files
-if GetOption('extras'):
-  SConscript('opendbc/safety/tests/libsafety/SConscript')
+# libsafety.so is built unconditionally — comma-upstream opendbc gets it via
+# setuptools wheel; we vendor opendbc and rely on scons, so the test surface
+# has to opt in. Build cost is ~1s of gcc on a bare safety.c. Without this,
+# the only way to build it is `scons --extras`, which also pulls in the
+# device installer link step that has unrelated pre-existing breakage.
+SConscript('opendbc/safety/tests/libsafety/SConscript')
