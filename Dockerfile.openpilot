@@ -26,4 +26,7 @@ COPY --chown=batman:batman . ${OPENPILOT_PATH}/
 
 ENV UV_BIN="/home/batman/.local/bin/"
 ENV PATH="$UV_BIN:$PATH"
+# --all-extras pulls the dev/tools/testing groups (parameterized,
+# tabulate, etc.) — needed by selfdrive/test/ tests at gate 10.
+RUN UV_PROJECT_ENVIRONMENT=$VIRTUAL_ENV uv sync --frozen --all-extras
 RUN UV_PROJECT_ENVIRONMENT=$VIRTUAL_ENV uv run scons --cache-readonly -j$(nproc)

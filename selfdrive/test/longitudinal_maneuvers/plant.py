@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import time
+from types import SimpleNamespace
 import numpy as np
 
 from cereal import log
@@ -127,14 +128,31 @@ class Plant:
     car_control.carControl.orientationNED = [0., float(pitch), 0.]
 
     # ******** get controlsState messages for plotting ***
+    # FrogPilotPlan stub: planner reads vCruise/min-max-accel/cscControllingSpeed/
+    # *Jerk/tFollow/dangerFactor. Mirror the upstream defaults so the pure-
+    # planner maneuver evaluator gets sane lookahead without a real planner.
+    fp_plan = messaging.new_message('frogpilotPlan').frogpilotPlan
+    fp_plan.vCruise = float(v_cruise)
+    fp_plan.maxAcceleration = 1.6
+    fp_plan.minAcceleration = -3.5
+    fp_plan.cscControllingSpeed = False
+    fp_plan.accelerationJerk = 1.0
+    fp_plan.dangerJerk = 1.0
+    fp_plan.speedJerk = 1.0
+    fp_plan.tFollow = 1.45
+    fp_plan.dangerFactor = 1.0
     sm = {'radarState': radar.radarState,
           'carState': car_state.carState,
           'carControl': car_control.carControl,
           'controlsState': control.controlsState,
           'selfdriveState': ss.selfdriveState,
           'liveParameters': lp.liveParameters,
-          'modelV2': model.modelV2}
-    self.planner.update(sm)
+          'modelV2': model.modelV2,
+          'frogpilotPlan': fp_plan}
+    # Defaults for the FrogPilot-extended planner signature; see
+    # selfdrive/controls/lib/longitudinal_planner.py for the read sites.
+    fp_toggles = SimpleNamespace(taco_tune=False, longitudinalActuatorDelay=0.2, vEgoStopping=0.5)
+    self.planner.update(sm, fp_toggles)
     self.acceleration = self.planner.output_a_target
     self.speed = self.speed + self.acceleration * self.ts
     self.should_stop = self.planner.output_should_stop
