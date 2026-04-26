@@ -12,7 +12,18 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from openpilot.tools.lib.logreader import LogReader
+# Inline LogReader: openpilot.tools.lib.logreader trips a fp circular import
+# (tools.lib.api → frogpilot_utilities → sentry → athena.registration →
+#  common.api → frogpilot_utilities). Local-file rlog reading doesn't need
+# any of that path — just zstd + capnp.
+import zstandard as zstd
+from cereal import log as capnp_log
+
+def LogReader(path):
+  with open(path, 'rb') as f:
+    raw = zstd.ZstdDecompressor().stream_reader(f).read()
+  return list(capnp_log.Event.read_multiple_bytes(raw))
+
 
 _LOG_ROOT = os.environ.get("LOG_DIR",
                            "/Users/jack/projects/personal/notautopilot/logs/no-pedal/drive-3")

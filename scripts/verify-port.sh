@@ -67,9 +67,14 @@ step "10. frogpilot's own test suite"
 python -m pytest -W ignore selfdrive/test/ -q 2>&1 | tail -10 || fail "selfdrive/test"
 
 step "11. drive-3 replay"
-python scripts/replay_stock_cc.py 2>&1 | tail -5 || fail "replay_stock_cc"
-python scripts/compare_stalk_frames.py 2>&1 | tail -5 || fail "compare_stalk_frames"
-python scripts/compare_stalk_frames.py 2>&1 | grep -E '^\s+t\+.*NAP' \
+python scripts/replay_stock_cc.py >/tmp/naponfp-replay.log 2>&1 \
+  || fail "replay_stock_cc (see /tmp/naponfp-replay.log)"
+python scripts/compare_stalk_frames.py >/dev/null 2>&1 \
+  || fail "compare_stalk_frames"
+# byte0 invariant: replay_stock_cc exercises the *current* StockCCSpoofer +
+# real CANPacker, so its byte0 column reflects a regression in our tree.
+# compare_stalk_frames diffs historical sendcan and can't tell the difference.
+grep -E '^\s+t\+.*NAP' /tmp/naponfp-replay.log \
   | awk '{print $4}' | grep -qE 'byte0=0x[57]' \
   || fail "spoof byte0 wrong — VSL_Enbl_Rq regression?"
 

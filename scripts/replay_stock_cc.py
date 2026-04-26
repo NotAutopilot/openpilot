@@ -18,10 +18,21 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from openpilot.tools.lib.logreader import LogReader
-from opendbc.can import CANParser
+# openpilot.tools.lib.logreader pulls in tools.lib.api → frogpilot_utilities
+# → sentry → athena.registration → common.api → frogpilot_utilities (cycle).
+# Inline a minimal local-file reader to avoid the partial-init cycle.
+import zstandard as zstd
+from cereal import log as capnp_log
+
+def LogReader(path):
+  with open(path, 'rb') as f:
+    raw = zstd.ZstdDecompressor().stream_reader(f).read()
+  return list(capnp_log.Event.read_multiple_bytes(raw))
+
+from opendbc.can import CANParser, CANPacker
 from opendbc.car.tesla.preap.engagement import PreAPEngagement
 from opendbc.car.tesla.preap.stock_cc_spoofer import StockCCSpoofer
+from opendbc.car.tesla.preap.teslacan import TeslaCANPreAP
 from opendbc.car.tesla.values import CruiseButtons
 
 
@@ -40,8 +51,10 @@ def main():
   eng = PreAPEngagement(double_pull_enabled=True, double_pull_window_ms=750)
   spoofer = StockCCSpoofer()
 
-  fake_can = MagicMock()
-  fake_can.create_action_request.side_effect = lambda btn, bus, ctr, msg: ("STW_FRAME", btn, ctr)
+  # Real TeslaCANPreAP so the verifier can inspect actual spoofer bytes.
+  packer_party = CANPacker("tesla_preap")
+  packer_pt = CANPacker("tesla_preap")
+  real_can = TeslaCANPreAP({0: packer_party, 2: packer_pt})
 
   prev_lever = 0
   start_ts = None
@@ -86,21 +99,25 @@ def main():
       msg_stw_actn_req=msg_stw,
     )
 
-    sends = spoofer.update(cs, frame, fake_can, can_bus_party=2)
-    for _ in sends:
-      btn = fake_can.create_action_request.call_args.args[0]
+    sends = spoofer.update(cs, frame, real_can, can_bus_party=2)
+    for addr, dat, _bus in sends:
+      if addr != 0x45:  # only STW_ACTN_RQ
+        continue
+      btn = dat[0] & 0x3F
       btn_name = "CANCEL" if btn == CruiseButtons.CANCEL else "SET_ACCEL" if btn == CruiseButtons.SET_ACCEL else f"btn={btn}"
-      fired.append((rt, btn_name))
+      fired.append((rt, btn_name, dat[0]))
 
     prev_lever = lever
     frame += 1
 
   print(f"\n  total NAP stalk-spoof TX (would have fired): {len(fired)}")
   if fired:
-    print(f"  by type: CANCEL={sum(1 for _, b in fired if b=='CANCEL')}  SET_ACCEL={sum(1 for _, b in fired if b=='SET_ACCEL')}")
+    print(f"  by type: CANCEL={sum(1 for _, b, _ in fired if b=='CANCEL')}  SET_ACCEL={sum(1 for _, b, _ in fired if b=='SET_ACCEL')}")
     print(f"  first 30:")
-    for rt, b in fired[:30]:
-      print(f"    t+{rt:7.3f}  {b}")
+    for rt, b, byte0 in fired[:30]:
+      # gate-11 invariant: VSL_Enbl_Rq=1 → byte0 high nibble has bit 6 set
+      # → 0x40 | (lever bits 0..5). CANCEL=0x41, SET_ACCEL/UP_1ST=0x50.
+      print(f"    t+{rt:7.3f}  {b}  byte0=0x{byte0:02x} NAP")
 
 
 if __name__ == "__main__":
