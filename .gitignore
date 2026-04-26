@@ -2,6 +2,13 @@ venv/
 .venv/
 .ci_cache
 .env
+
+# Qt build outputs. scons writes these as part of the UI build.
+# Without these ignores, release/check-dirty.sh sees untracked
+# build artifacts after a fresh CI build and fails the build job.
+moc_*.cc
+selfdrive/ui/translations/main_*.qm
+selfdrive/ui/ui
 .clang-format
 .DS_Store
 .tags
