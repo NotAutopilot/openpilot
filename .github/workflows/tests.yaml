@@ -191,7 +191,11 @@ jobs:
       run: |
         ${{ env.RUN }} "scons -j$(nproc)"
     - name: Run replay
-      timeout-minutes: ${{ contains(runner.name, 'nsc') && (steps.dependency-cache.outputs.cache-hit == 'true') && ((steps.setup-step.outputs.duration < 18) && 1 || 2) || 45 }}
+      # 4-core github-hosted runners need substantial headroom; 45 min wasn't
+      # enough on either nap-vdas-dev or naponfp-dev (both timeout-killed
+      # mid-replay around the 45-min mark). 90 min headroom for the
+      # github-hosted path; namespace nsc runners stay at 1-2 min.
+      timeout-minutes: ${{ contains(runner.name, 'nsc') && (steps.dependency-cache.outputs.cache-hit == 'true') && ((steps.setup-step.outputs.duration < 18) && 1 || 2) || 90 }}
       run: |
         ${{ env.RUN }} "selfdrive/test/process_replay/test_processes.py -j$(nproc) && \
                         chmod -R 777 /tmp/comma_download_cache"
