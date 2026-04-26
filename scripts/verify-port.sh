@@ -4,9 +4,17 @@
 # frogpilot's test surface instead of sunnypilot's.
 
 set -e
+set -o pipefail   # don't let `cmd | tail` mask a failing cmd's exit code
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+# Pick whatever GNU timeout we can find (bsd timeout doesn't exist on macOS;
+# coreutils via brew installs it as gtimeout).
+TIMEOUT="$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)"
+if [ -z "$TIMEOUT" ]; then
+  TIMEOUT="python3 -c 'import subprocess,sys; sys.exit(subprocess.run(sys.argv[2:], timeout=int(sys.argv[1])).returncode)'"
+fi
 
 # shellcheck disable=SC1091
 source .venv/bin/activate 2>/dev/null || { echo "FAIL: no .venv"; exit 1; }
@@ -64,7 +72,8 @@ docker run --rm naponfp-ci bash -c 'source $VIRTUAL_ENV/bin/activate && scons -j
 grep -q "done building targets" /tmp/naponfp-docker.log || fail "docker did not finish cleanly"
 
 step "10. frogpilot's own test suite"
-python -m pytest -W ignore selfdrive/test/ -q 2>&1 | tail -10 || fail "selfdrive/test"
+python -m pytest -W ignore selfdrive/test/ -q >/tmp/naponfp-pytest.log 2>&1 \
+  || { tail -20 /tmp/naponfp-pytest.log; fail "selfdrive/test (see /tmp/naponfp-pytest.log)"; }
 
 step "11. drive-3 replay"
 python scripts/replay_stock_cc.py >/tmp/naponfp-replay.log 2>&1 \
@@ -79,15 +88,20 @@ grep -E '^\s+t\+.*NAP' /tmp/naponfp-replay.log \
   || fail "spoof byte0 wrong — VSL_Enbl_Rq regression?"
 
 step "12. process_replay"
-timeout 600 python selfdrive/test/process_replay/test_processes.py -j2 2>&1 | tail -20 \
-  || fail "process_replay"
+$TIMEOUT 600 python selfdrive/test/process_replay/test_processes.py -j2 \
+  >/tmp/naponfp-procreplay.log 2>&1 \
+  || { tail -20 /tmp/naponfp-procreplay.log; fail "process_replay (see /tmp/naponfp-procreplay.log)"; }
 
 step "13. github CI workflow check"
-gh run list --branch naponfp-dev --limit 5 --json conclusion,status,name 2>/dev/null \
-  | python -c "import json, sys; runs = json.load(sys.stdin); \
-    incomplete = [r for r in runs if r['status'] != 'completed']; \
-    failed = [r for r in runs if r['conclusion'] not in ('success', 'skipped', None)]; \
-    sys.exit(0 if not incomplete and not failed else 1)" \
+RUNS_JSON="$(gh run list --branch naponfp-dev --limit 5 --json conclusion,status,name 2>/dev/null)"
+[ -n "$RUNS_JSON" ] || fail "gh run list returned nothing"
+echo "$RUNS_JSON" | python -c "import json, sys; runs = json.load(sys.stdin); \
+  sys.exit(0 if runs else 1)" \
+  || fail "no CI runs found for naponfp-dev — has it been pushed to origin?"
+echo "$RUNS_JSON" | python -c "import json, sys; runs = json.load(sys.stdin); \
+  incomplete = [r for r in runs if r['status'] != 'completed']; \
+  failed = [r for r in runs if r['conclusion'] not in ('success', 'skipped', None)]; \
+  sys.exit(0 if not incomplete and not failed else 1)" \
   || fail "github CI: incomplete or failing runs on naponfp-dev"
 
 green ""
