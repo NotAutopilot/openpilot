@@ -492,6 +492,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Use comma's narrow form: {flags, type, default}. FrogPilot's extra
     // (stock_value, tuning_level) default to nullopt/0 — we don't surface
     // these as user-tunable toggles in FrogPilot's settings UI yet.
+    {"NAPAdaptiveAccel", {PERSISTENT, BOOL, "1"}},
     {"NAPBrakeFactor", {PERSISTENT, FLOAT, "1.0"}},
     {"NAPFollowDistance", {PERSISTENT, INT, "4"}},
     {"NAPForcePreAP", {PERSISTENT, BOOL, "1"}},
@@ -506,5 +507,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"NAPPedalProfile", {PERSISTENT, INT, "4"}},
     {"NAPRadarBehindNosecone", {PERSISTENT, BOOL}},
     {"NAPRadarEnabled", {PERSISTENT, BOOL}},
+    {"NAPRadarOffset", {PERSISTENT, FLOAT, "0.0"}},
     {"NAPScriptRunning", {CLEAR_ON_MANAGER_START, BOOL}},
 };
