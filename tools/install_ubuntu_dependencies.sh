@@ -46,6 +46,8 @@ function install_ubuntu_common_requirements() {
     libavutil-dev \
     libavfilter-dev \
     libbz2-dev \
+    libdrm-dev \
+    libva-dev \
     libeigen3-dev \
     libffi-dev \
     libgles2-mesa-dev \
