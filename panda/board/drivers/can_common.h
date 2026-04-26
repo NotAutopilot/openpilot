@@ -207,6 +207,21 @@ void ignition_can_hook(CANPacket_t *msg) {
     }
 
   }
+
+  // Tesla Model S (Pre-AP) exception. NAP requires this — pre-AP harnesses
+  // do not wire ignition_line to panda, so panda must derive ignition from
+  // GTW_status (0x348) on bus 0 or bus 1.
+  if (((msg->bus == 0) || (msg->bus == 1)) && (msg->addr == 0x348U) && (GET_LEN(msg) == 8)) {
+     int counter = msg->data[6] & 0xFU;
+
+     static int prev_counter_tesla_legacy = -1;
+     if ((counter == ((prev_counter_tesla_legacy + 1) % 16)) && (prev_counter_tesla_legacy != -1)) {
+       // GTW_status
+       ignition_can = (msg->data[0] & 0x1U) != 0U;
+       ignition_can_cnt = 0U;
+     }
+     prev_counter_tesla_legacy = counter;
+ }
 }
 
 bool can_tx_check_min_slots_free(uint32_t min) {
