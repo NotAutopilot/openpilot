@@ -815,6 +815,11 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.NO_ENTRY: NoEntryAlert("Calibration in Progress"),
   },
 
+  EventName.pedalNotCalibrated: {
+    ET.PERMANENT: NormalPermanentAlert("Pedal Not Calibrated", "Check Calibration"),
+    ET.NO_ENTRY: NoEntryAlert("Pedal Not Calibrated: Check Calibration"),
+  },
+
   EventName.calibrationRecalibrating: {
     ET.PERMANENT: calibration_incomplete_alert,
     ET.SOFT_DISABLE: soft_disable_alert("Device Remount Detected: Recalibrating"),
@@ -1013,6 +1018,50 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   EventName.personalityChanged: {
     ET.WARNING: personality_changed_alert,
+  },
+
+  EventName.pedalCruiseEnabled: {
+    ET.WARNING: Alert(
+      "Pedal Cruise Engaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.engage, 0.8),
+  },
+
+  EventName.pedalCruiseDisabled: {
+    ET.WARNING: Alert(
+      "Pedal Cruise Disengaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.disengage, 0.8),
+  },
+
+  EventName.pedalMaxRegen: {
+    ET.WARNING: Alert(
+      "Max Regen Being Used",
+      "",
+      AlertStatus.userPrompt, AlertSize.small,
+      Priority.HIGH, VisualAlert.steerRequired, AudibleAlert.prompt, 2.),
+  },
+
+  EventName.teslaCCEngaged: {
+    ET.WARNING: Alert(
+      "Tesla Cruise Engaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.engage, 0.8),
+  },
+
+  EventName.teslaCCDisengaged: {
+    ET.WARNING: Alert(
+      "Tesla Cruise Disengaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.disengage, 0.8),
+  },
+
+  EventName.teslaCCNotArmed: {
+    ET.PERMANENT: NormalPermanentAlert("Arm Stock Cruise to Enable Speed Control"),
   },
 
   EventName.userBookmark: {

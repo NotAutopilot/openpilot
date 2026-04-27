@@ -12,6 +12,11 @@ if arch != "larch64":
 if arch == "Darwin":
   # exclude v4l
   del src[src.index('encoder/v4l_encoder.cc')]
+  # macOS frameworks required by ffmpeg's VideoToolbox hw encoding
+  env['FRAMEWORKS'] = ['VideoToolbox', 'CoreVideo', 'CoreMedia', 'CoreFoundation', 'Security']
+elif arch != "larch64":
+  # Ubuntu runners need explicit VA-API link flags (Namespace runners have these pre-linked)
+  libs += ['va', 'va-drm', 'drm']
 
 logger_lib = env.Library('logger', src)
 libs.insert(0, logger_lib)

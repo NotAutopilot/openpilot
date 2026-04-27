@@ -25,6 +25,9 @@ V_EGO_STATIONARY = 4.   # no stationary object flag below this speed
 RADAR_TO_CENTER = 2.7   # (deprecated) RADAR is ~ 2.7m ahead from center of car
 RADAR_TO_CAMERA = 1.52  # RADAR is ~ 1.5m ahead from center of mesh frame
 
+# Bosch radar updates at 8 Hz; use actual measurement interval for KF
+RADAR_DT = 1.0 / 8
+
 
 class KalmanParams:
   def __init__(self, dt: float):
@@ -187,7 +190,7 @@ class RadarD:
     self.current_time = 0.0
 
     self.tracks: dict[int, Track] = {}
-    self.kalman_params = KalmanParams(DT_MDL)
+    self.kalman_params = KalmanParams(RADAR_DT)
 
     self.v_ego = 0.0
     self.v_ego_hist = deque([0.0], maxlen=int(round(delay / DT_MDL))+1)
@@ -227,7 +230,10 @@ class RadarD:
       self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, rpt[3])
 
     # *** publish radarState ***
-    self.radar_state_valid = sm.all_checks()
+    # Exclude liveTracks from validity check: it arrives at radar rate (8Hz for
+    # Bosch) not the 20Hz SubMaster expects, so all_checks() would mark it stale
+    # between radar updates and cascade valid=False through the whole pipeline.
+    self.radar_state_valid = sm.all_checks(service_list=['modelV2', 'carState'])
     self.radar_state = log.RadarState.new_message()
     self.radar_state.mdMonoTime = sm.logMonoTime['modelV2']
     self.radar_state.radarErrors = rr.errors
@@ -269,8 +275,10 @@ def main() -> None:
   while 1:
     sm.update()
 
-    RD.update(sm, sm['liveTracks'])
-    RD.publish(pm)
+    if sm.updated['liveTracks']:
+      RD.update(sm, sm['liveTracks'])
+    if RD.radar_state is not None:
+      RD.publish(pm)
 
 
 if __name__ == "__main__":

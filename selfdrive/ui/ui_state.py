@@ -148,7 +148,12 @@ class UIState:
       state = ss.state
 
       if state in (log.SelfdriveState.OpenpilotState.preEnabled, log.SelfdriveState.OpenpilotState.overriding):
-        self.status = UIStatus.OVERRIDE
+        # Show green during gas override if lateral (steering) is still active
+        lat_active = self.sm["carControl"].latActive if self.sm.updated.get("carControl") or self.sm.recv_frame.get("carControl", 0) > 0 else False
+        if state == log.SelfdriveState.OpenpilotState.overriding and lat_active:
+          self.status = UIStatus.ENGAGED
+        else:
+          self.status = UIStatus.OVERRIDE
       else:
         self.status = UIStatus.ENGAGED if ss.enabled else UIStatus.DISENGAGED
 

@@ -18,7 +18,7 @@ from openpilot.system.manager.process import ensure_running
 from openpilot.system.manager.process_config import managed_processes
 from openpilot.system.athena.registration import register, UNREGISTERED_DONGLE_ID
 from openpilot.common.swaglog import cloudlog, add_file_handler
-from openpilot.system.version import get_build_metadata
+from openpilot.system.version import get_build_metadata, terms_version, training_version
 from openpilot.system.hardware.hw import Paths
 
 
@@ -55,6 +55,8 @@ def manager_init() -> None:
   # set params
   serial = HARDWARE.get_serial()
   params.put("Version", build_metadata.openpilot.version)
+  params.put("TermsVersion", terms_version)
+  params.put("TrainingVersion", training_version)
   params.put("GitCommit", build_metadata.openpilot.git_commit)
   params.put("GitCommitDate", build_metadata.openpilot.git_commit_date)
   params.put("GitBranch", build_metadata.channel)
@@ -62,6 +64,10 @@ def manager_init() -> None:
   params.put_bool("IsTestedBranch", build_metadata.tested_channel)
   params.put_bool("IsReleaseBranch", build_metadata.release_channel)
   params.put("HardwareSerial", serial)
+
+  # NAP: ensure Pre-AP fingerprint is forced on first boot
+  if params.get("NAPForcePreAP") is None:
+    params.put_bool("NAPForcePreAP", True)
 
   # set dongle id
   reg_res = register(show_spinner=True)
@@ -148,7 +154,14 @@ def manager_thread() -> None:
     started_prev = started
     ignition_prev = ignition
 
-    ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore)
+    # When a NAP script is running (e.g. pedal calibration), stop conflicting processes
+    # so the script can access hardware directly without conflicts.
+    nap_ignore = []
+    if params.get_bool("NAPScriptRunning"):
+      nap_ignore = ["pandad", "card", "controlsd", "selfdrived", "plannerd", "radard",
+                     "calibrationd", "torqued", "locationd", "modeld", "dmonitoringmodeld"]
+
+    ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore + nap_ignore)
 
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)

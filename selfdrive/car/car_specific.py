@@ -90,6 +90,23 @@ class CarSpecificEvents:
       # if CC.eps_timer_soft_disable_alert:
       #   events.add(EventName.steerTimeLimit)
 
+    elif self.CP.brand == 'tesla':
+      if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP":
+        if self.CP.pcmCruise:
+          if getattr(CS, 'teslaCCEngaged', False):
+            events.add(EventName.teslaCCEngaged)
+          if getattr(CS, 'teslaCCDisengaged', False):
+            events.add(EventName.teslaCCDisengaged)
+          if getattr(CS, 'teslaCCNotArmed', False):
+            events.add(EventName.teslaCCNotArmed)
+        else:
+          # Pedal mode: refuse to engage until the Comma Pedal is calibrated.
+          # Without calibration, INTERCEPTOR_GAS values sit near the press
+          # threshold and produce gasPressedOverride chatter that blocks engage.
+          from opendbc.car.tesla.preap.nap_conf import nap_conf
+          if not nap_conf.pedal_calibrated:
+            events.add(EventName.pedalNotCalibrated)
+
     return events
 
   def create_common_events(self, CS: structs.CarState, CS_prev: car.CarState):
@@ -97,7 +114,11 @@ class CarSpecificEvents:
 
     CI = interfaces[self.CP.carFingerprint]
     # TODO: cleanup the honda-specific logic
-    pcm_enable = self.CP.pcmCruise and self.CP.brand != 'honda'
+    # Pre-AP Tesla manages cruiseState.enabled via its own software FSM,
+    # so treat it the same as pcmCruise for the enable/disable event path.
+    preap_software_cruise = (self.CP.brand == "tesla" and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+                             and self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise)
+    pcm_enable = (self.CP.pcmCruise and self.CP.brand != 'honda') or preap_software_cruise
     # TODO: on some hyundai cars, the cancel button is also the pause/resume button,
     # so only use it for cancel when running openpilot longitudinal
     allow_button_cancel = self.CP.brand != 'hyundai'
