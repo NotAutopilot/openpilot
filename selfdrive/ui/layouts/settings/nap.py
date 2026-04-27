@@ -190,7 +190,10 @@ class NAPLayout(Widget):
     self._radar_offset_btn = button_item(
       "Radar Lateral Offset",
       self._get_radar_offset_text,
-      description="Lateral offset in meters added to radar yRel. Negative shifts leads toward the left of current radar reading; positive shifts right. Example: -0.27 for the 3D-printed factory-location mount.",
+      description=(
+        "Lateral offset in meters added to radar yRel. Negative shifts leads toward the left of current radar "
+        + "reading; positive shifts right. Example: -0.27 for the 3D-printed factory-location mount."
+      ),
       callback=self._on_radar_offset_click,
     )
     self._all_items.append(self._radar_offset_btn)

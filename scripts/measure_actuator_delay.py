@@ -162,12 +162,12 @@ def main():
     print(f"  Std dev:      {delays.std():.3f}s")
     print(f"  Min:          {delays.min():.3f}s")
     print(f"  Max:          {delays.max():.3f}s")
-    print(f"\nCurrent setting: longitudinalActuatorDelay = 0.4s")
+    print("\nCurrent setting: longitudinalActuatorDelay = 0.4s")
     print(f"Measured:        {delays.mean():.3f}s")
     if abs(delays.mean() - 0.4) > 0.05:
       print(f"  --> Consider updating to {delays.mean():.2f}s")
     else:
-      print(f"  --> Current 0.4s is within tolerance")
+      print("  --> Current 0.4s is within tolerance")
   else:
     print("\nNo valid measurements. Need drive logs with active pedal control.")
 

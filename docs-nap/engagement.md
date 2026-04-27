@@ -44,7 +44,7 @@ NAP both reads the real stalk and sends spoofed stalk messages. This creates an 
 - `CANCEL_ECHO_WINDOW_MS = 600` — ignore `CANCEL` events within 600 ms of our last non-cancel stalk activity (so auto-cancel echoes from engage spoofs don't look like the driver pressing cancel)
 - `SPOOF_ECHO_WINDOW_MS = 300` — ignore `CANCEL` events within 300 ms of our last explicit spoof send
 
-Both tuned on real drive logs. If you see stale "driver cancelled" events in logs, these are the knobs.
+Both tuned on real drive logs. If you see stale "driver canceled" events in logs, these are the knobs.
 
 ## Double-pull vs single-pull
 
