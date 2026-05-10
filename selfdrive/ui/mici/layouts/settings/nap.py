@@ -11,7 +11,9 @@ from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.big_multi_value_param import BigMultiValueParamToggle
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigParamControl
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog
-from openpilot.selfdrive.ui.mici.layouts.settings.nap_script import launch_script
+from openpilot.selfdrive.ui.mici.layouts.settings.nap_script import (
+  SAFETY_OFFROAD_ONLY, launch_script,
+)
 from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   FLASH_EPAS_INSTRUCTIONS,
   PEDAL_CAN_BUS_VALUES,
@@ -68,7 +70,8 @@ class NAPLayoutMici(NavScroller):
     flash_epas_btn = BigButton("flash epas", "flash")
     flash_epas_btn.set_click_callback(
       lambda: launch_script("Flash EPAS Firmware", FLASH_EPAS_INSTRUCTIONS,
-                            "scripts.nap.flash_epas"))
+                            "scripts.nap.flash_epas",
+                            safety_class=SAFETY_OFFROAD_ONLY))
     flash_epas_btn.set_enabled(ui_state.is_offroad)
 
     self._scroller.add_widgets([

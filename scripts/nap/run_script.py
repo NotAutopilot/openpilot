@@ -6,7 +6,15 @@ Standalone full-screen application for running scripts with live output display.
 Launched as a separate process to take over the display.
 
 Usage:
-    ./run_script.py "Title" "module.path.to.script" "Instructions text..."
+    ./run_script.py "Title" "module.path.to.script" "Instructions text..." [safety_class]
+
+safety_class:
+    "offroad_only" — refuse to launch and refuse Start if IsOnroad. For
+        EPAS firmware operations (flash/extract/restore) — driving stack
+        must be off, car must be parked.
+    "stationary" (default) — no IsOnroad check. For pedal/radar
+        calibration and tests, which require ignition on so the
+        relevant ECU is electrically active.
 """
 
 import sys
@@ -24,6 +32,10 @@ from openpilot.system.ui.lib.scroll_panel import GuiScrollPanel
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets.button import Button, ButtonStyle
 from openpilot.system.hardware import HARDWARE, PC
+
+SAFETY_OFFROAD_ONLY = "offroad_only"
+SAFETY_STATIONARY = "stationary"
+VALID_SAFETY_CLASSES = (SAFETY_OFFROAD_ONLY, SAFETY_STATIONARY)
 
 # UI Constants
 MARGIN = 50
@@ -44,10 +56,13 @@ class ScriptState:
 
 
 class ScriptRunnerApp:
-  def __init__(self, title: str, script_module: str, instructions: str):
+  def __init__(self, title: str, script_module: str, instructions: str,
+               safety_class: str = SAFETY_STATIONARY):
+    assert safety_class in VALID_SAFETY_CLASSES, f"unknown safety_class {safety_class!r}"
     self._title = title
     self._script_module = script_module
     self._instructions = instructions
+    self._safety_class = safety_class
 
     self._state = ScriptState.READY
     self._output_lines: list[str] = []
@@ -111,6 +126,20 @@ class ScriptRunnerApp:
 
   def _on_start_clicked(self):
     if self._state != ScriptState.READY:
+      return
+
+    # Execution-boundary safety check for offroad-only scripts (EPAS
+    # firmware ops). Catches the case where the user opened the runner
+    # while parked, then the car transitioned onroad before they
+    # pressed Start. Calibration/test scripts intentionally skip this
+    # — they require ignition on for the ECU to be electrically active.
+    if self._safety_class == SAFETY_OFFROAD_ONLY and self._params.get_bool("IsOnroad"):
+      self._output_lines = [
+        "Cannot run while car is on.",
+        "",
+        "Put the vehicle in park and turn it off, then try again.",
+      ]
+      self._state = ScriptState.ERROR
       return
 
     self._state = ScriptState.RUNNING
@@ -348,20 +377,32 @@ class ScriptRunnerApp:
 
 def main():
   if len(sys.argv) < 4:
-    print("Usage: run_script.py <title> <module> <instructions>")
+    print("Usage: run_script.py <title> <module> <instructions> [safety_class]")
+    print(f"  safety_class: one of {VALID_SAFETY_CLASSES} (default: {SAFETY_STATIONARY})")
     print("Example: run_script.py 'Pedal Calibration' 'scripts.nap.calibrate_pedal' 'Instructions...'")
     sys.exit(1)
 
   title = sys.argv[1]
   module = sys.argv[2]
   instructions = sys.argv[3]
+  safety_class = sys.argv[4] if len(sys.argv) > 4 else SAFETY_STATIONARY
+  if safety_class not in VALID_SAFETY_CLASSES:
+    print(f"unknown safety_class {safety_class!r}; expected one of {VALID_SAFETY_CLASSES}")
+    sys.exit(1)
+
+  # Pre-window onroad gate for offroad-only scripts. Refuse BEFORE
+  # killing the tmux session — refusing after the kill would strand the
+  # user in a runner with the main UI dead.
+  if safety_class == SAFETY_OFFROAD_ONLY and Params().get_bool("IsOnroad"):
+    print("NAP runner: cannot run while car is on. Park it and try again.")
+    sys.exit(0)
 
   # Kill the main openpilot UI tmux session so we can take over the screen
   subprocess.run(["tmux", "kill-session", "-t", "comma"], capture_output=True)
 
   gui_app.init_window("NAP Script Runner")
 
-  app = ScriptRunnerApp(title, module, instructions)
+  app = ScriptRunnerApp(title, module, instructions, safety_class)
   app._init_ui()
 
   for _ in gui_app.render():
