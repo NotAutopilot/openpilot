@@ -371,6 +371,16 @@ def main():
   module = sys.argv[2]
   instructions = sys.argv[3]
 
+  # Refuse to take over the screen at all if the car is on. The settings
+  # panel gates the action button offroad-only at tap time, but the user
+  # may have walked away or the car may have transitioned onroad before
+  # the runner booted. If we killed the tmux session here and then refused
+  # at the Start button, the user would be stranded in a runner with the
+  # main UI dead and a reboot as the only exit.
+  if Params().get_bool("IsOnroad"):
+    print("NAP runner: cannot run while car is on. Park it and try again.")
+    sys.exit(0)
+
   # Kill the main openpilot UI tmux session so we can take over the screen
   subprocess.run(["tmux", "kill-session", "-t", "comma"], capture_output=True)
 
