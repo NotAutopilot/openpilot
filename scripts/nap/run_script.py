@@ -37,6 +37,36 @@ SAFETY_OFFROAD_ONLY = "offroad_only"
 SAFETY_STATIONARY = "stationary"
 VALID_SAFETY_CLASSES = (SAFETY_OFFROAD_ONLY, SAFETY_STATIONARY)
 
+# Per-module required minimum safety class. Anything not listed is
+# unknown and rejected — fail closed. Callers may *request* the same
+# class or stricter; a weaker request is upgraded to the required one
+# so a forgotten or stale call site can't downgrade an EPAS flash to
+# a stationary classification.
+MODULE_REQUIRED_SAFETY: dict[str, str] = {
+  "scripts.nap.flash_epas":     SAFETY_OFFROAD_ONLY,
+  "scripts.nap.extract_epas":   SAFETY_OFFROAD_ONLY,
+  "scripts.nap.restore_epas":   SAFETY_OFFROAD_ONLY,
+  "scripts.nap.calibrate_pedal":   SAFETY_STATIONARY,
+  "scripts.nap.calibrate_radar":   SAFETY_STATIONARY,
+  "scripts.nap.test_radar":     SAFETY_STATIONARY,
+}
+
+
+def resolve_safety_class(module: str, requested: str) -> str:
+  """Resolve the effective safety class for `module`.
+
+  Unknown module → strictest (offroad_only). Known module → max(required,
+  requested) so a caller passing a weaker class is upgraded, never
+  downgraded.
+  """
+  required = MODULE_REQUIRED_SAFETY.get(module)
+  if required is None:
+    return SAFETY_OFFROAD_ONLY
+  # offroad_only is strictly stronger than stationary
+  if required == SAFETY_OFFROAD_ONLY or requested == SAFETY_OFFROAD_ONLY:
+    return SAFETY_OFFROAD_ONLY
+  return SAFETY_STATIONARY
+
 # UI Constants
 MARGIN = 50
 TITLE_FONT_SIZE = 70
@@ -385,10 +415,15 @@ def main():
   title = sys.argv[1]
   module = sys.argv[2]
   instructions = sys.argv[3]
-  safety_class = sys.argv[4] if len(sys.argv) > 4 else SAFETY_STATIONARY
-  if safety_class not in VALID_SAFETY_CLASSES:
-    print(f"unknown safety_class {safety_class!r}; expected one of {VALID_SAFETY_CLASSES}")
+  requested = sys.argv[4] if len(sys.argv) > 4 else SAFETY_STATIONARY
+  if requested not in VALID_SAFETY_CLASSES:
+    print(f"unknown safety_class {requested!r}; expected one of {VALID_SAFETY_CLASSES}")
     sys.exit(1)
+
+  # Module-bound resolution: unknown modules and weaker-than-required
+  # requests are upgraded to the strictest class. A caller cannot
+  # accidentally downgrade an EPAS flash.
+  safety_class = resolve_safety_class(module, requested)
 
   # Pre-window onroad gate for offroad-only scripts. Refuse BEFORE
   # killing the tmux session — refusing after the kill would strand the
