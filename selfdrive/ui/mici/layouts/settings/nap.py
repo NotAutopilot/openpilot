@@ -8,10 +8,14 @@ Subsequent phases add the rest.
 from openpilot.common.params import Params
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets.scroller import NavScroller
+from openpilot.selfdrive.ui.mici.widgets.big_multi_value_param import BigMultiValueParamToggle
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigParamControl
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog
 from openpilot.selfdrive.ui.mici.layouts.settings.nap_script import launch_script
-from openpilot.selfdrive.ui.layouts.settings.nap_content import FLASH_EPAS_INSTRUCTIONS
+from openpilot.selfdrive.ui.layouts.settings.nap_content import (
+  FLASH_EPAS_INSTRUCTIONS,
+  PEDAL_CAN_BUS_VALUES,
+)
 from openpilot.selfdrive.ui.ui_state import ui_state
 from opendbc.car.tesla.preap.nap_params import NAPParamKeys
 
@@ -43,6 +47,15 @@ class NAPLayoutMici(NavScroller):
                                      toggle_callback=_reboot_on_toggle)
     pedal_enabled.set_enabled(ui_state.is_offroad)
 
+    pedal_can_bus = BigMultiValueParamToggle(
+      "pedal can bus",
+      NAPParamKeys.PEDAL_CAN_BUS,
+      values=PEDAL_CAN_BUS_VALUES,
+      labels=["bus 0", "bus 2"],
+      toggle_callback=_reboot_on_toggle,
+    )
+    pedal_can_bus.set_enabled(ui_state.is_offroad)
+
     radar_enabled = BigParamControl("radar enabled", NAPParamKeys.RADAR_ENABLED,
                                     toggle_callback=_reboot_on_toggle)
     radar_enabled.set_enabled(ui_state.is_offroad)
@@ -55,6 +68,7 @@ class NAPLayoutMici(NavScroller):
 
     self._scroller.add_widgets([
       pedal_enabled,
+      pedal_can_bus,
       radar_enabled,
       flash_epas_btn,
     ])
