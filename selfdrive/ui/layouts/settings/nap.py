@@ -468,6 +468,10 @@ class NAPLayout(Widget):
         self._params.put_bool(key, default)
       elif isinstance(default, (int, float)):
         self._params.put(key, default)
+    # Force Pre-AP is locked on in the panel but DEFAULTS keeps it off
+    # for non-UI consumers. Re-apply the lock after the wholesale loop
+    # so reset doesn't silently flip the invariant.
+    self._params.put_bool(NAPParamKeys.FORCE_PRE_AP, True)
 
   # ── Render / lifecycle ──
 
