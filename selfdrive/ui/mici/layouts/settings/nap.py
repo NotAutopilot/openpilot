@@ -47,11 +47,16 @@ class NAPLayoutMici(NavScroller):
                                      toggle_callback=_reboot_on_toggle)
     pedal_enabled.set_enabled(ui_state.is_offroad)
 
+    # default_value=2 matches NAPPedalCanBus declared default in params_keys.h
+    # and the runtime fallback ("any nonzero is bus 2"). If the param is set
+    # to an out-of-range value (1, etc.), the widget rewrites it to 2 rather
+    # than render bus 0 while the runtime acts as bus 2.
     pedal_can_bus = BigMultiValueParamToggle(
       "pedal can bus",
       NAPParamKeys.PEDAL_CAN_BUS,
       values=PEDAL_CAN_BUS_VALUES,
       labels=["bus 0", "bus 2"],
+      default_value=2,
       toggle_callback=_reboot_on_toggle,
     )
     pedal_can_bus.set_enabled(ui_state.is_offroad)
