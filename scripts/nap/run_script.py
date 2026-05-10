@@ -123,7 +123,7 @@ class ScriptRunnerApp:
       self._output_lines = [
         "Cannot run while car is on.",
         "",
-        "Park the vehicle and turn off the engine, then try again.",
+        "Put the vehicle in park and turn it off, then try again.",
       ]
       self._state = ScriptState.ERROR
       return
