@@ -77,12 +77,15 @@ class NAPLayoutMici(NavScroller):
       "calibrated" if self._params.get_bool(NAPParamKeys.PEDAL_CALIB_DONE) else "not calibrated",
     )
 
+    # Stationary scripts (pedal/radar calibration, radar test) need
+    # ignition on so the ECU is electrically active. Don't offroad-gate
+    # them — the script's own preconditions (car_on, brake pressed,
+    # gear in neutral, etc.) are the load-bearing check.
     calibrate_pedal_btn = BigButton("calibrate pedal", "start")
     calibrate_pedal_btn.set_click_callback(
       lambda: launch_script("Pedal Calibration", CALIBRATE_PEDAL_INSTRUCTIONS,
                             "scripts.nap.calibrate_pedal",
                             safety_class=SAFETY_STATIONARY))
-    calibrate_pedal_btn.set_enabled(ui_state.is_offroad)
 
     # ── Radar ────────────────────────────────────────
     radar_enabled = BigParamControl("radar enabled", NAPParamKeys.RADAR_ENABLED,
@@ -100,14 +103,12 @@ class NAPLayoutMici(NavScroller):
       lambda: launch_script("Radar Calibration", CALIBRATE_RADAR_INSTRUCTIONS,
                             "scripts.nap.calibrate_radar",
                             safety_class=SAFETY_STATIONARY))
-    calibrate_radar_btn.set_enabled(ui_state.is_offroad)
 
     test_radar_btn = BigButton("test radar", "test")
     test_radar_btn.set_click_callback(
       lambda: launch_script("Radar Test", TEST_RADAR_INSTRUCTIONS,
                             "scripts.nap.test_radar",
                             safety_class=SAFETY_STATIONARY))
-    test_radar_btn.set_enabled(ui_state.is_offroad)
 
     # ── iBooster (locked off) ────────────────────────
     ibooster_enabled = BigParamControl("ibooster enabled", NAPParamKeys.IBOOSTER_ENABLED)
