@@ -113,6 +113,21 @@ class ScriptRunnerApp:
     if self._state != ScriptState.READY:
       return
 
+    # Re-check onroad state at the execution boundary. The menu-side
+    # button gate fires when the action card is tapped, but a user can
+    # open the runner while parked and only press Start after the car
+    # has transitioned onroad. Letting the script proceed in that case
+    # would set NAPScriptRunning and kill pandad/card/controlsd
+    # mid-drive.
+    if self._params.get_bool("IsOnroad"):
+      self._output_lines = [
+        "Cannot run while car is on.",
+        "",
+        "Park the vehicle and turn off the engine, then try again.",
+      ]
+      self._state = ScriptState.ERROR
+      return
+
     self._state = ScriptState.RUNNING
     self._output_lines = ["Starting script...", ""]
 
