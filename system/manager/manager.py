@@ -155,12 +155,9 @@ def manager_thread() -> None:
     ignition_prev = ignition
 
     # When a NAP script is running (e.g. pedal calibration), stop conflicting processes
-    # so the script can access hardware directly without conflicts. Only honor the
-    # request when offroad — if the car ever transitions onroad with NAPScriptRunning
-    # still set, this ignore list would kill driving processes mid-drive. Keeping the
-    # gate here means the runner-side checks are belt-and-braces, not load-bearing.
+    # so the script can access hardware directly without conflicts.
     nap_ignore = []
-    if params.get_bool("NAPScriptRunning") and not started:
+    if params.get_bool("NAPScriptRunning"):
       nap_ignore = ["pandad", "card", "controlsd", "selfdrived", "plannerd", "radard",
                      "calibrationd", "torqued", "locationd", "modeld", "dmonitoringmodeld"]
 
