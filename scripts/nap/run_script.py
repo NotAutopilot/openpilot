@@ -458,6 +458,15 @@ def main():
   # accidentally downgrade an EPAS flash.
   safety_class = resolve_safety_class(module, requested)
 
+  # Dispatch to the mici (comma 4) runner when the device's logical
+  # canvas is small. The tici runner's hardcoded font/button sizes are
+  # unusable at 536x240. Same lifecycle, different UI primitives.
+  if not gui_app.big_ui():
+    from scripts.nap import run_script_mici
+    sys.argv = ["run_script_mici", title, module, instructions, safety_class]
+    run_script_mici.main()
+    return
+
   # Pre-window onroad gate for offroad-only scripts. Refuse BEFORE
   # killing the tmux session — refusing after the kill would strand the
   # user in a runner with the main UI dead.
