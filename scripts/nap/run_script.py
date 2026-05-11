@@ -401,7 +401,16 @@ class ScriptRunnerApp:
         BUTTON_WIDTH,
         BUTTON_HEIGHT
       )
-      self._exit_button.set_enabled(self._state != ScriptState.RUNNING)
+      # Stationary scripts include unbounded loops (radar test, radar
+      # calibration). Disabling Exit while RUNNING strands the user
+      # with NAPScriptRunning asserted and no way to clear it.
+      # Offroad-only scripts (EPAS flash) must not be terminated
+      # mid-write — interrupting can brick the EPAS module — so keep
+      # the original lockout for them.
+      if self._safety_class == SAFETY_STATIONARY:
+        self._exit_button.set_enabled(True)
+      else:
+        self._exit_button.set_enabled(self._state != ScriptState.RUNNING)
       self._exit_button.render(exit_rect)
 
 
