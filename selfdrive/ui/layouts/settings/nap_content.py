@@ -87,6 +87,12 @@ This operation:
   - May take several minutes to complete
   - Should NOT be interrupted once started
 
+POWER REQUIREMENTS (read this part):
+  - 12V battery must be healthy and at a normal charge
+  - Do NOT start the flash if the car has been sitting cold
+    with marginal voltage
+  - Power loss DURING the flash will brick the EPAS module
+
 RISKS:
   - Incorrect firmware can disable power steering
   - Interrupted flash can brick the EPAS module
@@ -125,6 +131,12 @@ This operation:
   - Uses the extracted stock EPAS firmware image
   - May take several minutes to complete
   - Should NOT be interrupted once started
+
+POWER REQUIREMENTS (read this part):
+  - 12V battery must be healthy and at a normal charge
+  - Do NOT start the restore if the car has been sitting cold
+    with marginal voltage
+  - Power loss DURING the restore will brick the EPAS module
 
 RISKS:
   - Interrupted flash can brick the EPAS module
