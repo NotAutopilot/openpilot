@@ -22,10 +22,12 @@ import threading
 from openpilot.common.params import Params
 from openpilot.system.hardware import HARDWARE, PC
 from openpilot.system.ui.mici.widgets.script_runner_app import MiciScriptRunnerApp, ScriptState
-
-
-SAFETY_OFFROAD_ONLY = "offroad_only"
-SAFETY_STATIONARY = "stationary"
+from scripts.nap.run_script import (
+  SAFETY_OFFROAD_ONLY,
+  SAFETY_STATIONARY,
+  VALID_SAFETY_CLASSES,
+  resolve_safety_class,
+)
 
 
 class _NAPMiciRunner:
@@ -160,7 +162,17 @@ def main():
   title = sys.argv[1]
   module = sys.argv[2]
   instructions = sys.argv[3]
-  safety_class = sys.argv[4] if len(sys.argv) > 4 else SAFETY_STATIONARY
+  requested = sys.argv[4] if len(sys.argv) > 4 else SAFETY_STATIONARY
+  if requested not in VALID_SAFETY_CLASSES:
+    print(f"unknown safety_class {requested!r}; expected one of {VALID_SAFETY_CLASSES}")
+    sys.exit(1)
+
+  # Module-bound resolution: unknown modules and weaker-than-required
+  # requests are upgraded to the strictest class. This file is a
+  # standalone entry point, so the same fail-closed policy must apply
+  # here as in run_script.py — a direct invocation with a stale or
+  # missing safety_class would otherwise bypass the offroad gates.
+  safety_class = resolve_safety_class(module, requested)
 
   # Pre-window onroad gate for offroad-only scripts. Same as tici runner —
   # refuse before killing tmux so the user keeps their main UI.
