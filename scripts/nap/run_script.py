@@ -237,8 +237,21 @@ class ScriptRunnerApp:
           self._process.wait(timeout=2)
         except subprocess.TimeoutExpired:
           self._process.kill()
+          try:
+            self._process.wait(timeout=2)
+          except subprocess.TimeoutExpired:
+            # Child still alive after SIGKILL. Bail without clearing
+            # NAPScriptRunning — letting manager resume pandad while
+            # a zombie script may still hold Panda USB would create
+            # the exact dual-owner state this runner is meant to
+            # prevent. Surface an error and keep the runner up.
+            self._output_lines.append(
+              "[ERROR] script did not exit; manager will stay paused")
+            self._output_lines.append("Reboot the device to recover.")
+            self._state = ScriptState.ERROR
+            return
 
-    # Clear NAPScriptRunning so manager resumes normal operation
+    # Clear NAPScriptRunning only after we've confirmed the child is gone.
     self._params.put_bool("NAPScriptRunning", False)
 
     gui_app.request_close()
