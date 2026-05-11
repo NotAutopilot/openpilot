@@ -363,18 +363,16 @@ class NAPLayout(Widget):
 
   # ── Script runner ──
 
-  def _show_script_runner(self, title: str, instructions: str, script_module: str,
-                          safety_class: str = "stationary"):
+  def _show_script_runner(self, title: str, instructions: str, script_module: str):
     """Launch the script runner as a separate process that takes over the screen."""
     script_path = os.path.join(BASEDIR, "scripts", "nap", "run_script.py")
     log_path = "/tmp/nap_script_runner.log"
 
-    # Launch as detached process — run_script.py will kill the UI and take over
     with open(log_path, "w") as log_file:
       subprocess.Popen(
-        ["python", script_path, title, script_module, instructions, safety_class],
+        ["python", script_path, title, script_module, instructions],
         cwd=BASEDIR,
-        start_new_session=True,  # Detach from parent process
+        start_new_session=True,
         stdout=log_file,
         stderr=log_file,
       )
@@ -386,7 +384,6 @@ class NAPLayout(Widget):
       title="Pedal Calibration",
       instructions=CALIBRATE_PEDAL_INSTRUCTIONS,
       script_module="scripts.nap.calibrate_pedal",
-      safety_class="stationary",
     )
 
   def _on_calibrate_radar(self):
@@ -394,7 +391,6 @@ class NAPLayout(Widget):
       title="Radar Calibration",
       instructions=CALIBRATE_RADAR_INSTRUCTIONS,
       script_module="scripts.nap.calibrate_radar",
-      safety_class="stationary",
     )
 
   def _on_test_radar(self):
@@ -402,7 +398,6 @@ class NAPLayout(Widget):
       title="Radar Test",
       instructions=TEST_RADAR_INSTRUCTIONS,
       script_module="scripts.nap.test_radar",
-      safety_class="stationary",
     )
 
   def _on_flash_epas(self):
@@ -410,7 +405,6 @@ class NAPLayout(Widget):
       title="Flash EPAS Firmware",
       instructions=FLASH_EPAS_INSTRUCTIONS,
       script_module="scripts.nap.flash_epas",
-      safety_class="offroad_only",
     )
 
   def _on_backup_epas(self):
@@ -418,7 +412,6 @@ class NAPLayout(Widget):
       title="Backup EPAS Firmware",
       instructions=BACKUP_EPAS_INSTRUCTIONS,
       script_module="scripts.nap.extract_epas",
-      safety_class="offroad_only",
     )
 
   def _on_restore_epas(self):
@@ -426,7 +419,6 @@ class NAPLayout(Widget):
       title="Restore EPAS Firmware",
       instructions=RESTORE_EPAS_INSTRUCTIONS,
       script_module="scripts.nap.restore_epas",
-      safety_class="offroad_only",
     )
 
   def _show_reboot_modal(self):

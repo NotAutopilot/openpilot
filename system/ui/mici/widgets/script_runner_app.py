@@ -25,7 +25,6 @@ wires ``on_start`` and ``on_exit`` callbacks and decides what those mean.
 """
 import enum
 import queue
-import threading
 from collections.abc import Callable
 
 import pyray as rl
@@ -88,12 +87,6 @@ class MiciScriptRunnerApp:
     self._output_queue: queue.Queue[str] = queue.Queue()
     self._state_queue: queue.Queue[ScriptState] = queue.Queue()
 
-    # Consumer-controlled flag: action button enabled for the current
-    # state. Read by the render thread, written by either thread; a bare
-    # bool is safe under the GIL for this kind of write/read.
-    self._action_enabled: bool = True
-    self._action_enabled_lock = threading.Lock()
-
     # Initialised in _init_ui after gui_app.init_window.
     self._font = None
     self._title_font = None
@@ -116,15 +109,6 @@ class MiciScriptRunnerApp:
   def set_state(self, state: ScriptState) -> None:
     """Transition state. Safe from any thread; applied on next frame."""
     self._state_queue.put(state)
-
-  def set_action_enabled(self, enabled: bool) -> None:
-    """Enable or disable the action button for the current state.
-
-    Consumer uses this to make Exit non-clickable during a destructive
-    RUNNING phase (e.g. mid-flash, where interrupting would brick).
-    """
-    with self._action_enabled_lock:
-      self._action_enabled = enabled
 
   @property
   def state(self) -> ScriptState:
@@ -162,9 +146,6 @@ class MiciScriptRunnerApp:
     if drained_state and new_state != self._state:
       self._state = new_state
       self._action_button.set_text("start" if new_state == ScriptState.READY else "exit")
-      # Note: _action_enabled is consumer-controlled. We deliberately
-      # don't reset it on transitions — racing with the consumer's
-      # set_action_enabled call would lose the consumer's preference.
 
     while True:
       try:
@@ -175,8 +156,9 @@ class MiciScriptRunnerApp:
     if len(self._output_lines) > MAX_OUTPUT_LINES:
       self._output_lines = self._output_lines[-MAX_OUTPUT_LINES:]
 
-    with self._action_enabled_lock:
-      self._action_button.set_enabled(self._action_enabled)
+    # Universal: action button disabled while RUNNING. Matches the tici
+    # runner's behaviour — scripts can't be cancelled mid-execution.
+    self._action_button.set_enabled(self._state != ScriptState.RUNNING)
 
   def _render_frame(self) -> None:
     rect = rl.Rectangle(0, 0, gui_app.width, gui_app.height)

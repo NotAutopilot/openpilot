@@ -11,9 +11,7 @@ from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.big_multi_value_param import BigMultiValueParamToggle
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigParamControl
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog, BigInputDialog
-from openpilot.selfdrive.ui.mici.layouts.settings.nap_script import (
-  SAFETY_OFFROAD_ONLY, SAFETY_STATIONARY, launch_script,
-)
+from openpilot.selfdrive.ui.mici.layouts.settings.nap_script import launch_script
 from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   BACKUP_EPAS_INSTRUCTIONS,
   CALIBRATE_PEDAL_INSTRUCTIONS,
@@ -47,7 +45,7 @@ def _confirm_then_flash(slider_title: str, runner_title: str, instructions: str,
   Read-only operations (extract, calibration, test) skip this.
   """
   def confirm():
-    launch_script(runner_title, instructions, module, safety_class=SAFETY_OFFROAD_ONLY)
+    launch_script(runner_title, instructions, module)
   icon = gui_app.texture("icons_mici/buttons/button_circle_red.png", 180, 180)
   gui_app.push_widget(BigConfirmationDialog(slider_title, icon, confirm, red=True))
 
@@ -101,7 +99,7 @@ class NAPLayoutMici(NavScroller):
     calibrate_pedal_btn.set_click_callback(
       lambda: launch_script("Pedal Calibration", CALIBRATE_PEDAL_INSTRUCTIONS,
                             "scripts.nap.calibrate_pedal",
-                            safety_class=SAFETY_STATIONARY))
+                            ))
     calibrate_pedal_btn.set_enabled(ui_state.is_offroad)
 
     # ── Radar ────────────────────────────────────────
@@ -122,14 +120,14 @@ class NAPLayoutMici(NavScroller):
     calibrate_radar_btn.set_click_callback(
       lambda: launch_script("Radar Calibration", CALIBRATE_RADAR_INSTRUCTIONS,
                             "scripts.nap.calibrate_radar",
-                            safety_class=SAFETY_STATIONARY))
+                            ))
     calibrate_radar_btn.set_enabled(ui_state.is_offroad)
 
     test_radar_btn = BigButton("test radar", "test")
     test_radar_btn.set_click_callback(
       lambda: launch_script("Radar Test", TEST_RADAR_INSTRUCTIONS,
                             "scripts.nap.test_radar",
-                            safety_class=SAFETY_STATIONARY))
+                            ))
     test_radar_btn.set_enabled(ui_state.is_offroad)
 
     # ── iBooster (locked off) ────────────────────────
@@ -145,7 +143,7 @@ class NAPLayoutMici(NavScroller):
     backup_epas_btn.set_click_callback(
       lambda: launch_script("Backup EPAS Firmware", BACKUP_EPAS_INSTRUCTIONS,
                             "scripts.nap.extract_epas",
-                            safety_class=SAFETY_OFFROAD_ONLY))
+                            ))
     backup_epas_btn.set_enabled(ui_state.is_offroad)
 
     flash_epas_btn = BigButton("flash epas", "flash")

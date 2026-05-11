@@ -6,15 +6,12 @@ Standalone full-screen application for running scripts with live output display.
 Launched as a separate process to take over the display.
 
 Usage:
-    ./run_script.py "Title" "module.path.to.script" "Instructions text..." [safety_class]
+    ./run_script.py "Title" "module.path.to.script" "Instructions text..."
 
-safety_class:
-    "offroad_only" — refuse to launch and refuse Start if IsOnroad. For
-        EPAS firmware operations (flash/extract/restore) — driving stack
-        must be off, car must be parked.
-    "stationary" (default) — no IsOnroad check. For pedal/radar
-        calibration and tests, which require ignition on so the
-        relevant ECU is electrically active.
+The settings-panel button is offroad-gated, which forces the user to be
+parked when they tap. After the runner opens, the user is expected to
+turn the car on (brake + power button — Tesla pre-AP wake) before
+pressing Start, so the ECU being targeted is electrically active.
 """
 
 import signal
@@ -33,40 +30,6 @@ from openpilot.system.ui.lib.scroll_panel import GuiScrollPanel
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets.button import Button, ButtonStyle
 from openpilot.system.hardware import HARDWARE, PC
-
-SAFETY_OFFROAD_ONLY = "offroad_only"
-SAFETY_STATIONARY = "stationary"
-VALID_SAFETY_CLASSES = (SAFETY_OFFROAD_ONLY, SAFETY_STATIONARY)
-
-# Per-module required minimum safety class. Anything not listed is
-# unknown and rejected — fail closed. Callers may *request* the same
-# class or stricter; a weaker request is upgraded to the required one
-# so a forgotten or stale call site can't downgrade an EPAS flash to
-# a stationary classification.
-MODULE_REQUIRED_SAFETY: dict[str, str] = {
-  "scripts.nap.flash_epas":     SAFETY_OFFROAD_ONLY,
-  "scripts.nap.extract_epas":   SAFETY_OFFROAD_ONLY,
-  "scripts.nap.restore_epas":   SAFETY_OFFROAD_ONLY,
-  "scripts.nap.calibrate_pedal":   SAFETY_STATIONARY,
-  "scripts.nap.calibrate_radar":   SAFETY_STATIONARY,
-  "scripts.nap.test_radar":     SAFETY_STATIONARY,
-}
-
-
-def resolve_safety_class(module: str, requested: str) -> str:
-  """Resolve the effective safety class for `module`.
-
-  Unknown module → strictest (offroad_only). Known module → max(required,
-  requested) so a caller passing a weaker class is upgraded, never
-  downgraded.
-  """
-  required = MODULE_REQUIRED_SAFETY.get(module)
-  if required is None:
-    return SAFETY_OFFROAD_ONLY
-  # offroad_only is strictly stronger than stationary
-  if required == SAFETY_OFFROAD_ONLY or requested == SAFETY_OFFROAD_ONLY:
-    return SAFETY_OFFROAD_ONLY
-  return SAFETY_STATIONARY
 
 # UI Constants
 MARGIN = 50
@@ -87,13 +50,10 @@ class ScriptState:
 
 
 class ScriptRunnerApp:
-  def __init__(self, title: str, script_module: str, instructions: str,
-               safety_class: str = SAFETY_STATIONARY):
-    assert safety_class in VALID_SAFETY_CLASSES, f"unknown safety_class {safety_class!r}"
+  def __init__(self, title: str, script_module: str, instructions: str):
     self._title = title
     self._script_module = script_module
     self._instructions = instructions
-    self._safety_class = safety_class
 
     self._state = ScriptState.READY
     self._output_lines: list[str] = []
@@ -157,20 +117,6 @@ class ScriptRunnerApp:
 
   def _on_start_clicked(self):
     if self._state != ScriptState.READY:
-      return
-
-    # Execution-boundary safety check for offroad-only scripts (EPAS
-    # firmware ops). Catches the case where the user opened the runner
-    # while parked, then the car transitioned onroad before they
-    # pressed Start. Calibration/test scripts intentionally skip this
-    # — they require ignition on for the ECU to be electrically active.
-    if self._safety_class == SAFETY_OFFROAD_ONLY and self._params.get_bool("IsOnroad"):
-      self._output_lines = [
-        "Cannot run while car is on.",
-        "",
-        "Put the vehicle in park and turn it off, then try again.",
-      ]
-      self._state = ScriptState.ERROR
       return
 
     self._state = ScriptState.RUNNING
@@ -425,58 +371,34 @@ class ScriptRunnerApp:
         BUTTON_WIDTH,
         BUTTON_HEIGHT
       )
-      # Stationary scripts include unbounded loops (radar test, radar
-      # calibration). Disabling Exit while RUNNING strands the user
-      # with NAPScriptRunning asserted and no way to clear it.
-      # Offroad-only scripts (EPAS flash) must not be terminated
-      # mid-write — interrupting can brick the EPAS module — so keep
-      # the original lockout for them.
-      if self._safety_class == SAFETY_STATIONARY:
-        self._exit_button.set_enabled(True)
-      else:
-        self._exit_button.set_enabled(self._state != ScriptState.RUNNING)
+      # Exit is disabled while RUNNING. The flash path can't be
+      # safely interrupted mid-write; the calibration/test paths
+      # also disable cancel for consistency with the original design.
+      self._exit_button.set_enabled(self._state != ScriptState.RUNNING)
       self._exit_button.render(exit_rect)
 
 
 def main():
   if len(sys.argv) < 4:
-    print("Usage: run_script.py <title> <module> <instructions> [safety_class]")
-    print(f"  safety_class: one of {VALID_SAFETY_CLASSES} (default: {SAFETY_STATIONARY})")
+    print("Usage: run_script.py <title> <module> <instructions>")
     print("Example: run_script.py 'Pedal Calibration' 'scripts.nap.calibrate_pedal' 'Instructions...'")
     sys.exit(1)
 
   title = sys.argv[1]
   module = sys.argv[2]
   instructions = sys.argv[3]
-  requested = sys.argv[4] if len(sys.argv) > 4 else SAFETY_STATIONARY
-  if requested not in VALID_SAFETY_CLASSES:
-    print(f"unknown safety_class {requested!r}; expected one of {VALID_SAFETY_CLASSES}")
-    sys.exit(1)
-
-  # Module-bound resolution: unknown modules and weaker-than-required
-  # requests are upgraded to the strictest class. A caller cannot
-  # accidentally downgrade an EPAS flash.
-  safety_class = resolve_safety_class(module, requested)
 
   # Dispatch to the mici (comma 4) runner when the device's logical
   # canvas is small. The tici runner's hardcoded font/button sizes are
   # unusable at 536x240. Same lifecycle, different UI primitives.
   if not gui_app.big_ui():
     from scripts.nap import run_script_mici
-    sys.argv = ["run_script_mici", title, module, instructions, safety_class]
+    sys.argv = ["run_script_mici", title, module, instructions]
     run_script_mici.main()
     return
 
-  # Pre-window onroad gate for offroad-only scripts. Refuse BEFORE
-  # killing the tmux session — refusing after the kill would strand the
-  # user in a runner with the main UI dead.
-  if safety_class == SAFETY_OFFROAD_ONLY and Params().get_bool("IsOnroad"):
-    print("NAP runner: cannot run while car is on. Park it and try again.")
-    sys.exit(0)
-
   # Kill the main openpilot UI tmux session so we can take over the screen.
-  # tmux isn't installed on dev hosts (macOS), so swallow the FileNotFoundError
-  # — there's no session to kill there anyway.
+  # tmux isn't installed on dev hosts (macOS), so swallow the FileNotFoundError.
   try:
     subprocess.run(["tmux", "kill-session", "-t", "comma"], capture_output=True)
   except FileNotFoundError:
@@ -484,7 +406,7 @@ def main():
 
   gui_app.init_window("NAP Script Runner")
 
-  app = ScriptRunnerApp(title, module, instructions, safety_class)
+  app = ScriptRunnerApp(title, module, instructions)
   app._init_ui()
 
   for _ in gui_app.render():
