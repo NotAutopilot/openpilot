@@ -75,6 +75,10 @@ class _NAPMiciRunner:
 
     self._app.append_output("Starting script...")
     self._app.set_state(ScriptState.RUNNING)
+    # EPAS scripts must not be cancelled mid-write — disable the action
+    # button visibly. Calibration/test scripts stay cancellable.
+    if self._safety_class == SAFETY_OFFROAD_ONLY:
+      self._app.set_action_enabled(False)
     self._reader_thread = threading.Thread(target=self._read_output, daemon=True)
     self._reader_thread.start()
 
@@ -97,9 +101,14 @@ class _NAPMiciRunner:
         self._app.append_output("")
         self._app.append_output(f"[Script exited with code {return_code}]")
         self._app.set_state(ScriptState.ERROR)
+      # Re-enable the action button after the script finishes — exit
+      # is allowed in both COMPLETED and ERROR states regardless of
+      # safety_class.
+      self._app.set_action_enabled(True)
     except Exception as e:
       self._app.append_output(f"[Error reading output: {e}]")
       self._app.set_state(ScriptState.ERROR)
+      self._app.set_action_enabled(True)
 
   # ── exit ──────────────────────────────────────────
 
