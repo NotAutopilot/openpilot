@@ -465,8 +465,13 @@ def main():
     print("NAP runner: cannot run while car is on. Park it and try again.")
     sys.exit(0)
 
-  # Kill the main openpilot UI tmux session so we can take over the screen
-  subprocess.run(["tmux", "kill-session", "-t", "comma"], capture_output=True)
+  # Kill the main openpilot UI tmux session so we can take over the screen.
+  # tmux isn't installed on dev hosts (macOS), so swallow the FileNotFoundError
+  # — there's no session to kill there anyway.
+  try:
+    subprocess.run(["tmux", "kill-session", "-t", "comma"], capture_output=True)
+  except FileNotFoundError:
+    pass
 
   gui_app.init_window("NAP Script Runner")
 
