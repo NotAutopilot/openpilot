@@ -80,14 +80,16 @@ Press START to begin the radar test."""
 FLASH_EPAS_INSTRUCTIONS = """\
 EPAS Firmware Flash
 
+STEP 1 — POWER THE CAR ON NOW:
+  - Key fob inside the car
+  - Foot on the brake
+  - Car should be in Park and stay there
+  - Do not drive
+  (The EPAS ECU only responds when the car is on.)
+
 WARNING: This will modify your steering system firmware!
 
-This operation:
-  - Requires the vehicle to be safely parked
-  - May take several minutes to complete
-  - Should NOT be interrupted once started
-
-POWER REQUIREMENTS (read this part):
+POWER REQUIREMENTS:
   - 12V battery must be healthy and at a normal charge
   - Do NOT start the flash if the car has been sitting cold
     with marginal voltage
@@ -109,13 +111,20 @@ Press START only if you accept these risks."""
 BACKUP_EPAS_INSTRUCTIONS = """\
 EPAS Firmware Backup
 
-This action only extracts and saves the stock EPAS firmware image.
+STEP 1 — POWER THE CAR ON NOW:
+  - Key fob inside the car
+  - Foot on the brake
+  - Car should be in Park and stay there
+  - Do not drive
+  (The EPAS ECU only responds when the car is on. If the car
+   is not on, the script will time out.)
+
+This action only reads the stock EPAS firmware and saves it.
 No flashing or firmware modifications are performed.
 
-Use this before any flash operation so you have a local backup.
+Run this before any Flash operation so you have a local backup.
 
 PRECONDITIONS:
-  - Vehicle safely parked
   - Stable 12V power
   - Do not power-cycle during extraction
 
@@ -125,18 +134,25 @@ Press START to extract the EPAS firmware backup."""
 RESTORE_EPAS_INSTRUCTIONS = """\
 EPAS Firmware Restore
 
+STEP 1 — POWER THE CAR ON NOW:
+  - Key fob inside the car
+  - Foot on the brake
+  - Car should be in Park and stay there
+  - Do not drive
+  (The EPAS ECU only responds when the car is on.)
+
 WARNING: This will reflash your steering system firmware!
+
+POWER REQUIREMENTS:
+  - 12V battery must be healthy and at a normal charge
+  - Do NOT start the restore if the car has been sitting cold
+    with marginal voltage
+  - Power loss DURING the restore will brick the EPAS module
 
 This operation:
   - Uses the extracted stock EPAS firmware image
   - May take several minutes to complete
   - Should NOT be interrupted once started
-
-POWER REQUIREMENTS (read this part):
-  - 12V battery must be healthy and at a normal charge
-  - Do NOT start the restore if the car has been sitting cold
-    with marginal voltage
-  - Power loss DURING the restore will brick the EPAS module
 
 RISKS:
   - Interrupted flash can brick the EPAS module
