@@ -40,6 +40,18 @@ def _reboot_on_toggle(_):
   _reboot_dialog()
 
 
+def _confirm_then_flash(slider_title: str, runner_title: str, instructions: str, module: str):
+  """Slide-to-confirm dialog before launching a destructive EPAS script.
+
+  Adds a deliberate gesture before an irreversible firmware operation.
+  Read-only operations (extract, calibration, test) skip this.
+  """
+  def confirm():
+    launch_script(runner_title, instructions, module, safety_class=SAFETY_OFFROAD_ONLY)
+  icon = gui_app.texture("icons_mici/buttons/button_circle_red.png", 180, 180)
+  gui_app.push_widget(BigConfirmationDialog(slider_title, icon, confirm, red=True))
+
+
 class NAPLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
@@ -138,16 +150,18 @@ class NAPLayoutMici(NavScroller):
 
     flash_epas_btn = BigButton("flash epas", "flash")
     flash_epas_btn.set_click_callback(
-      lambda: launch_script("Flash EPAS Firmware", FLASH_EPAS_INSTRUCTIONS,
-                            "scripts.nap.flash_epas",
-                            safety_class=SAFETY_OFFROAD_ONLY))
+      lambda: _confirm_then_flash(
+        "slide to\nflash epas",
+        "Flash EPAS Firmware", FLASH_EPAS_INSTRUCTIONS, "scripts.nap.flash_epas",
+      ))
     flash_epas_btn.set_enabled(ui_state.is_offroad)
 
     restore_epas_btn = BigButton("restore epas", "restore")
     restore_epas_btn.set_click_callback(
-      lambda: launch_script("Restore EPAS Firmware", RESTORE_EPAS_INSTRUCTIONS,
-                            "scripts.nap.restore_epas",
-                            safety_class=SAFETY_OFFROAD_ONLY))
+      lambda: _confirm_then_flash(
+        "slide to\nrestore epas",
+        "Restore EPAS Firmware", RESTORE_EPAS_INSTRUCTIONS, "scripts.nap.restore_epas",
+      ))
     restore_epas_btn.set_enabled(ui_state.is_offroad)
 
     self._scroller.add_widgets([
