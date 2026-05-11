@@ -10,7 +10,7 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.big_multi_value_param import BigMultiValueParamToggle
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigParamControl
-from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog
+from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog, BigInputDialog
 from openpilot.selfdrive.ui.mici.layouts.settings.nap_script import (
   SAFETY_OFFROAD_ONLY, SAFETY_STATIONARY, launch_script,
 )
@@ -20,6 +20,8 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   CALIBRATE_RADAR_INSTRUCTIONS,
   FLASH_EPAS_INSTRUCTIONS,
   PEDAL_CAN_BUS_VALUES,
+  RADAR_OFFSET_MAX,
+  RADAR_OFFSET_MIN,
   RESTORE_EPAS_INSTRUCTIONS,
   TEST_RADAR_INSTRUCTIONS,
 )
@@ -101,6 +103,9 @@ class NAPLayoutMici(NavScroller):
     )
     radar_behind_nosecone.set_enabled(ui_state.is_offroad)
 
+    radar_offset_btn = BigButton("radar lateral offset", self._radar_offset_label())
+    radar_offset_btn.set_click_callback(lambda: self._open_radar_offset_input(radar_offset_btn))
+
     calibrate_radar_btn = BigButton("calibrate radar", "start")
     calibrate_radar_btn.set_click_callback(
       lambda: launch_script("Radar Calibration", CALIBRATE_RADAR_INSTRUCTIONS,
@@ -153,6 +158,7 @@ class NAPLayoutMici(NavScroller):
       calibrate_pedal_btn,
       radar_enabled,
       radar_behind_nosecone,
+      radar_offset_btn,
       calibrate_radar_btn,
       test_radar_btn,
       ibooster_enabled,
@@ -161,3 +167,37 @@ class NAPLayoutMici(NavScroller):
       flash_epas_btn,
       restore_epas_btn,
     ])
+
+  def _radar_offset_label(self) -> str:
+    raw = self._params.get(NAPParamKeys.RADAR_OFFSET, return_default=True)
+    try:
+      return f"{float(raw or 0):+.2f}m"
+    except (TypeError, ValueError):
+      return "+0.00m"
+
+  def _open_radar_offset_input(self, btn: BigButton) -> None:
+    raw = self._params.get(NAPParamKeys.RADAR_OFFSET, return_default=True)
+    try:
+      default_text = f"{float(raw or 0):.2f}"
+    except (TypeError, ValueError):
+      default_text = "0.00"
+
+    def on_confirm(text: str) -> None:
+      try:
+        v = float(text)
+      except (TypeError, ValueError):
+        return
+      v = max(RADAR_OFFSET_MIN, min(RADAR_OFFSET_MAX, v))
+      try:
+        self._params.put(NAPParamKeys.RADAR_OFFSET, v)
+      except Exception:
+        # FLOAT keys raise on bad value type; swallow so the UI
+        # doesn't crash on a corrupt write.
+        return
+      btn.set_value(self._radar_offset_label())
+
+    gui_app.push_widget(BigInputDialog(
+      f"radar offset (m, {RADAR_OFFSET_MIN} to {RADAR_OFFSET_MAX})",
+      default_text=default_text,
+      confirm_callback=on_confirm,
+    ))
