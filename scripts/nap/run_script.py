@@ -17,6 +17,7 @@ safety_class:
         relevant ECU is electrically active.
 """
 
+import signal
 import sys
 import subprocess
 import threading
@@ -221,11 +222,21 @@ class ScriptRunnerApp:
 
   def _on_exit_clicked(self):
     if self._process and self._process.poll() is None:
-      self._process.terminate()
+      # Cooperative cancel: SIGINT raises KeyboardInterrupt in the
+      # child, so its finally blocks run (Panda safety reset, pedal
+      # disable, etc.). Plain SIGTERM bypasses those, which for
+      # calibrate_pedal means leaving the interceptor at ALLOUTPUT
+      # with whatever GAS_COMMAND was last sent.
+      self._process.send_signal(signal.SIGINT)
       try:
-        self._process.wait(timeout=2)
+        self._process.wait(timeout=5)
       except subprocess.TimeoutExpired:
-        self._process.kill()
+        # Didn't cooperate. Escalate to SIGTERM, then SIGKILL.
+        self._process.terminate()
+        try:
+          self._process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+          self._process.kill()
 
     # Clear NAPScriptRunning so manager resumes normal operation
     self._params.put_bool("NAPScriptRunning", False)
