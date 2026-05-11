@@ -32,6 +32,7 @@ import pyray as rl
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.scroll_panel import GuiScrollPanel
 from openpilot.system.ui.lib.text_measure import measure_text_cached
+from openpilot.system.ui.lib.wrap_text import wrap_text
 from openpilot.system.ui.widgets.button import Button, ButtonStyle
 
 
@@ -128,8 +129,8 @@ class MiciScriptRunnerApp:
     )
 
     content_width = gui_app.width - MARGIN_X * 2
-    self._instruction_lines = _wrap_text(
-      self._font, self._instructions, content_width, BODY_FONT_SIZE
+    self._instruction_lines = wrap_text(
+      self._font, self._instructions, BODY_FONT_SIZE, content_width
     )
 
   def _drain_queues(self) -> None:
@@ -147,12 +148,22 @@ class MiciScriptRunnerApp:
       self._state = new_state
       self._action_button.set_text("start" if new_state == ScriptState.READY else "exit")
 
+    content_width = gui_app.width - MARGIN_X * 2
     while True:
       try:
         line = self._output_queue.get_nowait()
       except queue.Empty:
         break
-      self._output_lines.append(line)
+      # Subprocess stdout lines are often longer than the 536px canvas
+      # (especially Python tracebacks with long file paths). Use the
+      # framework wrap_text — it breaks single long unspaceable words
+      # (paths, urls) at the character level, which our paragraph-level
+      # split-on-spaces wouldn't catch.
+      wrapped = wrap_text(self._font, line, BODY_FONT_SIZE, content_width)
+      if wrapped:
+        self._output_lines.extend(wrapped)
+      else:
+        self._output_lines.append("")
     if len(self._output_lines) > MAX_OUTPUT_LINES:
       self._output_lines = self._output_lines[-MAX_OUTPUT_LINES:]
 
@@ -231,28 +242,6 @@ class MiciScriptRunnerApp:
       self._on_start()
     else:
       self._on_exit()
-
-
-def _wrap_text(font, text: str, max_width: float, font_size: int) -> list[str]:
-  lines: list[str] = []
-  for paragraph in text.split("\n"):
-    if not paragraph.strip():
-      lines.append("")
-      continue
-    words = paragraph.split()
-    current = ""
-    for word in words:
-      test = f"{current} {word}".strip()
-      width = measure_text_cached(font, test, font_size).x
-      if width <= max_width:
-        current = test
-      else:
-        if current:
-          lines.append(current)
-        current = word
-    if current:
-      lines.append(current)
-  return lines
 
 
 def _status_text(state: ScriptState) -> str:
