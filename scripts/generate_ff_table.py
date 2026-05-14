@@ -92,7 +92,7 @@ def build_table(all_cmd_data, all_ego_data):
   # For each (speed, accel_cmd) bin, compute a correction factor from
   # observed (commanded vs achieved) accel, then scale the default DI.
   table = []
-  for si, s_target in enumerate(SPEED_BP):
+  for si, _s_target in enumerate(SPEED_BP):
     if si == 0:
       s_lo, s_hi = 0.0, speed_edges[0] if speed_edges else 100.0
     elif si == len(SPEED_BP) - 1:
@@ -103,7 +103,7 @@ def build_table(all_cmd_data, all_ego_data):
     s_mask = (ego_v >= s_lo) & (ego_v < s_hi)
 
     row = []
-    for ai, a_target in enumerate(ACCEL_BP):
+    for ai, _a_target in enumerate(ACCEL_BP):
       if ai == 0:
         a_lo, a_hi = -10.0, accel_edges[0] if accel_edges else 10.0
       elif ai == len(ACCEL_BP) - 1:

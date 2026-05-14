@@ -14,27 +14,16 @@ from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets.html_render import HtmlRenderer, ElementType
+from openpilot.selfdrive.ui.layouts.settings.nap_content import (
+  BACKUP_EPAS_INSTRUCTIONS, BRAKE_FACTOR_PRESETS,
+  CALIBRATE_PEDAL_INSTRUCTIONS, CALIBRATE_RADAR_INSTRUCTIONS,
+  FLASH_EPAS_INSTRUCTIONS, PEDAL_CAN_BUS_VALUES,
+  RADAR_OFFSET_MAX, RADAR_OFFSET_MIN,
+  RESTORE_EPAS_INSTRUCTIONS, TEST_RADAR_INSTRUCTIONS,
+  acknowledgments_html, find_preset_index,
+)
 from opendbc.car.tesla.preap.nap_params import NAPParamKeys, DEFAULTS
 from openpilot.selfdrive.ui.ui_state import ui_state
-
-# Preset values for float/int params exposed as multiple-button selectors
-BRAKE_FACTOR_PRESETS = [0.5, 1.0, 1.5, 2.0]
-PEDAL_CAN_BUS_VALUES = [0, 2]
-
-# Radar lateral offset bounds (meters). Added to radar yRel in
-# radar_interface.py. Negative = shift toward left; positive = toward right.
-# ~0.27 is typical for the 3D-printed factory-location mount.
-RADAR_OFFSET_MIN = -2.0
-RADAR_OFFSET_MAX = 2.0
-
-
-def _find_preset_index(presets, value, default=0):
-  """Find the closest matching preset index for a given value."""
-  try:
-    return presets.index(value)
-  except ValueError:
-    closest = min(range(len(presets)), key=lambda i: abs(presets[i] - value))
-    return closest
 
 
 class SectionHeader(Widget):
@@ -190,7 +179,10 @@ class NAPLayout(Widget):
     self._radar_offset_btn = button_item(
       "Radar Lateral Offset",
       self._get_radar_offset_text,
-      description="Lateral offset in meters added to radar yRel. Negative shifts leads toward the left of current radar reading; positive shifts right. Example: -0.27 for the 3D-printed factory-location mount.",
+      description=(
+        "Lateral offset in meters added to radar yRel. Negative shifts leads toward the left of current radar "
+        + "reading; positive shifts right. Example: -0.27 for the 3D-printed factory-location mount."
+      ),
       callback=self._on_radar_offset_click,
     )
     self._all_items.append(self._radar_offset_btn)
@@ -229,7 +221,7 @@ class NAPLayout(Widget):
       "Multiplier for brake force. Higher values brake more aggressively. (Not yet implemented)",
       buttons=["0.5x", "1.0x", "1.5x", "2.0x"],
       button_width=130,
-      selected_index=_find_preset_index(BRAKE_FACTOR_PRESETS, brake_factor),
+      selected_index=find_preset_index(BRAKE_FACTOR_PRESETS, brake_factor),
       callback=self._on_brake_factor,
     )
     self._brake_factor_buttons.action_item.set_enabled(False)
@@ -296,15 +288,7 @@ class NAPLayout(Widget):
 
     # ── Acknowledgments ──
     self._all_items.append(section_header_item("Acknowledgments"))
-    self._all_items.append(CreditsBlock(
-      "<p>Special thanks to the following members. This project wouldn't be possible without you:</p>"
-      + "<p><b>Boggyver and the Tinkla Project</b><br>"
-      + "<b>Lukas Loetkolben</b><br>"
-      + "<b>Johnmr1</b><br>"
-      + "<b>SeriouslySerious</b><br>"
-      + "<b>Pod042</b><br>"
-      + "<b>1FrostlySlime</b></p>"
-    ))
+    self._all_items.append(CreditsBlock(acknowledgments_html()))
 
   def _add_toggle(self, param_key: str, title: str, description: str,
                    enabled: bool | None = None, needs_reboot: bool = False):
@@ -384,12 +368,11 @@ class NAPLayout(Widget):
     script_path = os.path.join(BASEDIR, "scripts", "nap", "run_script.py")
     log_path = "/tmp/nap_script_runner.log"
 
-    # Launch as detached process — run_script.py will kill the UI and take over
     with open(log_path, "w") as log_file:
       subprocess.Popen(
         ["python", script_path, title, script_module, instructions],
         cwd=BASEDIR,
-        start_new_session=True,  # Detach from parent process
+        start_new_session=True,
         stdout=log_file,
         stderr=log_file,
       )
@@ -399,142 +382,43 @@ class NAPLayout(Widget):
   def _on_calibrate_pedal(self):
     self._show_script_runner(
       title="Pedal Calibration",
-      instructions="""\
-NAP Pedal Calibrator
-
-This script calibrates the comma pedal interceptor for your pre-AP Tesla Model S.
-
-PRECONDITIONS:
-  1. Car must be ON
-  2. Gear must be in NEUTRAL
-  3. Brake pedal must be PRESSED and held
-  4. Do NOT press the accelerator pedal during calibration
-
-The calibration process will:
-  - Detect pedal zero position
-  - Detect pedal maximum position
-  - Fine-tune the scale factor
-  - Validate the calibration values
-  - Save calibration to params
-
-Press START when ready to begin calibration.""",
-      script_module="scripts.nap.calibrate_pedal"
+      instructions=CALIBRATE_PEDAL_INSTRUCTIONS,
+      script_module="scripts.nap.calibrate_pedal",
     )
 
   def _on_calibrate_radar(self):
     self._show_script_runner(
       title="Radar Calibration",
-      instructions="""\
-NAP Radar Calibrator
-
-This script displays filtered radar points to help align the Bosch radar.
-
-PRECONDITIONS:
-  1. Vehicle must be safely parked
-  2. Radar must be properly mounted and connected
-  3. Place a calibration target 3-10m ahead, centered on the vehicle axis
-
-The calibration display will show:
-  - Radar points within 2.5-14.5m ahead
-  - Lateral offset from center
-  - Adjust radar aim until target shows ~0.0m lateral
-
-Press START when ready to begin.""",
-      script_module="scripts.nap.calibrate_radar"
+      instructions=CALIBRATE_RADAR_INSTRUCTIONS,
+      script_module="scripts.nap.calibrate_radar",
     )
 
   def _on_test_radar(self):
     self._show_script_runner(
       title="Radar Test",
-      instructions="""\
-NAP Radar Test
-
-This script displays live radar data for testing and verification.
-
-The test will show:
-  - All detected radar points
-  - Distance and relative velocity
-  - Track status and confidence
-
-This is useful for:
-  - Verifying radar installation
-  - Checking radar alignment
-  - Debugging radar issues
-
-Press START to begin the radar test.""",
-      script_module="scripts.nap.test_radar"
+      instructions=TEST_RADAR_INSTRUCTIONS,
+      script_module="scripts.nap.test_radar",
     )
 
   def _on_flash_epas(self):
     self._show_script_runner(
       title="Flash EPAS Firmware",
-      instructions="""\
-EPAS Firmware Flash
-
-WARNING: This will modify your steering system firmware!
-
-This operation:
-  - Requires the vehicle to be safely parked
-  - May take several minutes to complete
-  - Should NOT be interrupted once started
-
-RISKS:
-  - Incorrect firmware can disable power steering
-  - Interrupted flash can brick the EPAS module
-  - This modification may void warranties
-
-Only proceed if you:
-  - Fully understand the implications
-  - Have backup EPAS firmware available
-  - Are comfortable with the risks involved
-
-Press START only if you accept these risks.""",
-      script_module="scripts.nap.flash_epas"
+      instructions=FLASH_EPAS_INSTRUCTIONS,
+      script_module="scripts.nap.flash_epas",
     )
 
   def _on_backup_epas(self):
     self._show_script_runner(
       title="Backup EPAS Firmware",
-      instructions="""\
-EPAS Firmware Backup
-
-This action only extracts and saves the stock EPAS firmware image.
-No flashing or firmware modifications are performed.
-
-Use this before any flash operation so you have a local backup.
-
-PRECONDITIONS:
-  - Vehicle safely parked
-  - Stable 12V power
-  - Do not power-cycle during extraction
-
-Press START to extract the EPAS firmware backup.""",
-      script_module="scripts.nap.extract_epas"
+      instructions=BACKUP_EPAS_INSTRUCTIONS,
+      script_module="scripts.nap.extract_epas",
     )
 
   def _on_restore_epas(self):
     self._show_script_runner(
       title="Restore EPAS Firmware",
-      instructions="""\
-EPAS Firmware Restore
-
-WARNING: This will reflash your steering system firmware!
-
-This operation:
-  - Uses the extracted stock EPAS firmware image
-  - May take several minutes to complete
-  - Should NOT be interrupted once started
-
-RISKS:
-  - Interrupted flash can brick the EPAS module
-  - Incorrect image can disable power steering
-
-Only proceed if you:
-  - Need to return to stock EPAS firmware
-  - Understand and accept the risks
-
-Press START only if you accept these risks.""",
-      script_module="scripts.nap.restore_epas"
+      instructions=RESTORE_EPAS_INSTRUCTIONS,
+      script_module="scripts.nap.restore_epas",
     )
 
   def _show_reboot_modal(self):
@@ -583,6 +467,10 @@ Press START only if you accept these risks.""",
         self._params.put_bool(key, default)
       elif isinstance(default, (int, float)):
         self._params.put(key, default)
+    # Force Pre-AP is locked on in the panel but DEFAULTS keeps it off
+    # for non-UI consumers. Re-apply the lock after the wholesale loop
+    # so reset doesn't silently flip the invariant.
+    self._params.put_bool(NAPParamKeys.FORCE_PRE_AP, True)
 
   # ── Render / lifecycle ──
 
@@ -609,4 +497,4 @@ Press START only if you accept these risks.""",
 
     brake_factor = self._params.get(NAPParamKeys.BRAKE_FACTOR, return_default=True)
     self._brake_factor_buttons.action_item.set_selected_button(
-      _find_preset_index(BRAKE_FACTOR_PRESETS, brake_factor))
+      find_preset_index(BRAKE_FACTOR_PRESETS, brake_factor))
