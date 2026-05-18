@@ -70,9 +70,7 @@ def analyze(log_dir):
       la = f'{cc["longActive"]}' if cc else '--'
       ca = f'{cc["accel"]:+6.2f}' if cc else '  --  '
       marker = f' <-- {label}' if j == center else ''
-      print(f'  t={c["t"]:.2f} en={c["enabled"]} gas={c["gas"]} '
-            f'v={c["vEgo"]:5.1f} a={c["aEgo"]:+6.2f} '
-            f'longAct={la:5s} ccAccel={ca}{marker}')
+      print(f'  t={c["t"]:.2f} en={c["enabled"]} gas={c["gas"]} v={c["vEgo"]:5.1f} a={c["aEgo"]:+6.2f} longAct={la:5s} ccAccel={ca}{marker}')
 
   prev_en = False
   prev_gas = False
