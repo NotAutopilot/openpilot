@@ -89,7 +89,7 @@ NotAutopilot wouldn't exist without:
 
 ## Contributing
 
-Pull requests are welcome against the `nap-dev` branch. See the `CLAUDE.md` for build instructions, pre-push checklist, and safety invariants.
+Pull requests are welcome against the `nap-dev` branch. See [`docs-nap/`](docs-nap/) for branch structure, build instructions, pre-push checklist, safety invariants, and the engagement flow.
 
 ## User Data
 

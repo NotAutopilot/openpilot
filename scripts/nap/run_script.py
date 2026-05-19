@@ -7,8 +7,14 @@ Launched as a separate process to take over the display.
 
 Usage:
     ./run_script.py "Title" "module.path.to.script" "Instructions text..."
+
+The settings-panel button is offroad-gated, which forces the user to be
+parked when they tap. After the runner opens, the user is expected to
+turn the car on (brake + power button — Tesla pre-AP wake) before
+pressing Start, so the ECU being targeted is electrically active.
 """
 
+import signal
 import sys
 import subprocess
 import threading
@@ -162,13 +168,36 @@ class ScriptRunnerApp:
 
   def _on_exit_clicked(self):
     if self._process and self._process.poll() is None:
-      self._process.terminate()
+      # Cooperative cancel: SIGINT raises KeyboardInterrupt in the
+      # child, so its finally blocks run (Panda safety reset, pedal
+      # disable, etc.). Plain SIGTERM bypasses those, which for
+      # calibrate_pedal means leaving the interceptor at ALLOUTPUT
+      # with whatever GAS_COMMAND was last sent.
+      self._process.send_signal(signal.SIGINT)
       try:
-        self._process.wait(timeout=2)
+        self._process.wait(timeout=5)
       except subprocess.TimeoutExpired:
-        self._process.kill()
+        # Didn't cooperate. Escalate to SIGTERM, then SIGKILL.
+        self._process.terminate()
+        try:
+          self._process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+          self._process.kill()
+          try:
+            self._process.wait(timeout=2)
+          except subprocess.TimeoutExpired:
+            # Child still alive after SIGKILL. Bail without clearing
+            # NAPScriptRunning — letting manager resume pandad while
+            # a zombie script may still hold Panda USB would create
+            # the exact dual-owner state this runner is meant to
+            # prevent. Surface an error and keep the runner up.
+            self._output_lines.append(
+              "[ERROR] script did not exit; manager will stay paused")
+            self._output_lines.append("Reboot the device to recover.")
+            self._state = ScriptState.ERROR
+            return
 
-    # Clear NAPScriptRunning so manager resumes normal operation
+    # Clear NAPScriptRunning only after we've confirmed the child is gone.
     self._params.put_bool("NAPScriptRunning", False)
 
     gui_app.request_close()
@@ -342,6 +371,9 @@ class ScriptRunnerApp:
         BUTTON_WIDTH,
         BUTTON_HEIGHT
       )
+      # Exit is disabled while RUNNING. The flash path can't be
+      # safely interrupted mid-write; the calibration/test paths
+      # also disable cancel for consistency with the original design.
       self._exit_button.set_enabled(self._state != ScriptState.RUNNING)
       self._exit_button.render(exit_rect)
 
@@ -356,8 +388,21 @@ def main():
   module = sys.argv[2]
   instructions = sys.argv[3]
 
-  # Kill the main openpilot UI tmux session so we can take over the screen
-  subprocess.run(["tmux", "kill-session", "-t", "comma"], capture_output=True)
+  # Dispatch to the mici (comma 4) runner when the device's logical
+  # canvas is small. The tici runner's hardcoded font/button sizes are
+  # unusable at 536x240. Same lifecycle, different UI primitives.
+  if not gui_app.big_ui():
+    from scripts.nap import run_script_mici
+    sys.argv = ["run_script_mici", title, module, instructions]
+    run_script_mici.main()
+    return
+
+  # Kill the main openpilot UI tmux session so we can take over the screen.
+  # tmux isn't installed on dev hosts (macOS), so swallow the FileNotFoundError.
+  try:
+    subprocess.run(["tmux", "kill-session", "-t", "comma"], capture_output=True)
+  except FileNotFoundError:
+    pass
 
   gui_app.init_window("NAP Script Runner")
 
