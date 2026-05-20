@@ -1,11 +1,11 @@
 [submodule "panda"]
   path = panda
 	url = https://github.com/MagZu/panda.git
-	branch = master-nap-preap-c3-0.11
+	branch = nap-C3-dev
 [submodule "opendbc"]
   path = opendbc_repo
 	url = https://github.com/MagZu/opendbc.git
-	branch = nap-C3-preap-0.11
+	branch = nap-C3-dev
 [submodule "msgq"]
   path = msgq_repo
   url = ../../commaai/msgq.git
