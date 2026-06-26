@@ -254,22 +254,25 @@ def below_steer_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.S
     Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 0.4)
 
 
-def pre_lane_change_left_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
-  n = sm['modelV2'].meta.laneChangeFlashesRemaining
+def _pre_lane_change_alert(side: str, sm: messaging.SubMaster) -> Alert:
+  meta = sm['modelV2'].meta
+  n = meta.laneChangeSignalsRemaining
+  remaining = meta.laneChangeRemaining
+  # Second line shows how many more lane changes are queued beyond this one.
+  line2 = f"{remaining} more lane change{'s' if remaining != 1 else ''} queued" if remaining > 0 else ""
   return Alert(
-    f"Nudge wheel left to change lane within {n} signals",
-    "",
+    f"Nudge wheel {side} to change lane within {n} signals",
+    line2,
     AlertStatus.normal, AlertSize.small,
     Priority.LOW, VisualAlert.none, AudibleAlert.none, .1)
+
+
+def pre_lane_change_left_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  return _pre_lane_change_alert("left", sm)
 
 
 def pre_lane_change_right_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
-  n = sm['modelV2'].meta.laneChangeFlashesRemaining
-  return Alert(
-    f"Nudge wheel right to change lane within {n} signals",
-    "",
-    AlertStatus.normal, AlertSize.small,
-    Priority.LOW, VisualAlert.none, AudibleAlert.none, .1)
+  return _pre_lane_change_alert("right", sm)
 
 
 def calibration_incomplete_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
