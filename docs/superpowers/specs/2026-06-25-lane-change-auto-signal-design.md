@@ -27,6 +27,69 @@ Replicate the Tesla-Unity / Tinkla behavior:
 5. The UI shows a live countdown: **"Nudge wheel to engage lane change within N
    signals"**.
 
+---
+
+## Revision 2 (2026-06-26) — time budget, full reset, multi-change queue
+
+On-car testing showed the original flash-counted design works to *hold* the
+signal, but has three problems, all fixed here:
+
+1. **Countdown never advances.** On this Pre-AP build, `BC_indicatorLStatus`
+   reflects only the driver's physical stalk, NOT the openpilot-driven
+   `DAS_bodyControls` flashes. So the flash counter only ticks when the driver
+   moves the stalk — the countdown freezes at 7/6.
+   **Fix:** count down a **7-second time budget** (`LANE_CHANGE_ARM_TIME = 7.0`)
+   instead of flashes. The countdown is `ceil(time_remaining)` and ticks by
+   `DT_MDL` every frame, independent of any blinker hardware feedback.
+
+2. **Stuck toast after completion.** After the maneuver, `laneChangeFinishing`
+   re-enters `preLaneChange` on a phantom `one_blinker` (the op-driven blinker),
+   leaving the countdown toast stuck on screen until the driver cancels/disengages.
+   **Fix:** on maneuver completion with no queued changes remaining, force a
+   **full reset to `off`** (direction none, timers cleared, blinker dropped).
+
+3. **No multi-lane-change.** **New feature:** during the arming window, count
+   same-direction stalk taps. `queued_changes = min(taps, 3)`. Each lane change
+   needs its **own** wheel nudge. After one completes with more queued, the signal
+   **stays on**, the queue decrements, and a **fresh 7s window** opens for the next
+   nudge (the timer counts only while waiting for a nudge — it pauses during the
+   maneuver). A UI value shows "N lane changes left" (0–2). Full reset (signal off,
+   toast clears) on: queue exhausted, 7s expiring while waiting for a nudge,
+   opposite-direction tap, or blindspot/below-speed/disengage.
+
+### Cereal field changes (Rev 2)
+- Rename `laneChangeFlashesRemaining @10` → `laneChangeSignalsRemaining @10`
+  (now the seconds-based countdown shown in the toast).
+- Add `laneChangeRemaining @11 :UInt8` (queued lane changes left, 0–2 after the
+  first is in progress; up to 2 while waiting).
+
+### State machine (Rev 2) — `desire_helper.py`
+- Constant: `LANE_CHANGE_ARM_TIME = 7.0` (replaces `LANE_CHANGE_FLASH_BUDGET`).
+- New state: `arm_timer` (counts up while waiting for a nudge in `preLaneChange`),
+  `queued_changes` (taps seen, capped 3), `signals_remaining` (ceil of time left),
+  `lane_changes_remaining` (queue minus the one in progress).
+- `preLaneChange` waiting: `arm_timer += DT_MDL`; cancel to full `off` when
+  `arm_timer > LANE_CHANGE_ARM_TIME`. Count same-direction taps into
+  `queued_changes` (cap 3). Opposite tap → full reset. Wheel nudge →
+  `laneChangeStarting` (consumes one from the queue; reset `arm_timer`).
+- `laneChangeFinishing` completion: if `queued_changes` (remaining) > 0 → return
+  to `preLaneChange`, keep the same direction & signal on, open a fresh window
+  (`arm_timer = 0`). Else → **full `off` reset**.
+- "Keep signal on between maneuvers": the between-change wait runs through
+  `preLaneChange` with the direction retained, so `laneChangeState != off` and
+  `controlsd` keeps asserting `CC.leftBlinker/rightBlinker`.
+
+### UI (Rev 2)
+- Countdown alert reads `laneChangeSignalsRemaining`: "Nudge wheel {left/right}
+  to change lane within N signals". When `laneChangeRemaining > 0`, append the
+  queue count, e.g. a second line / suffix "(N more queued)".
+
+The carcontroller / teslacan / panda-safety layer is **unchanged** in Rev 2 — it
+already drives the blinker from `CC.leftBlinker/rightBlinker`, which follow
+`laneChangeState != off`.
+
+---
+
 ## Verified Mechanism (from reading the code + `origin/tesla-unity`)
 
 ### Blinker READ (already correct)
