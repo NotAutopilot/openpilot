@@ -1,3 +1,5 @@
+import math
+
 from cereal import log
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
@@ -7,6 +9,16 @@ LaneChangeDirection = log.LaneChangeDirection
 
 LANE_CHANGE_SPEED_MIN = 20 * CV.MPH_TO_MS
 LANE_CHANGE_TIME_MAX = 10.
+
+# Time (seconds) the lane change stays armed waiting for a wheel nudge. The
+# countdown shown in the UI is the ceil of the time remaining. Time-based rather
+# than flash-based because on Pre-AP the indicator-light feedback
+# (BC_indicatorLStatus) does not reflect openpilot-driven DAS_bodyControls
+# flashes, so a flash counter never advances on its own.
+LANE_CHANGE_ARM_TIME = 7.0
+
+# Cap on how many same-direction lane changes can be queued from repeated taps.
+MAX_QUEUED_LANE_CHANGES = 3
 
 DESIRES = {
   LaneChangeDirection.none: {
@@ -40,9 +52,27 @@ class DesireHelper:
     self.prev_one_blinker = False
     self.desire = log.Desire.none
 
+    # Time-based arming latch
+    self.arm_timer = 0.0
+    self.signals_remaining = math.ceil(LANE_CHANGE_ARM_TIME)
+
+    # Multi-lane-change queue. queued_changes counts the lane changes still to
+    # perform (the one currently armed/in-progress plus any waiting). It is set
+    # from same-direction taps during the arming window (capped). lane_changes_
+    # remaining is the UI value: how many are left *beyond* the current one.
+    self.queued_changes = 0
+    self.lane_changes_remaining = 0
+
   @staticmethod
   def get_lane_change_direction(CS):
     return LaneChangeDirection.left if CS.leftBlinker else LaneChangeDirection.right
+
+  def _reset(self):
+    self.lane_change_state = LaneChangeState.off
+    self.lane_change_direction = LaneChangeDirection.none
+    self.arm_timer = 0.0
+    self.queued_changes = 0
+    self.lane_changes_remaining = 0
 
   def update(self, carstate, lateral_active, lane_change_prob):
     v_ego = carstate.vEgo
@@ -50,8 +80,7 @@ class DesireHelper:
     below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN
 
     if not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX:
-      self.lane_change_state = LaneChangeState.off
-      self.lane_change_direction = LaneChangeDirection.none
+      self._reset()
     else:
       # LaneChangeState.off
       if self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker and not below_lane_change_speed:
@@ -59,12 +88,12 @@ class DesireHelper:
         self.lane_change_ll_prob = 1.0
         # Initialize lane change direction to prevent UI alert flicker
         self.lane_change_direction = self.get_lane_change_direction(carstate)
+        # Start a fresh arming window. The first tap queues one change.
+        self.arm_timer = 0.0
+        self.queued_changes = 1
 
       # LaneChangeState.preLaneChange
       elif self.lane_change_state == LaneChangeState.preLaneChange:
-        # Update lane change direction
-        self.lane_change_direction = self.get_lane_change_direction(carstate)
-
         torque_applied = carstate.steeringPressed and \
                          ((carstate.steeringTorque > 0 and self.lane_change_direction == LaneChangeDirection.left) or
                           (carstate.steeringTorque < 0 and self.lane_change_direction == LaneChangeDirection.right))
@@ -72,11 +101,24 @@ class DesireHelper:
         blindspot_detected = ((carstate.leftBlindspot and self.lane_change_direction == LaneChangeDirection.left) or
                               (carstate.rightBlindspot and self.lane_change_direction == LaneChangeDirection.right))
 
-        if not one_blinker or below_lane_change_speed:
-          self.lane_change_state = LaneChangeState.off
-          self.lane_change_direction = LaneChangeDirection.none
+        new_tap = one_blinker and not self.prev_one_blinker
+        same_dir_tap = new_tap and self.get_lane_change_direction(carstate) == self.lane_change_direction
+        opposite_tap = new_tap and self.get_lane_change_direction(carstate) != self.lane_change_direction
+
+        # Same-direction tap queues another change (capped).
+        if same_dir_tap:
+          self.queued_changes = min(self.queued_changes + 1, MAX_QUEUED_LANE_CHANGES)
+
+        # Count down the arming window.
+        self.arm_timer += DT_MDL
+
+        if below_lane_change_speed or opposite_tap:
+          self._reset()
         elif torque_applied and not blindspot_detected:
           self.lane_change_state = LaneChangeState.laneChangeStarting
+        elif self.arm_timer > LANE_CHANGE_ARM_TIME:
+          # Window expired with no wheel nudge — cancel everything.
+          self._reset()
 
       # LaneChangeState.laneChangeStarting
       elif self.lane_change_state == LaneChangeState.laneChangeStarting:
@@ -93,11 +135,25 @@ class DesireHelper:
         self.lane_change_ll_prob = min(self.lane_change_ll_prob + DT_MDL, 1.0)
 
         if self.lane_change_ll_prob > 0.99:
-          self.lane_change_direction = LaneChangeDirection.none
-          if one_blinker:
+          # One change just completed.
+          self.queued_changes = max(self.queued_changes - 1, 0)
+          if self.queued_changes > 0:
+            # More queued: keep the same direction and signal on, re-arm a fresh
+            # window and wait for the next wheel nudge.
             self.lane_change_state = LaneChangeState.preLaneChange
+            self.lane_change_ll_prob = 1.0
+            self.arm_timer = 0.0
           else:
-            self.lane_change_state = LaneChangeState.off
+            # Nothing left — full reset so the toast clears and no ALC re-arms.
+            self._reset()
+
+    # Derived UI values.
+    if self.lane_change_state == LaneChangeState.preLaneChange:
+      self.signals_remaining = max(math.ceil(LANE_CHANGE_ARM_TIME - self.arm_timer), 0)
+    else:
+      self.signals_remaining = math.ceil(LANE_CHANGE_ARM_TIME)
+    # How many lane changes remain beyond the one currently armed/in progress.
+    self.lane_changes_remaining = max(self.queued_changes - 1, 0)
 
     if self.lane_change_state in (LaneChangeState.off, LaneChangeState.preLaneChange):
       self.lane_change_timer = 0.0
@@ -108,7 +164,7 @@ class DesireHelper:
 
     self.desire = DESIRES[self.lane_change_direction][self.lane_change_state]
 
-    # Send keep pulse once per second during LaneChangeStart.preLaneChange
+    # Send keep pulse once per second during LaneChangeState.preLaneChange
     if self.lane_change_state in (LaneChangeState.off, LaneChangeState.laneChangeStarting):
       self.keep_pulse_timer = 0.0
     elif self.lane_change_state == LaneChangeState.preLaneChange:

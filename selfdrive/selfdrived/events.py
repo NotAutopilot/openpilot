@@ -254,6 +254,27 @@ def below_steer_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.S
     Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 0.4)
 
 
+def _pre_lane_change_alert(side: str, sm: messaging.SubMaster) -> Alert:
+  meta = sm['modelV2'].meta
+  n = meta.laneChangeSignalsRemaining
+  remaining = meta.laneChangeRemaining
+  # Second line shows how many more lane changes are queued beyond this one.
+  line2 = f"{remaining} more lane change{'s' if remaining != 1 else ''} queued" if remaining > 0 else ""
+  return Alert(
+    f"Nudge wheel {side} to change lane within {n} signals",
+    line2,
+    AlertStatus.normal, AlertSize.small,
+    Priority.LOW, VisualAlert.none, AudibleAlert.none, .1)
+
+
+def pre_lane_change_left_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  return _pre_lane_change_alert("left", sm)
+
+
+def pre_lane_change_right_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  return _pre_lane_change_alert("right", sm)
+
+
 def calibration_incomplete_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   first_word = 'Recalibrating' if sm['liveCalibration'].calStatus == log.LiveCalibrationData.Status.recalibrating else 'Calibrating'
   return Alert(
@@ -576,19 +597,11 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.preLaneChangeLeft: {
-    ET.WARNING: Alert(
-      "Steer Left to Start Lane Change Once Safe",
-      "",
-      AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+    ET.WARNING: pre_lane_change_left_alert,
   },
 
   EventName.preLaneChangeRight: {
-    ET.WARNING: Alert(
-      "Steer Right to Start Lane Change Once Safe",
-      "",
-      AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+    ET.WARNING: pre_lane_change_right_alert,
   },
 
   EventName.laneChangeBlocked: {
