@@ -5,7 +5,7 @@
 [submodule "opendbc"]
   path = opendbc_repo
   url = https://github.com/SloPOS/opendbc.git
-  branch = lane-change-auto-signal
+  branch = nap-wiper-fix-test
 [submodule "msgq"]
   path = msgq_repo
   url = ../../commaai/msgq.git
