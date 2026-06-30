@@ -5,7 +5,7 @@
 [submodule "opendbc"]
   path = opendbc_repo
   url = https://github.com/NotAutopilot/opendbc.git
-  branch = nap-dev
+  branch = wiper-fix-preap
 [submodule "msgq"]
   path = msgq_repo
   url = ../../commaai/msgq.git
