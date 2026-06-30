@@ -79,11 +79,33 @@ class DesireHelper:
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN
 
+    # A tap is a rising edge of one_blinker. Detected once here so it can be
+    # honored in every active state, not just preLaneChange — the driver may tap
+    # to queue another change (same direction) or to cancel (opposite direction)
+    # while a maneuver is already underway.
+    new_tap = one_blinker and not self.prev_one_blinker
+    tap_direction = self.get_lane_change_direction(carstate) if new_tap else LaneChangeDirection.none
+    same_dir_tap = new_tap and tap_direction == self.lane_change_direction
+    opposite_tap = new_tap and self.lane_change_direction != LaneChangeDirection.none \
+                            and tap_direction != self.lane_change_direction
+
     if not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX:
       self._reset()
     else:
-      # LaneChangeState.off
-      if self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker and not below_lane_change_speed:
+      # Taps honored from ANY active state (arming or mid-maneuver):
+      #   opposite-direction tap -> cancel everything, blinker off
+      #   same-direction tap     -> queue another change (capped)
+      just_cancelled = False
+      if self.lane_change_state != LaneChangeState.off:
+        if opposite_tap:
+          self._reset()
+          just_cancelled = True
+        elif same_dir_tap:
+          self.queued_changes = min(self.queued_changes + 1, MAX_QUEUED_LANE_CHANGES)
+
+      # LaneChangeState.off — do NOT re-arm on the same tick an opposite tap just
+      # cancelled, otherwise the cancel would immediately re-arm the new direction.
+      if not just_cancelled and self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker and not below_lane_change_speed:
         self.lane_change_state = LaneChangeState.preLaneChange
         self.lane_change_ll_prob = 1.0
         # Initialize lane change direction to prevent UI alert flicker
@@ -101,18 +123,11 @@ class DesireHelper:
         blindspot_detected = ((carstate.leftBlindspot and self.lane_change_direction == LaneChangeDirection.left) or
                               (carstate.rightBlindspot and self.lane_change_direction == LaneChangeDirection.right))
 
-        new_tap = one_blinker and not self.prev_one_blinker
-        same_dir_tap = new_tap and self.get_lane_change_direction(carstate) == self.lane_change_direction
-        opposite_tap = new_tap and self.get_lane_change_direction(carstate) != self.lane_change_direction
-
-        # Same-direction tap queues another change (capped).
-        if same_dir_tap:
-          self.queued_changes = min(self.queued_changes + 1, MAX_QUEUED_LANE_CHANGES)
-
-        # Count down the arming window.
+        # Count down the arming window. (Tap queue/cancel handled above for all
+        # active states.)
         self.arm_timer += DT_MDL
 
-        if below_lane_change_speed or opposite_tap:
+        if below_lane_change_speed:
           self._reset()
         elif torque_applied and not blindspot_detected:
           self.lane_change_state = LaneChangeState.laneChangeStarting

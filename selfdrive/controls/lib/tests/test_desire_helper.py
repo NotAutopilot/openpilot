@@ -190,3 +190,87 @@ def test_midsequence_timeout_full_resets():
     assert dh.lane_change_state == LaneChangeState.off
     assert dh.lane_change_direction == LaneChangeDirection.none
     assert dh.queued_changes == 0
+
+
+# ---- taps DURING the maneuver (not just the pre-nudge window) -----------
+
+def _tap_same_dir_left(dh):
+    """A same-direction (left) tap: blinker off for a tick, then on — a rising
+    edge of one_blinker — without applying wheel torque."""
+    dh.update(FakeCarState(left=False), True, 0.0)
+    dh.update(FakeCarState(left=True), True, 0.0)
+
+
+def test_same_dir_tap_during_starting_queues_change():
+    dh = DesireHelper()
+    _arm_left(dh)
+    dh.update(_nudge_left(), True, 0.0)
+    assert dh.lane_change_state == LaneChangeState.laneChangeStarting
+    assert dh.queued_changes == 1
+    # tap again while the maneuver is underway
+    _tap_same_dir_left(dh)
+    assert dh.queued_changes == 2
+
+
+def test_same_dir_tap_during_finishing_queues_change():
+    dh = DesireHelper()
+    _arm_left(dh)
+    # drive into laneChangeFinishing
+    _tick(dh, _nudge_left(), n=int(0.6 / DT_MDL), lane_change_prob=0.0)
+    assert dh.lane_change_state == LaneChangeState.laneChangeFinishing
+    assert dh.queued_changes == 1
+    _tap_same_dir_left(dh)
+    assert dh.queued_changes == 2
+
+
+def test_tap_during_maneuver_offers_second_change_after_completion():
+    # The reported bug: tap during the first change -> a second change should be
+    # offered (re-armed, awaiting its own nudge) once the first completes.
+    dh = DesireHelper()
+    _arm_left(dh)
+    dh.update(_nudge_left(), True, 0.0)
+    assert dh.lane_change_state == LaneChangeState.laneChangeStarting
+    _tap_same_dir_left(dh)               # queue a second mid-maneuver
+    assert dh.queued_changes == 2
+    _complete_maneuver(dh, FakeCarState(left=True))
+    assert dh.lane_change_state == LaneChangeState.preLaneChange
+    assert dh.lane_change_direction == LaneChangeDirection.left
+    assert dh.queued_changes == 1
+    # second change still needs its own wheel nudge
+    dh.update(_nudge_left(), True, 0.0)
+    assert dh.lane_change_state == LaneChangeState.laneChangeStarting
+
+
+def test_opposite_tap_during_starting_cancels():
+    dh = DesireHelper()
+    _arm_left(dh)
+    dh.update(_nudge_left(), True, 0.0)
+    assert dh.lane_change_state == LaneChangeState.laneChangeStarting
+    # opposite (right) tap while the left maneuver is underway -> full cancel
+    dh.update(FakeCarState(left=False, right=False), True, 0.0)
+    dh.update(FakeCarState(right=True), True, 0.0)
+    assert dh.lane_change_state == LaneChangeState.off
+    assert dh.lane_change_direction == LaneChangeDirection.none
+    assert dh.queued_changes == 0
+
+
+def test_opposite_tap_during_finishing_cancels():
+    dh = DesireHelper()
+    _arm_left(dh)
+    _tick(dh, _nudge_left(), n=int(0.6 / DT_MDL), lane_change_prob=0.0)
+    assert dh.lane_change_state == LaneChangeState.laneChangeFinishing
+    dh.update(FakeCarState(left=False, right=False), True, 0.0)
+    dh.update(FakeCarState(right=True), True, 0.0)
+    assert dh.lane_change_state == LaneChangeState.off
+    assert dh.lane_change_direction == LaneChangeDirection.none
+
+
+def test_held_blinker_during_maneuver_does_not_queue():
+    # Guard: a continuously-held blinker (no rising edge) must NOT be miscounted
+    # as repeated taps while the maneuver runs.
+    dh = DesireHelper()
+    _arm_left(dh)
+    dh.update(_nudge_left(), True, 0.0)
+    assert dh.queued_changes == 1
+    _tick(dh, FakeCarState(left=True), n=20)  # blinker held on, no edges
+    assert dh.queued_changes == 1
