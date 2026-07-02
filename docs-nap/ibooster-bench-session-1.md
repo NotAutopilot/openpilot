@@ -26,7 +26,15 @@ Stop if the car is not parked, if the ignition is off, if any warning appears, o
 1. Park the car and turn ignition on.
 2. Connect the comma/panda as usual.
 3. Open a terminal on the comma or SSH into it.
-4. Go to openpilot:
+4. Stop openpilot so the bench tool can talk to the panda directly. It
+   holds the panda's USB interface while running. The device screen goes
+   dark until the reboot at the end — that is normal:
+
+```bash
+sudo systemctl stop comma
+```
+
+5. Go to openpilot:
 
 ```bash
 cd /data/openpilot
@@ -119,3 +127,13 @@ scp comma:/data/openpilot/ibooster-bench-runs/<file>.json .
 ```
 
 Then send that JSON file through the usual channel.
+
+## After the session
+
+Reboot the device to bring openpilot back:
+
+```bash
+sudo reboot
+```
+
+Then switch back to your normal branch if you changed branches for this session.
