@@ -58,6 +58,7 @@ function install_ubuntu_deps() {
     build-essential \
     curl \
     libcurl4-openssl-dev \
+    libusb-1.0-0-dev \
     locales \
     git \
     xvfb

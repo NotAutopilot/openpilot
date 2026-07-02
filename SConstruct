@@ -110,6 +110,9 @@ elif arch == "Darwin":
   env.Append(LIBPATH=[
     "/System/Library/Frameworks/OpenGL.framework/Libraries",
   ])
+  openssl_prefix = "/opt/homebrew/opt/openssl@3"
+  if os.path.isdir(openssl_prefix):
+    env.Append(CPPPATH=[f"{openssl_prefix}/include"], LIBPATH=[f"{openssl_prefix}/lib"])
   env.Append(CCFLAGS=["-DGL_SILENCE_DEPRECATION"])
   env.Append(CXXFLAGS=["-DGL_SILENCE_DEPRECATION"])
 else:

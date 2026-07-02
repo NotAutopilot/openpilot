@@ -4,8 +4,9 @@ replay_env = env.Clone()
 replay_env['CCFLAGS'] += ['-Wno-deprecated-declarations']
 
 base_frameworks = []
+if arch == "Darwin":
+  base_frameworks = ["VideoToolbox", "CoreVideo", "CoreMedia", "CoreFoundation"]
 base_libs = [common, messaging, cereal, visionipc, 'm', 'ssl', 'crypto', 'pthread']
-
 replay_lib_src = ["replay.cc", "consoleui.cc", "camera.cc", "filereader.cc", "logreader.cc", "framereader.cc",
                   "route.cc", "util.cc", "seg_mgr.cc", "timeline.cc", "py_downloader.cc"]
 if arch != "Darwin":

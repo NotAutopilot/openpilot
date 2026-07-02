@@ -45,6 +45,7 @@ dependencies = [
 
   # panda
   "libusb1",
+  "smbus2",
   "spidev; platform_system == 'Linux'",
 
   # logging
