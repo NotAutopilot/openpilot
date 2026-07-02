@@ -16,7 +16,7 @@ echo "=== C3 pre-AP first-time setup ==="
 
 # Init submodules (panda + opendbc)
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
-echo "Initialising submodules..."
+echo "Initializing submodules..."
 cd "$DIR"
 git submodule update --init --depth 1 panda opendbc_repo
 

@@ -17,14 +17,13 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_HW
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
-from openpilot.system.hardware import HARDWARE, TICI, AGNOS, PC
+from openpilot.system.hardware import HARDWARE, TICI, AGNOS
 from openpilot.system.loggerd.config import get_available_percent
 from openpilot.system.statsd import statlog
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware.power_monitoring import PowerMonitoring
 from openpilot.system.hardware.fan_controller import FanController
 from openpilot.system.version import terms_version, training_version
-from openpilot.system.athena.registration import UNREGISTERED_DONGLE_ID
 
 ThermalStatus = log.DeviceState.ThermalStatus
 NetworkType = log.DeviceState.NetworkType
@@ -243,7 +242,8 @@ def hardware_thread(end_event, hw_queue) -> None:
 
       # Set ignition based on any panda connected
       # C3_IGNITION_CAN: Tesla pre-AP 0x348 GTW_status OR standard ignitionLine/Can
-      onroad_conditions["ignition"] = any(ps.ignitionLine or ps.ignitionCan for ps in pandaStates if ps.pandaType != log.PandaState.PandaType.unknown) or _tesla_ign_can
+      has_standard_ignition = any(ps.ignitionLine or ps.ignitionCan for ps in pandaStates if ps.pandaType != log.PandaState.PandaType.unknown)
+      onroad_conditions["ignition"] = has_standard_ignition or _tesla_ign_can
 
       pandaState = pandaStates[0]
 
