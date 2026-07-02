@@ -96,7 +96,7 @@ If this happens:
 
 ## FAULT OBSERVED output
 
-If the screen prints `FAULT OBSERVED`, let the session finish. In the counter-skip and transmit-gap checks, a fault can be the thing being measured, not a reason to stop the run. The JSON will say `result: fault_observed` and `cleared_by_mode_0: true` or `false`.
+If the screen prints `FAULT OBSERVED`, let the session finish. In the counter-skip and transmit-gap checks, a fault can be the thing being measured, not a reason to stop the run. Losing the status stream during those checks also shows `FAULT OBSERVED`, and the tool keeps sending mode 0 at 0 mm through the observation window. The JSON will say `result: fault_observed` and `cleared_by_mode_0: true` or `false`.
 
 If `cleared_by_mode_0` is `false`, turn ignition off for 10 seconds, turn it back on, and note whether any brake warning appears or stays on. Send that note with the JSON file.
 
