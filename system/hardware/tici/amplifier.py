@@ -99,6 +99,12 @@ CONFIGS = {
   ],
 }
 
+def _read_device_model() -> str:
+  with open("/sys/firmware/devicetree/base/model") as f:
+    model = f.read().strip('\x00')
+  return model.split('comma ')[-1]
+
+
 class Amplifier:
   AMP_I2C_BUS = 0
   AMP_ADDRESS = 0x10
@@ -139,7 +145,9 @@ class Amplifier:
   def set_global_shutdown(self, amp_disabled: bool) -> bool:
     return self.set_configs([self._get_shutdown_config(amp_disabled), ])
 
-  def initialize_configuration(self, model: str) -> bool:
+  def initialize_configuration(self, model: str | None = None) -> bool:
+    if model is None:
+      model = _read_device_model()
     cfgs = [
       self._get_shutdown_config(True),
       *BASE_CONFIG,
@@ -150,9 +158,7 @@ class Amplifier:
 
 
 if __name__ == "__main__":
-  with open("/sys/firmware/devicetree/base/model") as f:
-    model = f.read().strip('\x00')
-  model = model.split('comma ')[-1]
+  model = _read_device_model()
 
   amp = Amplifier()
   amp.initialize_configuration(model)
