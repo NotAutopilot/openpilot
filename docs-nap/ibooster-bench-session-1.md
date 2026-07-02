@@ -94,6 +94,12 @@ If this happens:
 4. Save the output file path shown below the stop message.
 5. Send the JSON file back with a short note describing what the car did, if anything.
 
+## FAULT OBSERVED output
+
+If the screen prints `FAULT OBSERVED`, let the session finish. In the counter-skip and transmit-gap checks, a fault can be the thing being measured, not a reason to stop the run. The JSON will say `result: fault_observed` and `cleared_by_mode_0: true` or `false`.
+
+If `cleared_by_mode_0` is `false`, turn ignition off for 10 seconds, turn it back on, and note whether any brake warning appears or stays on. Send that note with the JSON file.
+
 ## Output file
 
 The run writes one JSON file:
@@ -102,7 +108,7 @@ The run writes one JSON file:
 /data/openpilot/ibooster-bench-runs/<car>-YYYYMMDDTHHMMSSZ-ibooster-session1.json
 ```
 
-The file contains raw transmitted `0x553` bytes with timestamps, all accepted `0x554` Status frames, all accepted `0x39D` readiness frames, the mode-transition results, the counter-skip observation, and the transmit-gap results.
+The file contains raw transmitted `0x553` bytes with timestamps, all accepted `0x554` Status frames, all accepted `0x39D` readiness frames, the mode-transition results, the counter-skip observation, the transmit-gap results, and any fault-observation window with whether mode 0 cleared it.
 
 Send the JSON file back exactly as written. Do not edit it.
 
