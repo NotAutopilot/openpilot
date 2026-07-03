@@ -88,7 +88,7 @@ class MiciScriptRunnerApp:
     self._output_queue: queue.Queue[str] = queue.Queue()
     self._state_queue: queue.Queue[ScriptState] = queue.Queue()
 
-    # Initialised in _init_ui after gui_app.init_window.
+    # Initialized in _init_ui after gui_app.init_window.
     self._font = None
     self._title_font = None
     self._scroll_panel: GuiScrollPanel | None = None
@@ -168,7 +168,7 @@ class MiciScriptRunnerApp:
       self._output_lines = self._output_lines[-MAX_OUTPUT_LINES:]
 
     # Universal: action button disabled while RUNNING. Matches the tici
-    # runner's behaviour — scripts can't be cancelled mid-execution.
+    # runner's behavior — scripts can't be canceled mid-execution.
     self._action_button.set_enabled(self._state != ScriptState.RUNNING)
 
   def _render_frame(self) -> None:
