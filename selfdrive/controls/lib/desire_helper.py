@@ -1,11 +1,12 @@
 import math
 
-from cereal import log
+from cereal import car, log
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
+ButtonType = car.CarState.ButtonEvent.Type
 
 LANE_CHANGE_SPEED_MIN = 20 * CV.MPH_TO_MS
 LANE_CHANGE_TIME_MAX = 10.
@@ -79,15 +80,21 @@ class DesireHelper:
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN
 
-    # A tap is a rising edge of one_blinker. Detected once here so it can be
-    # honored in every active state, not just preLaneChange — the driver may tap
-    # to queue another change (same direction) or to cancel (opposite direction)
-    # while a maneuver is already underway.
-    new_tap = one_blinker and not self.prev_one_blinker
-    tap_direction = self.get_lane_change_direction(carstate) if new_tap else LaneChangeDirection.none
-    same_dir_tap = new_tap and tap_direction == self.lane_change_direction
-    opposite_tap = new_tap and self.lane_change_direction != LaneChangeDirection.none \
-                            and tap_direction != self.lane_change_direction
+    # Driver taps come from the turn-signal LEVER (ButtonEvents built by the
+    # Pre-AP carstate from STW_ACTN_RQ.TurnIndLvr_Stat), NOT from the indicator
+    # lamp. While openpilot drives the blinker (laneChangeState != off), the
+    # lamp feedback (BC_indicatorLStatus -> carstate.leftBlinker) latches ON, so
+    # lamp edges cannot see taps at all — this is why on-car taps were ignored.
+    # Lamp edges are still used to ARM from off (a tap makes the stock car flash
+    # 3x, raising the lamp, when openpilot is not yet driving it).
+    left_tap = any(be.pressed and be.type == ButtonType.leftBlinker for be in carstate.buttonEvents)
+    right_tap = any(be.pressed and be.type == ButtonType.rightBlinker for be in carstate.buttonEvents)
+    if self.lane_change_direction == LaneChangeDirection.left:
+      same_dir_tap, opposite_tap = left_tap, right_tap
+    elif self.lane_change_direction == LaneChangeDirection.right:
+      same_dir_tap, opposite_tap = right_tap, left_tap
+    else:
+      same_dir_tap, opposite_tap = False, False
 
     if not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX:
       self._reset()
