@@ -1,12 +1,11 @@
 import math
 
-from cereal import car, log
+from cereal import log
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
-ButtonType = car.CarState.ButtonEvent.Type
 
 LANE_CHANGE_SPEED_MIN = 20 * CV.MPH_TO_MS
 LANE_CHANGE_TIME_MAX = 10.
@@ -57,6 +56,10 @@ class DesireHelper:
     self.arm_timer = 0.0
     self.signals_remaining = math.ceil(LANE_CHANGE_ARM_TIME)
 
+    # Turn-signal lever tracking for tap edge detection. Pure signal history —
+    # deliberately NOT cleared in _reset() so a held lever can't retrigger.
+    self.prev_turn_lever = 0
+
     # Multi-lane-change queue. queued_changes counts the lane changes still to
     # perform (the one currently armed/in-progress plus any waiting). It is set
     # from same-direction taps during the arming window (capped). lane_changes_
@@ -80,15 +83,19 @@ class DesireHelper:
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN
 
-    # Driver taps come from the turn-signal LEVER (ButtonEvents built by the
-    # Pre-AP carstate from STW_ACTN_RQ.TurnIndLvr_Stat), NOT from the indicator
-    # lamp. While openpilot drives the blinker (laneChangeState != off), the
-    # lamp feedback (BC_indicatorLStatus -> carstate.leftBlinker) latches ON, so
-    # lamp edges cannot see taps at all — this is why on-car taps were ignored.
-    # Lamp edges are still used to ARM from off (a tap makes the stock car flash
-    # 3x, raising the lamp, when openpilot is not yet driving it).
-    left_tap = any(be.pressed and be.type == ButtonType.leftBlinker for be in carstate.buttonEvents)
-    right_tap = any(be.pressed and be.type == ButtonType.rightBlinker for be in carstate.buttonEvents)
+    # Driver taps come from the turn-signal LEVER position
+    # (carstate.turnSignalStalkState: 0=idle, 1=left, 2=right), NOT from the
+    # indicator lamp. While openpilot drives the blinker (laneChangeState !=
+    # off), the lamp feedback (BC_indicatorLStatus -> carstate.leftBlinker)
+    # latches ON, so lamp edges cannot see taps at all. The lever is a LEVEL
+    # signal (a press persists >=100ms), so edges detected here survive the
+    # conflated ~20Hz carState reads in modeld — single-message ButtonEvents
+    # would be dropped 4 times out of 5. Lamp edges are still used to ARM from
+    # off (a tap makes the stock car flash 3x when openpilot isn't driving it).
+    lever = carstate.turnSignalStalkState
+    left_tap = lever == 1 and self.prev_turn_lever != 1
+    right_tap = lever == 2 and self.prev_turn_lever != 2
+    self.prev_turn_lever = lever
     if self.lane_change_direction == LaneChangeDirection.left:
       same_dir_tap, opposite_tap = left_tap, right_tap
     elif self.lane_change_direction == LaneChangeDirection.right:
