@@ -58,9 +58,9 @@ This is a driver-training feature: prevents accidental full engage from a bump o
 
 ## Steering disengage
 
-`handle_steering_disengage()` runs on every frame. Rising edge of `steeringDisengage` (hands-on level ≥ 3 or EPAS rejecting) fully tears down FSM state: `cruiseEnabled=False`, `enableLongControl=False`, `pedal_speed_kph=0`, pull timers cleared.
+`handle_steering_disengage()` runs on every frame. Rising edge of `steeringDisengage` (hands-on level ≥ 2 or EPAS rejecting) fully tears down FSM state: `cruiseEnabled=False`, `enableLongControl=False`, `pedal_speed_kph=0`, pull timers cleared.
 
-This is the primary user override path. The panda also enforces it independently via EPAS error codes 6–9 and hands-on level ≥ 3.
+This is the primary user override path. The panda also enforces it independently via EPAS error codes 6–9 and hands-on level ≥ 2.
 
 ## Where to look
 

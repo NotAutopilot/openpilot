@@ -10,11 +10,7 @@ LaneChangeDirection = log.LaneChangeDirection
 LANE_CHANGE_SPEED_MIN = 20 * CV.MPH_TO_MS
 LANE_CHANGE_TIME_MAX = 10.
 
-# Time (seconds) the lane change stays armed waiting for a wheel nudge. The
-# countdown shown in the UI is the ceil of the time remaining. Time-based rather
-# than flash-based because on Pre-AP the indicator-light feedback
-# (BC_indicatorLStatus) does not reflect openpilot-driven DAS_bodyControls
-# flashes, so a flash counter never advances on its own.
+# Time the lane change stays armed waiting for steering input.
 LANE_CHANGE_ARM_TIME = 7.0
 
 # Cap on how many same-direction lane changes can be queued from repeated taps.
@@ -52,14 +48,14 @@ class DesireHelper:
     self.prev_one_blinker = False
     self.desire = log.Desire.none
 
-    # Time-based arming latch
     self.arm_timer = 0.0
     self.signals_remaining = math.ceil(LANE_CHANGE_ARM_TIME)
 
-    # Multi-lane-change queue. queued_changes counts the lane changes still to
-    # perform (the one currently armed/in-progress plus any waiting). It is set
-    # from same-direction taps during the arming window (capped). lane_changes_
-    # remaining is the UI value: how many are left *beyond* the current one.
+    # Lever history is independent of lane-change state. Resetting it would
+    # turn a held lever into a second tap.
+    self.prev_turn_lever = 0
+
+    # Includes the lane change currently armed or in progress.
     self.queued_changes = 0
     self.lane_changes_remaining = 0
 
@@ -79,11 +75,34 @@ class DesireHelper:
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN
 
+    # The indicator lamp stays on while openpilot drives it, so driver taps
+    # must be detected from the physical lever. The lever is a level signal and
+    # remains asserted long enough to survive conflated carState reads.
+    lever = carstate.turnSignalStalkState
+    left_tap = lever == 1 and self.prev_turn_lever != 1
+    right_tap = lever == 2 and self.prev_turn_lever != 2
+    self.prev_turn_lever = lever
+
+    if self.lane_change_direction == LaneChangeDirection.left:
+      same_direction_tap, opposite_direction_tap = left_tap, right_tap
+    elif self.lane_change_direction == LaneChangeDirection.right:
+      same_direction_tap, opposite_direction_tap = right_tap, left_tap
+    else:
+      same_direction_tap, opposite_direction_tap = False, False
+
     if not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX:
       self._reset()
     else:
+      just_cancelled = False
+      if self.lane_change_state != LaneChangeState.off:
+        if opposite_direction_tap:
+          self._reset()
+          just_cancelled = True
+        elif same_direction_tap:
+          self.queued_changes = min(self.queued_changes + 1, MAX_QUEUED_LANE_CHANGES)
+
       # LaneChangeState.off
-      if self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker and not below_lane_change_speed:
+      if not just_cancelled and self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker and not below_lane_change_speed:
         self.lane_change_state = LaneChangeState.preLaneChange
         self.lane_change_ll_prob = 1.0
         # Initialize lane change direction to prevent UI alert flicker
@@ -101,18 +120,9 @@ class DesireHelper:
         blindspot_detected = ((carstate.leftBlindspot and self.lane_change_direction == LaneChangeDirection.left) or
                               (carstate.rightBlindspot and self.lane_change_direction == LaneChangeDirection.right))
 
-        new_tap = one_blinker and not self.prev_one_blinker
-        same_dir_tap = new_tap and self.get_lane_change_direction(carstate) == self.lane_change_direction
-        opposite_tap = new_tap and self.get_lane_change_direction(carstate) != self.lane_change_direction
-
-        # Same-direction tap queues another change (capped).
-        if same_dir_tap:
-          self.queued_changes = min(self.queued_changes + 1, MAX_QUEUED_LANE_CHANGES)
-
-        # Count down the arming window.
         self.arm_timer += DT_MDL
 
-        if below_lane_change_speed or opposite_tap:
+        if below_lane_change_speed:
           self._reset()
         elif torque_applied and not blindspot_detected:
           self.lane_change_state = LaneChangeState.laneChangeStarting
@@ -147,12 +157,12 @@ class DesireHelper:
             # Nothing left — full reset so the toast clears and no ALC re-arms.
             self._reset()
 
-    # Derived UI values.
+    # Retain the existing metadata even though the stock alert text no longer
+    # displays the countdown or queue depth.
     if self.lane_change_state == LaneChangeState.preLaneChange:
       self.signals_remaining = max(math.ceil(LANE_CHANGE_ARM_TIME - self.arm_timer), 0)
     else:
       self.signals_remaining = math.ceil(LANE_CHANGE_ARM_TIME)
-    # How many lane changes remain beyond the one currently armed/in progress.
     self.lane_changes_remaining = max(self.queued_changes - 1, 0)
 
     if self.lane_change_state in (LaneChangeState.off, LaneChangeState.preLaneChange):

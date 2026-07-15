@@ -69,7 +69,7 @@ Panda hardcodes `brake_pressed=false`. The framework's generic brake-to-disengag
 3. On brake rising edge in pedal mode: drops `enableLongControl=False` but keeps `cruiseEnabled=True` (lateral stays active, only pedal drops)
 4. `ret.brakePressed = False` suppresses the generic openpilot brake handler from also killing lateral
 
-The driver can always override steering via hands-on level ≥ 3. The panda enforces that; it does not enforce brake-to-disengage.
+The driver can always override steering via hands-on level ≥ 2. The panda enforces that; it does not enforce brake-to-disengage.
 
 See `test_tesla_preap.py::test_prev_user_brake` for the panda-layer invariant test.
 
