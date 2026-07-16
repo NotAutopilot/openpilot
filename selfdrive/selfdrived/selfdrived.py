@@ -202,7 +202,7 @@ class SelfdriveD:
           self.events.add(EventName.pedalCruiseDisabled)
         self.prev_pedal_long_active = pedal_long_active
 
-        # Max regen warning: pedal is at limit, driver should use brake for more decel
+        # Sustained regen under-delivery: the driver needs to add friction brake.
         if getattr(CS, 'pedalMaxRegen', False):
           self.events.add(EventName.pedalMaxRegen)
       else:

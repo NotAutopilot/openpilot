@@ -1038,10 +1038,10 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   EventName.pedalMaxRegen: {
     ET.WARNING: Alert(
-      "Max Regen Being Used",
-      "",
-      AlertStatus.userPrompt, AlertSize.small,
-      Priority.HIGH, VisualAlert.steerRequired, AudibleAlert.prompt, 2.),
+      "Regen Limit Reached",
+      "Press Brake to Slow Down",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.HIGH, VisualAlert.brakePressed, AudibleAlert.prompt, .2),
   },
 
   EventName.teslaCCEngaged: {

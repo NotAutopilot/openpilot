@@ -8,6 +8,7 @@ from cereal import log, car
 from cereal.messaging import SubMaster
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
+from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.selfdrived.events import Alert, EVENTS, ET
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.selfdrive.test.process_replay.process_replay import CONFIGS
@@ -103,6 +104,15 @@ class TestAlerts:
 
         if event_type not in (ET.WARNING, ET.PERMANENT, ET.PRE_ENABLE):
           assert a.creation_delay == 0.
+
+  def test_preap_regen_alert_tells_driver_to_brake(self):
+    alert = EVENTS[log.OnroadEvent.EventName.pedalMaxRegen][ET.WARNING]
+
+    assert alert.alert_text_1 == "Regen Limit Reached"
+    assert alert.alert_text_2 == "Press Brake to Slow Down"
+    assert alert.alert_size == AlertSize.mid
+    assert alert.visual_alert == car.CarControl.HUDControl.VisualAlert.brakePressed
+    assert alert.duration == int(0.2 / DT_CTRL)
 
   def test_offroad_alerts(self):
     params = Params()
