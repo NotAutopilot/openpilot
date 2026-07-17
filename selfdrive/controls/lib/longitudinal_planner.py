@@ -146,7 +146,9 @@ class LongitudinalPlanner:
     self.v_desired_filter.x = max(0.0, self.v_desired_filter.update(v_ego))
     _, _, _, _, throttle_prob = self.parse_model(sm['modelV2'])
     # Don't clip at low speeds since throttle_prob doesn't account for creep
-    self.allow_throttle = throttle_prob > ALLOW_THROTTLE_THRESHOLD or v_ego <= MIN_ALLOW_THROTTLE_SPEED
+    # VDAS takes acceleration targets literally, so the model's negative coast
+    # ceiling commands regen even when the MPC is trying to hold cruise speed.
+    self.allow_throttle = self._is_preap or throttle_prob > ALLOW_THROTTLE_THRESHOLD or v_ego <= MIN_ALLOW_THROTTLE_SPEED
 
     if not self.allow_throttle:
       clipped_accel_coast = max(accel_coast, accel_clip[0])
