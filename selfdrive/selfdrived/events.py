@@ -1064,6 +1064,14 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.PERMANENT: NormalPermanentAlert("Arm Stock Cruise to Enable Speed Control"),
   },
 
+  EventName.pedalUnavailable: {
+    ET.WARNING: Alert(
+      "Pedal Control Unavailable",
+      "Speed Control Disabled",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.HIGH, VisualAlert.none, AudibleAlert.disengage, 3.0),
+  },
+
   EventName.userBookmark: {
     ET.PERMANENT: NormalPermanentAlert("Bookmark Saved", duration=1.5),
   },

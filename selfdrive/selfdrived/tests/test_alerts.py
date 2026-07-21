@@ -114,6 +114,16 @@ class TestAlerts:
     assert alert.visual_alert == car.CarControl.HUDControl.VisualAlert.brakePressed
     assert alert.duration == int(0.2 / DT_CTRL)
 
+  def test_preap_pedal_unavailable_alert_is_visible_without_disabling_lateral(self):
+    event_types = EVENTS[log.OnroadEvent.EventName.pedalUnavailable]
+    alert = event_types[ET.WARNING]
+
+    assert set(event_types) == {ET.WARNING}
+    assert alert.alert_text_1 == "Pedal Control Unavailable"
+    assert alert.alert_text_2 == "Speed Control Disabled"
+    assert alert.alert_size == AlertSize.mid
+    assert alert.duration == int(3.0 / DT_CTRL)
+
   def test_offroad_alerts(self):
     params = Params()
     for a in self.offroad_alerts:

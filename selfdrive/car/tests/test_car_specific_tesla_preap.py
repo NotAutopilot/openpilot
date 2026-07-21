@@ -35,10 +35,10 @@ def _make_cs():
   return cs
 
 
-def _run(cp, calibrated):
+def _run(cp, calibrated, cs=None):
   with patch(NAP_CONF_PATH, new_callable=PropertyMock, return_value=calibrated):
     ce = CarSpecificEvents(cp)
-    events = ce.update(_make_cs(), _make_cs(), car.CarControl.new_message())
+    events = ce.update(cs or _make_cs(), _make_cs(), car.CarControl.new_message())
   return events.names
 
 
@@ -66,3 +66,20 @@ def test_silent_on_non_preap_tesla():
 def test_silent_on_non_tesla_brand():
   cp = _make_cp(fingerprint="HONDA_CIVIC_2022", brand="honda", pcm_cruise=True, op_long=False)
   assert EventName.pedalNotCalibrated not in _run(cp, calibrated=False)
+
+
+def test_pedal_authority_failure_warns_only_in_preap_pedal_mode():
+  cs = _make_cs()
+  cs.pedalAuthorityFailed = True
+
+  pedal_mode = _make_cp(pcm_cruise=False, op_long=True)
+  assert EventName.pedalUnavailable in _run(pedal_mode, calibrated=True, cs=cs)
+
+  no_pedal_mode = _make_cp(pcm_cruise=True, op_long=False)
+  assert EventName.pedalUnavailable not in _run(no_pedal_mode, calibrated=True, cs=cs)
+
+  longitudinal_disabled = _make_cp(pcm_cruise=False, op_long=False)
+  assert EventName.pedalUnavailable not in _run(longitudinal_disabled, calibrated=True, cs=cs)
+
+  non_preap = _make_cp(fingerprint="TESLA_MODEL_S", pcm_cruise=False, op_long=True)
+  assert EventName.pedalUnavailable not in _run(non_preap, calibrated=True, cs=cs)

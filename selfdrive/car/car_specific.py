@@ -106,6 +106,8 @@ class CarSpecificEvents:
           from opendbc.car.tesla.preap.nap_conf import nap_conf
           if not nap_conf.pedal_calibrated:
             events.add(EventName.pedalNotCalibrated)
+          if self.CP.openpilotLongitudinalControl and getattr(CS, 'pedalAuthorityFailed', False):
+            events.add(EventName.pedalUnavailable)
 
     return events
 
