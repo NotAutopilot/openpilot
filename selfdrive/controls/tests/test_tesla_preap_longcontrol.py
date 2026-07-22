@@ -240,7 +240,8 @@ def test_negative_planner_target_reaches_regen_side_of_coast_anchor(monkeypatch)
   settled_pedal_samples = pedal_samples[-settled_sample_count:]
 
   assert all(target_mps2 <= -0.15 for target_mps2, _pedal_di in settled_pedal_samples)
-  assert all(pedal_di <= coast_pedal_di for _target_mps2, pedal_di in settled_pedal_samples), (
+  maximum_settled_pedal_di = max(pedal_di for _target_mps2, pedal_di in settled_pedal_samples)
+  assert maximum_settled_pedal_di <= coast_pedal_di - 0.05, (
     f"settled negative planner window reached {max(pedal_di for _, pedal_di in settled_pedal_samples):.3f} DI, "
-    + f"above the {coast_pedal_di:.3f} DI coast anchor"
+    + f"without moving meaningfully below the {coast_pedal_di:.3f} DI coast anchor"
   )
