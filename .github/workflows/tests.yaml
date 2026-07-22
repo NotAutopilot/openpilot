@@ -24,6 +24,28 @@ env:
   PYTEST: pytest --continue-on-collection-errors --durations=0 -n logical
 
 jobs:
+  tesla_preap_longitudinal_regression:
+    name: Tesla Pre-AP longitudinal regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: true
+    - name: Check workflow contract
+      run: python3 .github/ci/test_tesla_preap_longitudinal_workflow.py
+    - run: ./tools/op.sh setup
+    - name: Build focused test dependencies
+      run: scons -j$(nproc) common/ cereal/ msgq_repo/ opendbc_repo/
+    - name: Run focused longitudinal tests
+      run: |
+        pytest -q -n 0 \
+          selfdrive/controls/tests/test_tesla_preap_longcontrol.py \
+          opendbc_repo/opendbc/car/tesla/preap/tests/test_longitudinal_tuning.py \
+          opendbc_repo/opendbc/car/tesla/preap/tests/test_virtual_das.py
+    - name: Run historical mutation checks
+      run: python .github/ci/tesla_preap_longitudinal_mutations.py
+
   build_release:
     name: build release
     runs-on: ${{

@@ -1,0 +1,7 @@
+# Longitudinal safety gate and its protected test surface
+/.github/CODEOWNERS @daggerhashjack @SloPOS
+/.github/workflows/tests.yaml @daggerhashjack @SloPOS
+/.github/ci/tesla_preap_longitudinal_mutations.py @daggerhashjack @SloPOS
+/.github/ci/test_tesla_preap_longitudinal_workflow.py @daggerhashjack @SloPOS
+/selfdrive/controls/tests/test_tesla_preap_longcontrol.py @daggerhashjack @SloPOS
+/opendbc_repo @daggerhashjack @SloPOS
