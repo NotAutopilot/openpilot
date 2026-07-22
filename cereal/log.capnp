@@ -1266,6 +1266,8 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   shouldStop @37: Bool;
   allowThrottle @38: Bool;
   allowBrake @39: Bool;
+  napFollowDistance @40 :UInt8;
+  tFollow @41 :Float32;
 
 
   solverExecutionTime @35 :Float32;

@@ -2,7 +2,7 @@
 import time
 import numpy as np
 
-from cereal import log
+from cereal import car, log
 import cereal.messaging as messaging
 from openpilot.common.realtime import Ratekeeper, DT_MDL
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
@@ -11,11 +11,27 @@ from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPl
 from openpilot.selfdrive.controls.radard import _LEAD_ACCEL_TAU
 
 
+class _ManeuverParams:
+  def __init__(self, nap_follow_dist):
+    self.nap_follow_dist = nap_follow_dist
+
+  def get(self, key, return_default=False):
+    assert return_default
+    assert key == "NAPFollowDistance"
+    return self.nap_follow_dist
+
+  @staticmethod
+  def get_bool(key):
+    assert key == "NAPAdaptiveAccel"
+    return False
+
+
 class Plant:
   messaging_initialized = False
 
   def __init__(self, lead_relevancy=False, speed=0.0, distance_lead=2.0,
-               enabled=True, only_lead2=False, only_radar=False, e2e=False, personality=0, force_decel=False):
+               enabled=True, only_lead2=False, only_radar=False, e2e=False, personality=0,
+               nap_follow_dist=None, force_decel=False):
     self.rate = 1. / DT_MDL
 
     if not Plant.messaging_initialized:
@@ -48,10 +64,22 @@ class Plant:
     time.sleep(0.1)
     self.sm = messaging.SubMaster(['longitudinalPlan'])
 
-    from opendbc.car.honda.values import CAR
-    from opendbc.car.honda.interface import CarInterface
+    if nap_follow_dist is None:
+      from opendbc.car.honda.values import CAR
+      from opendbc.car.honda.interface import CarInterface
+      planner_params = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+      params = None
+    else:
+      planner_params = car.CarParams.new_message()
+      planner_params.brand = "tesla"
+      planner_params.carFingerprint = "TESLA_MODEL_S_PREAP"
+      planner_params.openpilotLongitudinalControl = True
+      planner_params.pcmCruise = False
+      planner_params.steerRatio = 15.75
+      planner_params.wheelbase = 2.959
+      params = _ManeuverParams(nap_follow_dist)
 
-    self.planner = LongitudinalPlanner(CarInterface.get_non_essential_params(CAR.HONDA_CIVIC), init_v=self.speed)
+    self.planner = LongitudinalPlanner(planner_params, init_v=self.speed, params=params)
 
   @property
   def current_time(self):
