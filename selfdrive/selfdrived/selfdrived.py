@@ -18,6 +18,7 @@ from openpilot.selfdrive.car.car_specific import CarSpecificEvents
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.selfdrive.selfdrived.events import Events, ET
 from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
+from openpilot.selfdrive.selfdrived.preap_regen import RegenDemandCheck
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
 
@@ -122,6 +123,7 @@ class SelfdriveD:
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
     self.prev_pedal_long_active = False
+    self.preap_regen_demand = RegenDemandCheck()
 
     # Determine startup event
     self.startup_event = EventName.startup if build_metadata.openpilot.comma_remote and build_metadata.tested_channel else EventName.startupMaster
@@ -202,8 +204,17 @@ class SelfdriveD:
           self.events.add(EventName.pedalCruiseDisabled)
         self.prev_pedal_long_active = pedal_long_active
 
-        # Sustained regen under-delivery: the driver needs to add friction brake.
-        if getattr(CS, 'pedalMaxRegen', False):
+        # Two shapes of "regen is not enough, add friction brake": the carstate
+        # flag covers weak regen under-delivering an in-envelope request; the
+        # demand check covers a planned deceleration the envelope cannot cover,
+        # which the clamped actuator request hides from the car entirely.
+        regen_demand_overflow = self.preap_regen_demand.update(
+          pedal_long_active=pedal_long_active,
+          brake_pressed=CS.brakePressed,
+          a_target=float(self.sm['longitudinalPlan'].aTarget),
+          v_ego=CS.vEgo,
+        )
+        if getattr(CS, 'pedalMaxRegen', False) or regen_demand_overflow:
           self.events.add(EventName.pedalMaxRegen)
       else:
         self.prev_pedal_long_active = False
