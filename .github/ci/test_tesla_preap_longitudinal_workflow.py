@@ -55,6 +55,14 @@ def test_focused_tests_and_mutations_are_pinned():
   assert "run: python .github/ci/tesla_preap_longitudinal_mutations.py" in normalized_lines(focused_job)
 
 
+def test_focused_job_builds_generated_mpc_dependencies():
+  workflow = WORKFLOW_PATH.read_text()
+  focused_job = indented_block(workflow, "  tesla_preap_longitudinal_regression:")
+  build_step = indented_block(focused_job, "    - name: Build focused test dependencies")
+
+  assert "run: scons -j$(nproc)" in normalized_lines(build_step)
+
+
 def test_focused_job_cannot_be_skipped_or_soft_failed():
   workflow = WORKFLOW_PATH.read_text()
   focused_job = indented_block(workflow, "  tesla_preap_longitudinal_regression:")
@@ -75,6 +83,7 @@ def main():
   test_nap_branches_run_on_push()
   test_named_focused_job_is_present()
   test_focused_tests_and_mutations_are_pinned()
+  test_focused_job_builds_generated_mpc_dependencies()
   test_focused_job_cannot_be_skipped_or_soft_failed()
   test_additive_follow_telemetry_is_ignored_by_process_replay()
   print("Tesla Pre-AP longitudinal workflow contract passed")

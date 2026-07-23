@@ -36,7 +36,7 @@ jobs:
       run: python3 .github/ci/test_tesla_preap_longitudinal_workflow.py
     - run: ./tools/op.sh setup
     - name: Build focused test dependencies
-      run: scons -j$(nproc) common/ cereal/ msgq_repo/ opendbc_repo/
+      run: scons -j$(nproc)
     - name: Run focused longitudinal tests
       run: |
         pytest -q -n 0 \
