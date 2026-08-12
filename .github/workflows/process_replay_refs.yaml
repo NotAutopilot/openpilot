@@ -37,14 +37,14 @@ jobs:
           case "${OPERATION}" in
             generate-active)
               test -z "${ROLLBACK_TAG}"
-              gh workflow run process_replay_refs.yaml --ref nap-dev -f operation=generate-active
+              gh workflow run process_replay_refs.yaml --repo NotAutopilot/openpilot --ref nap-dev -f operation=generate-active
               ;;
             rollback)
               if [[ ! "${ROLLBACK_TAG}" =~ ^process-replay/v1/[0-9a-f]{40}-[0-9a-f]{12}$ ]]; then
                 echo "rollback_tag must match process-replay/v1/<40-hex>-<12-hex>" >&2
                 exit 1
               fi
-              gh workflow run process_replay_refs.yaml --ref nap-dev -f operation=rollback -f "rollback_tag=${ROLLBACK_TAG}"
+              gh workflow run process_replay_refs.yaml --repo NotAutopilot/openpilot --ref nap-dev -f operation=rollback -f "rollback_tag=${ROLLBACK_TAG}"
               ;;
             *)
               echo "Invalid operation ${OPERATION}" >&2
