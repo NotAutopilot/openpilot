@@ -1,0 +1,74 @@
+# Digest-pinned base for trusted private-runner replay jobs.
+# Build/runtime packages install as root; the image default USER is 1001:1001 with no sudo.
+# Source is NOT COPY'd: nap-replay-job bind-mounts / ephemeral /src (not executed on the host).
+# Because there is no sudo, one-shot setup_dependencies / uv sync must be started as root by
+# the launcher (podman --user 0), then replay drops back to --user 1001:1001 --network=none.
+# Python deps land in the mounted /src/.venv (VIRTUAL_ENV=/src/.venv); they are not baked in.
+FROM ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    LANG=en_US.UTF-8 \
+    LANGUAGE=en_US:en \
+    LC_ALL=en_US.UTF-8 \
+    OPENPILOT_PATH=/src \
+    VIRTUAL_ENV=/src/.venv \
+    PYTHONPATH=/src \
+    HOME=/home/runner \
+    PATH="/usr/local/bin:/src/.venv/bin:/home/runner/.local/bin:${PATH}"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      build-essential \
+      cmake \
+      pkg-config \
+      curl \
+      libcurl4-openssl-dev \
+      libssl-dev \
+      libusb-1.0-0-dev \
+      libzmq3-dev \
+      libsqlite3-dev \
+      libbz2-dev \
+      zlib1g-dev \
+      libva-dev \
+      libva-drm2 \
+      libdrm-dev \
+      git \
+      git-lfs \
+      locales \
+      python3 \
+      python3-venv \
+      xz-utils \
+      zstd \
+      time \
+      xvfb \
+    && sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
+    && locale-gen \
+    && git lfs install --system \
+    && UV_VERSION=0.12.2 \
+    && UV_ARCH=x86_64-unknown-linux-gnu \
+    && UV_TARBALL="uv-${UV_ARCH}.tar.gz" \
+    && UV_SHA256=d66e96b5f1ca3b99806eee283a8125d33a0bd669e6e6d9bc4ab7ffda63c41bf4 \
+    && curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_TARBALL}" -o "/tmp/${UV_TARBALL}" \
+    && echo "${UV_SHA256}  /tmp/${UV_TARBALL}" | sha256sum -c - \
+    && tar -xzf "/tmp/${UV_TARBALL}" -C /tmp \
+    && install -m 0755 "/tmp/uv-${UV_ARCH}/uv" /usr/local/bin/uv \
+    && rm -rf "/tmp/${UV_TARBALL}" "/tmp/uv-${UV_ARCH}" \
+    && test -x /usr/local/bin/uv \
+    && uv --version | grep -F "uv ${UV_VERSION}" \
+    && groupadd --gid 1001 runner \
+    && useradd --uid 1001 --gid 1001 --create-home --home-dir /home/runner \
+         --shell /usr/sbin/nologin runner \
+    && passwd -l runner \
+    && mkdir -p /src \
+    && chown 1001:1001 /src \
+    && rm -rf /var/lib/apt/lists/* \
+    && ! command -v sudo >/dev/null
+
+WORKDIR /src
+
+# No sudoers entry. Default runtime is unprivileged; launcher may override to root for setup.
+USER 1001:1001
+
+# Controller invokes replay under --userns=keep-id:uid=1001,gid=1001 --network=none.
+CMD ["bash", "-lc", "selfdrive/test/process_replay/test_processes.py --help"]

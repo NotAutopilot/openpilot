@@ -201,6 +201,9 @@ function op_before_cmd() {
 function op_setup() {
   op_get_openpilot_dir
   cd $OPENPILOT_ROOT
+  if [[ -n "${OPENPILOT_LFS_URL:-}" ]]; then
+    git config lfs.url "$OPENPILOT_LFS_URL"
+  fi
 
   op_check_openpilot_dir
   op_check_os

@@ -1,0 +1,438 @@
+{
+  "allowed_processes": [
+    "calibrationd",
+    "card",
+    "controlsd",
+    "dmonitoringd",
+    "lagd",
+    "locationd",
+    "paramsd",
+    "plannerd",
+    "radard",
+    "selfdrived",
+    "torqued",
+    "ubloxd"
+  ],
+  "cases": [
+    {
+      "car_brand": "HYUNDAI",
+      "case_id": "hyundai",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd",
+        "selfdrived",
+        "radard",
+        "plannerd",
+        "calibrationd",
+        "dmonitoringd",
+        "locationd",
+        "paramsd",
+        "ubloxd",
+        "torqued"
+      ],
+      "source": "regenAA0FC4ED71E|2025-04-08--22-57-50--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "HYUNDAI2",
+      "case_id": "hyundai2",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regenAFB9780D823|2025-04-08--23-00-34--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "TOYOTA",
+      "case_id": "toyota",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd",
+        "selfdrived",
+        "radard",
+        "plannerd",
+        "calibrationd",
+        "dmonitoringd",
+        "locationd",
+        "paramsd",
+        "ubloxd",
+        "torqued"
+      ],
+      "source": "regen218A4DCFAA1|2025-04-08--22-57-51--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "TOYOTA3",
+      "case_id": "toyota3",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen1455E3B4BDF|2025-04-09--03-26-06--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "HONDA",
+      "case_id": "honda",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regenB328FF8BA0A|2025-04-08--22-57-45--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "HONDA2",
+      "case_id": "honda2",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen6170C8C9A35|2025-04-08--22-57-46--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "CHRYSLER",
+      "case_id": "chrysler",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen5B28FC2A437|2025-04-08--23-04-24--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "RAM",
+      "case_id": "ram",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regenBF81EA96E08|2025-04-08--23-06-54--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "SUBARU",
+      "case_id": "subaru",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen7366F13F6A1|2025-04-08--23-07-07--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "GM",
+      "case_id": "gm",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen1271097D038|2025-04-09--03-26-00--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "NISSAN",
+      "case_id": "nissan",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen15D60604EAB|2025-04-08--23-06-59--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "VOLKSWAGEN",
+      "case_id": "volkswagen",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen0F2F06C9539|2025-04-08--23-06-56--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "MAZDA",
+      "case_id": "mazda",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regenACF84CCF482|2024-08-30--03-21-55--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "FORD",
+      "case_id": "ford",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen755D8CB1E1F|2025-04-08--23-13-43--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "RIVIAN",
+      "case_id": "rivian",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen5FCAC896BBE|2025-04-08--23-13-35--0",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "TESLA",
+      "case_id": "tesla",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "2c912ca5de3b1ee9|0000025d--6eb6bcbca4--4",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "TESLA",
+      "case_id": "nap-preap-pedal-v1",
+      "custom_params": {
+        "NAPAdaptiveAccel": true,
+        "NAPBrakeFactor": 1.0,
+        "NAPFollowDistance": 7,
+        "NAPForcePreAP": true,
+        "NAPPedalCalibDone": true,
+        "NAPPedalCalibFactor": 0.9478672985781991,
+        "NAPPedalCalibMax": 110.23299810159,
+        "NAPPedalCalibMin": 0.73299810159,
+        "NAPPedalCalibZero": 4.732998101589998,
+        "NAPPedalCanBus": 2,
+        "NAPPedalEnabled": true,
+        "NAPPedalProfile": 4,
+        "NAPRadarBehindNosecone": true,
+        "NAPRadarEnabled": true,
+        "NAPRadarOffset": -0.5,
+        "NAPiBoosterEnabled": false
+      },
+      "executable": false,
+      "params_digest": "b5217b239c759d5a960872a99f2e9ff6cacdb37aff6e99e1ee1bd0c20dead809",
+      "processes": [
+        "card",
+        "controlsd",
+        "selfdrived",
+        "radard",
+        "plannerd",
+        "lagd"
+      ],
+      "source": "",
+      "source_bytes": null,
+      "source_sha256": null
+    },
+    {
+      "car_brand": "TESLA",
+      "case_id": "nap-preap-no-pedal-v1",
+      "custom_params": {
+        "NAPAdaptiveAccel": true,
+        "NAPBrakeFactor": 1.0,
+        "NAPFollowDistance": 5,
+        "NAPForcePreAP": true,
+        "NAPPedalCalibDone": true,
+        "NAPPedalCalibFactor": 0.946969696969697,
+        "NAPPedalCalibMax": 110.43821722611,
+        "NAPPedalCalibMin": 0.9382172261100007,
+        "NAPPedalCalibZero": 4.838217226109999,
+        "NAPPedalCanBus": 2,
+        "NAPPedalEnabled": false,
+        "NAPPedalProfile": 4,
+        "NAPRadarBehindNosecone": true,
+        "NAPRadarEnabled": true,
+        "NAPRadarOffset": -0.25,
+        "NAPiBoosterEnabled": false
+      },
+      "executable": false,
+      "params_digest": "96b5f9f76bdf20f24bf2a29d408d87e60ebf377eccc3858b4f0c0de7c3c2e786",
+      "processes": [
+        "card",
+        "controlsd",
+        "selfdrived",
+        "radard",
+        "plannerd",
+        "lagd"
+      ],
+      "source": "",
+      "source_bytes": null,
+      "source_sha256": null
+    }
+  ],
+  "expected_cases": 18,
+  "expected_params_digest": "200ac7871bca5f1026c3a271864d88cc7a28e36f10051e85ce73205409658522",
+  "expected_sources_digest": "d08466e4dfe7796111b612aed7bbc2532bb40567fc85b9d71ea4343440d7736f",
+  "expected_tasks": 78,
+  "inventory": "staged",
+  "partition": {
+    "card": 18,
+    "controlsd": 18,
+    "lagd": 18,
+    "other": 24
+  },
+  "schema_version": 1,
+  "task_ids": [
+    "hyundai:card",
+    "hyundai:controlsd",
+    "hyundai:lagd",
+    "hyundai:selfdrived",
+    "hyundai:radard",
+    "hyundai:plannerd",
+    "hyundai:calibrationd",
+    "hyundai:dmonitoringd",
+    "hyundai:locationd",
+    "hyundai:paramsd",
+    "hyundai:ubloxd",
+    "hyundai:torqued",
+    "hyundai2:card",
+    "hyundai2:controlsd",
+    "hyundai2:lagd",
+    "toyota:card",
+    "toyota:controlsd",
+    "toyota:lagd",
+    "toyota:selfdrived",
+    "toyota:radard",
+    "toyota:plannerd",
+    "toyota:calibrationd",
+    "toyota:dmonitoringd",
+    "toyota:locationd",
+    "toyota:paramsd",
+    "toyota:ubloxd",
+    "toyota:torqued",
+    "toyota3:card",
+    "toyota3:controlsd",
+    "toyota3:lagd",
+    "honda:card",
+    "honda:controlsd",
+    "honda:lagd",
+    "honda2:card",
+    "honda2:controlsd",
+    "honda2:lagd",
+    "chrysler:card",
+    "chrysler:controlsd",
+    "chrysler:lagd",
+    "ram:card",
+    "ram:controlsd",
+    "ram:lagd",
+    "subaru:card",
+    "subaru:controlsd",
+    "subaru:lagd",
+    "gm:card",
+    "gm:controlsd",
+    "gm:lagd",
+    "nissan:card",
+    "nissan:controlsd",
+    "nissan:lagd",
+    "volkswagen:card",
+    "volkswagen:controlsd",
+    "volkswagen:lagd",
+    "mazda:card",
+    "mazda:controlsd",
+    "mazda:lagd",
+    "ford:card",
+    "ford:controlsd",
+    "ford:lagd",
+    "rivian:card",
+    "rivian:controlsd",
+    "rivian:lagd",
+    "tesla:card",
+    "tesla:controlsd",
+    "tesla:lagd",
+    "nap-preap-pedal-v1:card",
+    "nap-preap-pedal-v1:controlsd",
+    "nap-preap-pedal-v1:selfdrived",
+    "nap-preap-pedal-v1:radard",
+    "nap-preap-pedal-v1:plannerd",
+    "nap-preap-pedal-v1:lagd",
+    "nap-preap-no-pedal-v1:card",
+    "nap-preap-no-pedal-v1:controlsd",
+    "nap-preap-no-pedal-v1:selfdrived",
+    "nap-preap-no-pedal-v1:radard",
+    "nap-preap-no-pedal-v1:plannerd",
+    "nap-preap-no-pedal-v1:lagd"
+  ]
+}

@@ -1,53 +1,71 @@
 # Process replay
 
-Process replay is a regression test designed to identify any changes in the output of a process. This test replays a segment through individual processes and compares the output to a known good replay. Each make is represented in the test with a segment.
+Process replay is a regression test that replays recorded source logs through individual openpilot processes and compares each process output against a known reference.
 
-If the test fails, make sure that you didn't unintentionally change anything. If there are intentional changes, the reference logs will be updated.
+## Cases and tasks
 
-Use `test_processes.py` to run the test locally.
-Log files are cached by default. Use `DISABLE_FILEREADER_CACHE='1' test_processes.py` to disable caching.
+A **case** is one source input: car brand, source locator, selected processes, and optional typed custom params.
+A **task** is one process on one case. Task IDs are canonical: `{case_id}:{process}`.
 
-Currently the following processes are tested:
+The active inventory is the legacy 16 sources / 66 tasks:
+- `card`, `controlsd`, and `lagd` on every case
+- the other nine non-model processes only on `HYUNDAI` and `TOYOTA`
 
-* controlsd
-* radard
-* plannerd
-* calibrationd
-* dmonitoringd
-* locationd
-* paramsd
-* ubloxd
-* torqued
+`--inventory staged` also lists two temporary Pre-AP descriptors (`PENDING_CASES`) for a total of 18 cases / 78 tasks. Those pending cases are listing/generation descriptors only until sanitized fixture URLs and digests are filled in; they are not executable in normal active runs.
 
-### Usage
-```
-Usage: test_processes.py [-h] [--whitelist-procs PROCS] [--whitelist-cars CARS] [--blacklist-procs PROCS]
-                         [--blacklist-cars CARS] [--ignore-fields FIELDS] [--ignore-msgs MSGS] [--update-refs]
-Regression test to identify changes in a process's output
-optional arguments:
-  -h, --help            show this help message and exit
-  --whitelist-procs PROCS               Whitelist given processes from the test (e.g. controlsd)
-  --whitelist-cars WHITELIST_CARS       Whitelist given cars from the test (e.g. HONDA)
-  --blacklist-procs BLACKLIST_PROCS     Blacklist given processes from the test (e.g. controlsd)
-  --blacklist-cars BLACKLIST_CARS       Blacklist given cars from the test (e.g. HONDA)
-  --ignore-fields IGNORE_FIELDS         Extra fields or msgs to ignore (e.g. driverMonitoringState.events)
-  --ignore-msgs IGNORE_MSGS             Msgs to ignore (e.g. onroadEvents)
-  --update-refs                         Updates reference logs using current commit
+`source_segments` remains the regen compatibility list used by `regen_all.py`.
+
+## Running locally
+
+```bash
+# full active suite
+./test_processes.py -j$(nproc)
+
+# shard-style filters (diagnostics go to --output-dir)
+./test_processes.py -j$(nproc) --whitelist-procs card --output-dir /tmp/replay/card
+./test_processes.py -j$(nproc) --whitelist-procs controlsd --output-dir /tmp/replay/controlsd
+./test_processes.py -j$(nproc) --whitelist-procs lagd --output-dir /tmp/replay/lagd
+./test_processes.py -j$(nproc) --blacklist-procs card controlsd lagd --output-dir /tmp/replay/other
+
+# inventories
+./test_processes.py --list-cases
+./test_processes.py --list-tasks
+./test_processes.py --inventory staged --list-tasks
 ```
 
-## Forks
+Log downloads are cached by default. Disable with `DISABLE_FILEREADER_CACHE=1`.
 
-openpilot forks can use this test with their own reference logs, by default `test_proccesses.py` saves logs locally.
+### CLI
 
-To generate new logs:
+```
+Usage: test_processes.py [-h]
+                         [--whitelist-procs PROCS] [--whitelist-cars CARS]
+                         [--blacklist-procs PROCS] [--blacklist-cars CARS]
+                         [--ignore-fields FIELDS] [--ignore-msgs MSGS]
+                         [--update-refs] [--inventory {active,staged}]
+                         [--list-cases] [--list-tasks]
+                         [--output-dir DIR] [--reference-dir DIR] [-j JOBS]
+```
 
-`./test_processes.py`
+- `--output-dir` only changes where `diff.txt` and `results.json` are written.
+- `--reference-dir` selects an already-generated local candidate tree for comparison.
+- `--update-refs` writes candidate refs for the selected tasks. It does not mark those candidates as accepted; acceptance is a second normal run against `--reference-dir`.
 
-Then, check in the new logs using git-lfs. Make sure to also update the `ref_commit` file to the current commit.
+## References and diagnostics
+
+Remote references are resolved from one pinned `NotAutopilot/ci-artifacts` commit on `process-replay`, not from a moving branch URL. Filenames use `{case_id}__{process}__{ref_commit}.zst`. Manifest-era trees require `manifest.json` and canonical filenames. Pre-bootstrap segment filenames are allowed only when the pinned artifacts commit is listed in `LEGACY_ARTIFACTS_COMMITS`.
+
+Each selected case is downloaded once. When a case declares size/SHA-256, both are checked before replay. A digest failure becomes a task error for every task on that case; other cases continue.
+
+Workers return serializable `TaskResult` values. One task failure does not abort the pool. `diff.txt` and schema-versioned `results.json` are created before downloads start and rewritten after every settled task. The process exits nonzero on any diff, error, or incomplete inventory. After a normal compare run, only failed/different generated logs are kept; stale `fakedata` is cleared at start.
+
+## Params
+
+Runtime custom params stay native Python types (`bool`, `int`, `float`) and are validated against `common/params_keys.h` before scheduling. Manifest digests hash a separate canonical JSON array sorted by key with explicit `type` tags.
 
 ## API
 
-Process replay test suite exposes programmatic APIs for simultaneously running processes or groups of processes on provided logs.
+Process replay also exposes programmatic helpers for replaying processes on provided logs:
 
 ```py
 def replay_process_with_name(name: Union[str, Iterable[str]], lr: LogIterable, *args, **kwargs) -> List[capnp._DynamicStructReader]:
@@ -58,68 +76,17 @@ def replay_process(
 ) -> List[capnp._DynamicStructReader]:
 ```
 
-Example usage:
+Example:
+
 ```py
 from openpilot.selfdrive.test.process_replay import replay_process_with_name
 from openpilot.tools.lib.logreader import LogReader
 
 lr = LogReader(...)
-
-# provide a name of the process to replay
 output_logs = replay_process_with_name('locationd', lr)
-
-# or list of names
 output_logs = replay_process_with_name(['ubloxd', 'locationd'], lr)
 ```
 
-Supported processes:
-* controlsd
-* radard
-* plannerd
-* calibrationd
-* dmonitoringd
-* locationd
-* paramsd
-* ubloxd
-* torqued
-* modeld
-* dmonitoringmodeld
+Supported processes include `controlsd`, `radard`, `plannerd`, `calibrationd`, `dmonitoringd`, `locationd`, `paramsd`, `ubloxd`, `torqued`, `card`, `lagd`, `selfdrived`, `modeld`, and `dmonitoringmodeld`.
 
-Certain processes may require an initial state, which is usually supplied within `Params` and persisting from segment to segment (e.g CalibrationParams, LiveParameters). The `custom_params` is dictionary  used to prepopulate `Params` with arbitrary values. The `get_custom_params_from_lr` helper is provided to fetch meaningful values from log files.
-
-```py
-from openpilot.selfdrive.test.process_replay import get_custom_params_from_lr
-
-previous_segment_lr = LogReader(...)
-current_segment_lr = LogReader(...)
-
-custom_params = get_custom_params_from_lr(previous_segment_lr, 'last')
-
-output_logs = replay_process_with_name('calibrationd', lr, custom_params=custom_params)
-```
-
-Replaying processes that use VisionIPC (e.g. modeld, dmonitoringmodeld) require additional `frs` dictionary with camera states as keys and `FrameReader` objects as values.
-
-```py
-from openpilot.tools.lib.framereader import FrameReader
-
-frs = {
-  'roadCameraState': FrameReader(...),
-  'wideRoadCameraState': FrameReader(...),
-  'driverCameraState': FrameReader(...),
-}
-
-output_logs = replay_process_with_name(['modeld', 'dmonitoringmodeld'], lr, frs=frs)
-```
-
-To capture stdout/stderr of the replayed process, `captured_output_store` can be provided.
-
-```py
-output_store = dict()
-# pass dictionary by reference, it will be filled with standard outputs - even if process replay fails
-output_logs = replay_process_with_name(['radard', 'plannerd'], lr, captured_output_store=output_store)
-
-# entries with captured output in format { 'out': '...', 'err': '...' } will be added to provided dictionary for each replayed process
-print(output_store['radard']['out']) # radard stdout
-print(output_store['radard']['err']) # radard stderr
-```
+Use `custom_params` to seed `Params` with typed values. `get_custom_params_from_lr` can recover meaningful values from a previous segment. VisionIPC processes need an `frs` map of camera state names to `FrameReader` objects. Pass `captured_output_store` to collect stdout/stderr per process.
