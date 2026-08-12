@@ -23,6 +23,13 @@ def normalized_lines(block: str) -> set[str]:
   return {line.strip().removesuffix("\\").rstrip() for line in block.splitlines()}
 
 
+def test_nap_ci_uses_fork_lfs_storage():
+  workflow = WORKFLOW_PATH.read_text()
+
+  assert "OPENPILOT_LFS_URL: https://github.com/${{ github.repository }}.git/info/lfs" in normalized_lines(workflow)
+  assert 'command: git config lfs.url "$OPENPILOT_LFS_URL" && git lfs pull' in normalized_lines(workflow)
+
+
 def test_nap_branches_run_on_push():
   workflow = WORKFLOW_PATH.read_text()
   push_config = indented_block(workflow, "  push:")
@@ -81,6 +88,7 @@ def test_additive_follow_telemetry_is_ignored_by_process_replay():
 
 def main():
   test_nap_branches_run_on_push()
+  test_nap_ci_uses_fork_lfs_storage()
   test_named_focused_job_is_present()
   test_focused_tests_and_mutations_are_pinned()
   test_focused_job_builds_generated_mpc_dependencies()

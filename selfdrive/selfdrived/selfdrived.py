@@ -80,7 +80,8 @@ class SelfdriveD:
       ignore += ['driverCameraState', 'managerState']
     if REPLAY:
       # no vipc in replay will make them ignored anyways
-      ignore += ['roadCameraState', 'wideRoadCameraState']
+      # sanitized fixtures omit driverCameraState/managerState; ignore them in replay
+      ignore += ['roadCameraState', 'wideRoadCameraState', 'driverCameraState', 'managerState']
     self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'liveCalibration',
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'livePose', 'liveDelay',
                                    'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters',

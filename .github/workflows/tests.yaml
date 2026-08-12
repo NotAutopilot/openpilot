@@ -22,6 +22,7 @@ env:
   CI: 1
   PYTHONPATH: ${{ github.workspace }}
   PYTEST: pytest --continue-on-collection-errors --durations=0 -n logical
+  OPENPILOT_LFS_URL: https://github.com/${{ github.repository }}.git/info/lfs
 
 jobs:
   tesla_preap_longitudinal_regression:
@@ -34,7 +35,12 @@ jobs:
         submodules: true
     - name: Check workflow contract
       run: python3 .github/ci/test_tesla_preap_longitudinal_workflow.py
-    - run: ./tools/op.sh setup
+    - name: Set up dependencies
+      uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e
+      with:
+        timeout_minutes: 10
+        max_attempts: 3
+        command: ./tools/op.sh setup
     - name: Build focused test dependencies
       run: scons -j$(nproc)
     - name: Run focused longitudinal tests
@@ -69,7 +75,7 @@ jobs:
       with:
         timeout_minutes: 2
         max_attempts: 3
-        command: git lfs pull
+        command: git config lfs.url "$OPENPILOT_LFS_URL" && git lfs pull
     - name: Build devel
       timeout-minutes: 1
       run: TARGET_DIR=$STRIPPED_DIR release/build_stripped.sh
@@ -149,62 +155,117 @@ jobs:
         MAX_EXAMPLES=1 $PYTEST -m 'not slow'
 
   process_replay:
-    name: process replay
-    runs-on: ${{
-      (github.repository == 'commaai/openpilot') &&
-      ((github.event_name != 'pull_request') ||
-      (github.event.pull_request.head.repo.full_name == 'commaai/openpilot'))
-      && fromJSON('["namespace-profile-amd64-8x16"]')
-      || fromJSON('["ubuntu-24.04"]') }}
+    name: process replay (${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: card
+            filter_args: "--whitelist-procs card"
+            expected_tasks: 16
+          - shard: controlsd
+            filter_args: "--whitelist-procs controlsd"
+            expected_tasks: 16
+          - shard: lagd
+            filter_args: "--whitelist-procs lagd"
+            expected_tasks: 16
+          - shard: other
+            filter_args: "--blacklist-procs card controlsd lagd"
+            expected_tasks: 18
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       with:
         submodules: true
-    - run: ./tools/op.sh setup
+        persist-credentials: false
+    - name: Set up dependencies
+      uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e
+      with:
+        timeout_minutes: 10
+        max_attempts: 3
+        command: ./tools/op.sh setup
     - name: Install video encoding deps
       run: sudo apt-get install -y libva-dev libva-drm2 libdrm-dev
     - name: Build openpilot
       run: scons -j$(nproc)
-    - name: Run replay
-      timeout-minutes: ${{ contains(runner.name, 'nsc') && 2 || 45 }}
-      continue-on-error: ${{ github.ref == 'refs/heads/master' }}
-      run: selfdrive/test/process_replay/test_processes.py -j$(nproc)
-    - name: Print diff
-      id: print-diff
-      if: always()
-      run: cat selfdrive/test/process_replay/diff.txt
-    - uses: actions/upload-artifact@v6
-      if: always()
-      continue-on-error: true
-      with:
-        name: process_replay_diff.txt
-        path: selfdrive/test/process_replay/diff.txt
-    - name: Checkout ci-artifacts
-      if: github.repository == 'commaai/openpilot' && github.ref == 'refs/heads/master'
-      uses: actions/checkout@v4
-      with:
-        repository: commaai/ci-artifacts
-        ssh-key: ${{ secrets.CI_ARTIFACTS_DEPLOY_KEY }}
-        path: ${{ github.workspace }}/ci-artifacts
-    - name: Push refs
-      if: github.repository == 'commaai/openpilot' && github.ref == 'refs/heads/master'
-      working-directory: ${{ github.workspace }}/ci-artifacts
-      run: |
-        git config user.name "GitHub Actions Bot"
-        git config user.email "<>"
-        git fetch origin process-replay || true
-        git checkout process-replay 2>/dev/null || git checkout --orphan process-replay
-        cp ${{ github.workspace }}/selfdrive/test/process_replay/fakedata/*.zst .
-        echo "${{ github.sha }}" > ref_commit
-        git add .
-        git commit -m "process-replay refs for ${{ github.repository }}@${{ github.sha }}" || echo "No changes to commit"
-        git push origin process-replay --force
-    - name: Run regen
-      if: false
-      timeout-minutes: 4
+    - name: Verify shard inventory contracts
       env:
-        ONNXCPU: 1
-      run: $PYTEST selfdrive/test/process_replay/test_regen.py
+        SHARD: ${{ matrix.shard }}
+        FILTER_ARGS: ${{ matrix.filter_args }}
+        EXPECTED_TASKS: ${{ matrix.expected_tasks }}
+      run: |
+        set -euo pipefail
+        REPLAY=selfdrive/test/process_replay/test_processes.py
+
+        python3 - <<'PY'
+        from openpilot.selfdrive.test.process_replay import test_processes as tp
+
+        active_cases = tp.select_cases("active")
+        staged_cases = tp.select_cases("staged")
+        tp.assert_inventory_invariants(active_cases)
+        tp.assert_inventory_invariants(staged_cases)
+
+        assert len(active_cases) == 16, len(active_cases)
+        assert len(staged_cases) == 18, len(staged_cases)
+
+        active_tasks = tp.build_tasks(active_cases)
+        staged_tasks = tp.build_tasks(staged_cases)
+        assert len(active_tasks) == 66, len(active_tasks)
+        assert len(staged_tasks) == 78, len(staged_tasks)
+
+        active_counts = {name: len(tp.shard_task_ids(active_tasks, name)) for name in ("card", "controlsd", "lagd", "other")}
+        assert active_counts == {"card": 16, "controlsd": 16, "lagd": 16, "other": 18}, active_counts
+        assert sum(active_counts.values()) == 66
+
+        staged_counts = {name: len(tp.shard_task_ids(staged_tasks, name)) for name in ("card", "controlsd", "lagd", "other")}
+        assert staged_counts == {"card": 18, "controlsd": 18, "lagd": 18, "other": 24}, staged_counts
+        assert sum(staged_counts.values()) == 78
+
+        staged_task_ids = {task.task_id for task in staged_tasks}
+        staged_union = set(tp.shard_task_ids(staged_tasks, "card"))
+        staged_union |= set(tp.shard_task_ids(staged_tasks, "controlsd"))
+        staged_union |= set(tp.shard_task_ids(staged_tasks, "lagd"))
+        staged_union |= set(tp.shard_task_ids(staged_tasks, "other"))
+        assert staged_union == staged_task_ids, (len(staged_union), len(staged_task_ids))
+        assert len(staged_union) == 78, len(staged_union)
+        print("inventory unit checks passed:", active_counts, staged_counts)
+        PY
+
+        mapfile -t shard_tasks < <(${REPLAY} --inventory active --list-tasks ${FILTER_ARGS})
+        echo "shard=${SHARD} list-tasks count=${#shard_tasks[@]}"
+        printf '%s\n' "${shard_tasks[@]}"
+        test "${#shard_tasks[@]}" -eq "${EXPECTED_TASKS}"
+
+        active_total="$(${REPLAY} --inventory active --list-tasks | wc -l)"
+        staged_total="$(${REPLAY} --inventory staged --list-tasks | wc -l)"
+        echo "active_total=${active_total} staged_total=${staged_total}"
+        test "${active_total}" -eq 66
+        test "${staged_total}" -eq 78
+    - name: Run replay
+      run: |
+        set -euo pipefail
+        OUT_DIR="selfdrive/test/process_replay/out/${{ matrix.shard }}"
+        mkdir -p "${OUT_DIR}"
+        selfdrive/test/process_replay/test_processes.py \
+          -j$(nproc) \
+          --inventory active \
+          --output-dir "${OUT_DIR}" \
+          ${{ matrix.filter_args }}
+    - name: Print diff
+      if: always()
+      run: cat selfdrive/test/process_replay/out/${{ matrix.shard }}/diff.txt
+    - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      if: always()
+      with:
+        name: process_replay_${{ matrix.shard }}
+        path: |
+          selfdrive/test/process_replay/out/${{ matrix.shard }}/diff.txt
+          selfdrive/test/process_replay/out/${{ matrix.shard }}/results.json
+          selfdrive/test/process_replay/fakedata
+        if-no-files-found: error
 
   simulator_driving:
     name: simulator driving

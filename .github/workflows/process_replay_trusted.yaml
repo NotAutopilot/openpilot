@@ -1,0 +1,247 @@
+# Public post-merge dispatch only. Never schedules self-hosted runners.
+# After a successful hosted `tests` run for an exact refs/heads/nap-dev push tip,
+# require Actions API proof of exact workflow name/path/event/SHA and successful
+# conclusions for process replay (card|controlsd|lagd|other), then dispatch the
+# private controller with client_payload:
+# source_sha / source_repo / operation=test / jobs=6 / public_workflow_run_id / nonce.
+# Zero-runner proof for NotAutopilot/openpilot is a documented rollout prerequisite
+# (install-runner / host attestation). Ordinary GITHUB_TOKEN cannot authorize the
+# repository runners administration API, so this workflow does not call it.
+name: process replay trusted dispatch
+
+on:
+  workflow_run:
+    workflows:
+      - tests
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: process-replay-trusted-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch-private-controller:
+    name: Dispatch private controller
+    if: >
+      github.repository == 'NotAutopilot/openpilot' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'nap-dev'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Environment-scoped fine-grained credential; never CI_ARTIFACTS_TOKEN.
+    # Restrict this environment to protected nap-dev in repo settings.
+    environment: process-replay-dispatch
+    env:
+      SOURCE_REPO: NotAutopilot/openpilot
+      CONTROLLER_REPO: NotAutopilot/nap-ci-controller
+      HOSTED_WORKFLOW_NAME: tests
+      EXPECTED_REF: refs/heads/nap-dev
+      DISPATCH_OPERATION: test
+      DISPATCH_JOBS: "6"
+    steps:
+      - name: Validate exact tip and successful hosted run
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
+          CANDIDATE_RUN_ID: ${{ github.event.workflow_run.id }}
+          CANDIDATE_EVENT: ${{ github.event.workflow_run.event }}
+          CANDIDATE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          CANDIDATE_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CANDIDATE_WORKFLOW: ${{ github.event.workflow_run.name }}
+          CANDIDATE_PATH: ${{ github.event.workflow_run.path }}
+        run: |
+          set -euo pipefail
+
+          echo "candidate_sha=${CANDIDATE_SHA}"
+          echo "candidate_run_id=${CANDIDATE_RUN_ID}"
+          echo "candidate_event=${CANDIDATE_EVENT}"
+          echo "candidate_branch=${CANDIDATE_BRANCH}"
+          echo "candidate_conclusion=${CANDIDATE_CONCLUSION}"
+          echo "candidate_workflow=${CANDIDATE_WORKFLOW}"
+          echo "candidate_path=${CANDIDATE_PATH}"
+
+          if [[ "${CANDIDATE_CONCLUSION}" != "success" ]]; then
+            echo "Refusing dispatch: hosted workflow conclusion is not success" >&2
+            exit 1
+          fi
+          if [[ "${CANDIDATE_EVENT}" != "push" ]]; then
+            echo "Refusing dispatch: underlying event must be push" >&2
+            exit 1
+          fi
+          if [[ "${CANDIDATE_BRANCH}" != "nap-dev" ]]; then
+            echo "Refusing dispatch: head branch must be nap-dev" >&2
+            exit 1
+          fi
+          if [[ "${CANDIDATE_WORKFLOW}" != "${HOSTED_WORKFLOW_NAME}" ]]; then
+            echo "Refusing dispatch: unexpected workflow name ${CANDIDATE_WORKFLOW}" >&2
+            exit 1
+          fi
+          if [[ -n "${CANDIDATE_PATH}" && "${CANDIDATE_PATH}" != ".github/workflows/tests.yaml" ]]; then
+            echo "Refusing dispatch: unexpected workflow path ${CANDIDATE_PATH}" >&2
+            exit 1
+          fi
+          if [[ ! "${CANDIDATE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Refusing dispatch: source_sha must be exact lowercase 40-hex" >&2
+            exit 1
+          fi
+          if [[ ! "${CANDIDATE_RUN_ID}" =~ ^[0-9]+$ ]]; then
+            echo "Refusing dispatch: public workflow run ID must be numeric" >&2
+            exit 1
+          fi
+
+          TIP="$(gh api "repos/${SOURCE_REPO}/git/ref/heads/nap-dev" --jq '.object.sha')"
+          if [[ ! "${TIP}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Refusing dispatch: current nap-dev tip is not lowercase 40-hex: ${TIP}" >&2
+            exit 1
+          fi
+          if [[ "${TIP}" != "${CANDIDATE_SHA}" ]]; then
+            echo "Refusing dispatch: candidate ${CANDIDATE_SHA} is not the current ${EXPECTED_REF} tip ${TIP}" >&2
+            exit 1
+          fi
+
+          # Re-check the exact hosted run via API (fail closed).
+          RUN_JSON="$(gh api "repos/${SOURCE_REPO}/actions/runs/${CANDIDATE_RUN_ID}")"
+          RUN_SHA="$(jq -r '.head_sha' <<<"${RUN_JSON}")"
+          RUN_BRANCH="$(jq -r '.head_branch' <<<"${RUN_JSON}")"
+          RUN_EVENT="$(jq -r '.event' <<<"${RUN_JSON}")"
+          RUN_CONCLUSION="$(jq -r '.conclusion' <<<"${RUN_JSON}")"
+          RUN_STATUS="$(jq -r '.status' <<<"${RUN_JSON}")"
+          RUN_PATH="$(jq -r '.path' <<<"${RUN_JSON}")"
+          RUN_NAME="$(jq -r '.name' <<<"${RUN_JSON}")"
+
+          if [[ "${RUN_STATUS}" != "completed" || "${RUN_CONCLUSION}" != "success" ]]; then
+            echo "Refusing dispatch: hosted run ${CANDIDATE_RUN_ID} is not a successful completion" >&2
+            exit 1
+          fi
+          if [[ "${RUN_SHA}" != "${CANDIDATE_SHA}" || "${RUN_SHA}" != "${TIP}" ]]; then
+            echo "Refusing dispatch: hosted run SHA mismatch" >&2
+            exit 1
+          fi
+          if [[ "${RUN_BRANCH}" != "nap-dev" || "${RUN_EVENT}" != "push" ]]; then
+            echo "Refusing dispatch: hosted run is not an exact nap-dev push" >&2
+            exit 1
+          fi
+          if [[ "${RUN_NAME}" != "${HOSTED_WORKFLOW_NAME}" ]]; then
+            echo "Refusing dispatch: hosted run workflow name mismatch" >&2
+            exit 1
+          fi
+          if [[ "${RUN_PATH}" != ".github/workflows/tests.yaml" ]]; then
+            echo "Refusing dispatch: hosted run path mismatch: ${RUN_PATH}" >&2
+            exit 1
+          fi
+
+          # Require successful conclusions for the four exact hosted process-replay jobs.
+          mapfile -t JOB_LINES < <(
+            gh api --paginate \
+              "repos/${SOURCE_REPO}/actions/runs/${CANDIDATE_RUN_ID}/jobs" \
+              --jq '.jobs[] | [.name, .status, .conclusion] | @tsv'
+          )
+          declare -A JOB_STATUS=()
+          declare -A JOB_CONCLUSION=()
+          for line in "${JOB_LINES[@]}"; do
+            IFS=$'	' read -r job_name job_status job_conclusion <<<"${line}"
+            JOB_STATUS["${job_name}"]="${job_status}"
+            JOB_CONCLUSION["${job_name}"]="${job_conclusion}"
+          done
+          EXPECTED_JOBS=(
+            "process replay (card)"
+            "process replay (controlsd)"
+            "process replay (lagd)"
+            "process replay (other)"
+          )
+          for job_name in "${EXPECTED_JOBS[@]}"; do
+            if [[ -z "${JOB_STATUS[${job_name}]+x}" ]]; then
+              echo "Refusing dispatch: missing required hosted job ${job_name}" >&2
+              exit 1
+            fi
+            if [[ "${JOB_STATUS[${job_name}]}" != "completed" || "${JOB_CONCLUSION[${job_name}]}" != "success" ]]; then
+              echo "Refusing dispatch: job ${job_name} status=${JOB_STATUS[${job_name}]} conclusion=${JOB_CONCLUSION[${job_name}]}" >&2
+              exit 1
+            fi
+          done
+
+          # Zero public-repo self-hosted runners remain a rollout prerequisite attested
+          # during private runner install; ordinary GITHUB_TOKEN cannot query that API.
+
+          NONCE="$(openssl rand -hex 16)"
+          if [[ ! "${NONCE}" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "Failed to generate nonce" >&2
+            exit 1
+          fi
+
+          {
+            echo "source_sha=${CANDIDATE_SHA}"
+            echo "public_workflow_run_id=${CANDIDATE_RUN_ID}"
+            echo "nonce=${NONCE}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Dispatch private controller
+        env:
+          # Fine-grained token scoped to the private controller only.
+          GH_TOKEN: ${{ secrets.NAP_CI_CONTROLLER_DISPATCH_TOKEN }}
+          SOURCE_SHA: ${{ steps.gate.outputs.source_sha }}
+          PUBLIC_WORKFLOW_RUN_ID: ${{ steps.gate.outputs.public_workflow_run_id }}
+          NONCE: ${{ steps.gate.outputs.nonce }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "Missing NAP_CI_CONTROLLER_DISPATCH_TOKEN in process-replay-dispatch environment" >&2
+            exit 1
+          fi
+          if [[ ! "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid source_sha" >&2
+            exit 1
+          fi
+          if [[ ! "${PUBLIC_WORKFLOW_RUN_ID}" =~ ^[0-9]+$ ]]; then
+            echo "Invalid public_workflow_run_id" >&2
+            exit 1
+          fi
+          if [[ ! "${NONCE}" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "Invalid nonce" >&2
+            exit 1
+          fi
+          if [[ "${SOURCE_REPO}" != "NotAutopilot/openpilot" || "${DISPATCH_OPERATION}" != "test" || "${DISPATCH_JOBS}" != "6" ]]; then
+            echo "Invalid fixed dispatch contract" >&2
+            exit 1
+          fi
+
+          # Tip must still match at dispatch time.
+          TIP="$(gh api "repos/${SOURCE_REPO}/git/ref/heads/nap-dev" --jq '.object.sha')"
+          if [[ "${TIP}" != "${SOURCE_SHA}" ]]; then
+            echo "Refusing dispatch: nap-dev moved to ${TIP} before controller dispatch" >&2
+            exit 1
+          fi
+
+          PAYLOAD="$(jq -cn \
+            --arg source_sha "${SOURCE_SHA}" \
+            --arg source_repo "${SOURCE_REPO}" \
+            --arg operation "${DISPATCH_OPERATION}" \
+            --arg jobs "${DISPATCH_JOBS}" \
+            --arg public_workflow_run_id "${PUBLIC_WORKFLOW_RUN_ID}" \
+            --arg nonce "${NONCE}" \
+            '{
+              event_type: "nap-replay",
+              client_payload: {
+                source_sha: $source_sha,
+                source_repo: $source_repo,
+                operation: $operation,
+                jobs: $jobs,
+                public_workflow_run_id: $public_workflow_run_id,
+                nonce: $nonce
+              }
+            }')"
+
+          echo "Dispatching controller for ${SOURCE_REPO}@${SOURCE_SHA} operation=${DISPATCH_OPERATION} jobs=${DISPATCH_JOBS}"
+          gh api --method POST "repos/${CONTROLLER_REPO}/dispatches" \
+            -H "Accept: application/vnd.github+json" \
+            --input - <<<"${PAYLOAD}"
+
+          echo "Dispatched private controller; public workflow does not schedule self-hosted runners."
