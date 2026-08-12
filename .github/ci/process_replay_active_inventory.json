@@ -1,0 +1,356 @@
+{
+  "allowed_processes": [
+    "calibrationd",
+    "card",
+    "controlsd",
+    "dmonitoringd",
+    "lagd",
+    "locationd",
+    "paramsd",
+    "plannerd",
+    "radard",
+    "selfdrived",
+    "torqued",
+    "ubloxd"
+  ],
+  "cases": [
+    {
+      "car_brand": "HYUNDAI",
+      "case_id": "hyundai",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd",
+        "selfdrived",
+        "radard",
+        "plannerd",
+        "calibrationd",
+        "dmonitoringd",
+        "locationd",
+        "paramsd",
+        "ubloxd",
+        "torqued"
+      ],
+      "source": "regenAA0FC4ED71E|2025-04-08--22-57-50--0",
+      "source_bytes": 11873030,
+      "source_sha256": "0b6734026f7c775f7fd648ef76130f9b9a672c5236c6a328eff31ec9cc3c5343"
+    },
+    {
+      "car_brand": "HYUNDAI2",
+      "case_id": "hyundai2",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regenAFB9780D823|2025-04-08--23-00-34--0",
+      "source_bytes": 12527194,
+      "source_sha256": "4cc51a77bf8d128d5720fd692e5a0994c887ee35fdd949cc0ce54d4215e2b7a2"
+    },
+    {
+      "car_brand": "TOYOTA",
+      "case_id": "toyota",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd",
+        "selfdrived",
+        "radard",
+        "plannerd",
+        "calibrationd",
+        "dmonitoringd",
+        "locationd",
+        "paramsd",
+        "ubloxd",
+        "torqued"
+      ],
+      "source": "regen218A4DCFAA1|2025-04-08--22-57-51--0",
+      "source_bytes": 10846201,
+      "source_sha256": "6c028c0d40328fc00fa12acf91dba30d9f152e89d99a7089aadac62f6c7d5d64"
+    },
+    {
+      "car_brand": "TOYOTA3",
+      "case_id": "toyota3",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen1455E3B4BDF|2025-04-09--03-26-06--0",
+      "source_bytes": 9272538,
+      "source_sha256": "876100021b13ddd1a39efad5fdb4e7376ad5b298f64bf390b5f58742ffc6e429"
+    },
+    {
+      "car_brand": "HONDA",
+      "case_id": "honda",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regenB328FF8BA0A|2025-04-08--22-57-45--0",
+      "source_bytes": 10090147,
+      "source_sha256": "8ea4ab5412a99bfc65fbe95cd169a54edb6bcb68f6fa20c97f2bc58ed4bba538"
+    },
+    {
+      "car_brand": "HONDA2",
+      "case_id": "honda2",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen6170C8C9A35|2025-04-08--22-57-46--0",
+      "source_bytes": 10419375,
+      "source_sha256": "fc9ab2b4fd9702ceb8e3342186076dc6a85dbd6a3bd859ac6b965234bcc65c69"
+    },
+    {
+      "car_brand": "CHRYSLER",
+      "case_id": "chrysler",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen5B28FC2A437|2025-04-08--23-04-24--0",
+      "source_bytes": 11951101,
+      "source_sha256": "a30f65eb1033afbd0cff70d965aa9c0a276cc5ceb73d28baa817430df178009a"
+    },
+    {
+      "car_brand": "RAM",
+      "case_id": "ram",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regenBF81EA96E08|2025-04-08--23-06-54--0",
+      "source_bytes": 11420074,
+      "source_sha256": "cc1d8bb9729a71c3166e04343e436a67fbc1ff7107a30201a5d13ea9b45ea143"
+    },
+    {
+      "car_brand": "SUBARU",
+      "case_id": "subaru",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen7366F13F6A1|2025-04-08--23-07-07--0",
+      "source_bytes": 9393878,
+      "source_sha256": "f501c1c99bae27ca710f40f723a1960ea4e898836d7edfb57ea6397591e5aff2"
+    },
+    {
+      "car_brand": "GM",
+      "case_id": "gm",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen1271097D038|2025-04-09--03-26-00--0",
+      "source_bytes": 9846869,
+      "source_sha256": "6c10ce899270e4fc8350730e44cb39dfbda451670dd598798207ffc929baa69a"
+    },
+    {
+      "car_brand": "NISSAN",
+      "case_id": "nissan",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen15D60604EAB|2025-04-08--23-06-59--0",
+      "source_bytes": 11775886,
+      "source_sha256": "58f3822418e86d8c4afca79ef9058602c8825fadaedf8b63477ed53a2b9ba748"
+    },
+    {
+      "car_brand": "VOLKSWAGEN",
+      "case_id": "volkswagen",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen0F2F06C9539|2025-04-08--23-06-56--0",
+      "source_bytes": 10593610,
+      "source_sha256": "bca512375f61ade1af793227f4aa9137ba1cbd0067d3b92f1242f5907f84a0af"
+    },
+    {
+      "car_brand": "MAZDA",
+      "case_id": "mazda",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regenACF84CCF482|2024-08-30--03-21-55--0",
+      "source_bytes": 12309353,
+      "source_sha256": "a84e9f84c39802f58a64031e7c56b362c0e745b5c216848ca2d561f5ae6d440a"
+    },
+    {
+      "car_brand": "FORD",
+      "case_id": "ford",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen755D8CB1E1F|2025-04-08--23-13-43--0",
+      "source_bytes": 11315727,
+      "source_sha256": "786dfef08325d24e8205320862adc940706ff3475ae082ea104127fb5da62823"
+    },
+    {
+      "car_brand": "RIVIAN",
+      "case_id": "rivian",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "regen5FCAC896BBE|2025-04-08--23-13-35--0",
+      "source_bytes": 11022997,
+      "source_sha256": "2f2574c057b7cb55fbb2e05c99c5f1b1d6d894222422c4b51d4363ad66e6c840"
+    },
+    {
+      "car_brand": "TESLA",
+      "case_id": "tesla",
+      "custom_params": {},
+      "executable": true,
+      "params_digest": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "processes": [
+        "card",
+        "controlsd",
+        "lagd"
+      ],
+      "source": "2c912ca5de3b1ee9|0000025d--6eb6bcbca4--4",
+      "source_bytes": 8287366,
+      "source_sha256": "ca3bfc37b118f0e1987c2177b77b7446d44fbc7806cc5fae71c2ed79d4776fff"
+    }
+  ],
+  "expected_cases": 16,
+  "expected_params_digest": "39222ea1947da902789761de487c2f308ebe66c6b2242c983a7cf9d9d64913d3",
+  "expected_sources_digest": "73a05665dbaaf10abae7f7566e53cfb2e90f30ef7aafa5f4ce035d9b71298ca7",
+  "expected_tasks": 66,
+  "inventory": "active",
+  "partition": {
+    "card": 16,
+    "controlsd": 16,
+    "lagd": 16,
+    "other": 18
+  },
+  "schema_version": 1,
+  "task_ids": [
+    "hyundai:card",
+    "hyundai:controlsd",
+    "hyundai:lagd",
+    "hyundai:selfdrived",
+    "hyundai:radard",
+    "hyundai:plannerd",
+    "hyundai:calibrationd",
+    "hyundai:dmonitoringd",
+    "hyundai:locationd",
+    "hyundai:paramsd",
+    "hyundai:ubloxd",
+    "hyundai:torqued",
+    "hyundai2:card",
+    "hyundai2:controlsd",
+    "hyundai2:lagd",
+    "toyota:card",
+    "toyota:controlsd",
+    "toyota:lagd",
+    "toyota:selfdrived",
+    "toyota:radard",
+    "toyota:plannerd",
+    "toyota:calibrationd",
+    "toyota:dmonitoringd",
+    "toyota:locationd",
+    "toyota:paramsd",
+    "toyota:ubloxd",
+    "toyota:torqued",
+    "toyota3:card",
+    "toyota3:controlsd",
+    "toyota3:lagd",
+    "honda:card",
+    "honda:controlsd",
+    "honda:lagd",
+    "honda2:card",
+    "honda2:controlsd",
+    "honda2:lagd",
+    "chrysler:card",
+    "chrysler:controlsd",
+    "chrysler:lagd",
+    "ram:card",
+    "ram:controlsd",
+    "ram:lagd",
+    "subaru:card",
+    "subaru:controlsd",
+    "subaru:lagd",
+    "gm:card",
+    "gm:controlsd",
+    "gm:lagd",
+    "nissan:card",
+    "nissan:controlsd",
+    "nissan:lagd",
+    "volkswagen:card",
+    "volkswagen:controlsd",
+    "volkswagen:lagd",
+    "mazda:card",
+    "mazda:controlsd",
+    "mazda:lagd",
+    "ford:card",
+    "ford:controlsd",
+    "ford:lagd",
+    "rivian:card",
+    "rivian:controlsd",
+    "rivian:lagd",
+    "tesla:card",
+    "tesla:controlsd",
+    "tesla:lagd"
+  ]
+}
