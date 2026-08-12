@@ -584,9 +584,11 @@ jobs:
               raise SystemExit(f'missing review proof {results_path}')
           results = json.loads(results_path.read_text(encoding='utf-8'))
           trusted = json.loads(Path(os.environ['TRUSTED_INVENTORY_PATH']).read_text(encoding='utf-8'))
-          expected_ids = trusted.get('task_ids')
-          if not isinstance(expected_ids, list) or len(expected_ids) != expected_tasks:
+          trusted_ids = trusted.get('task_ids')
+          if (not isinstance(trusted_ids, list) or len(trusted_ids) != expected_tasks
+              or len(set(trusted_ids)) != expected_tasks):
               raise SystemExit('trusted active task inventory is invalid')
+          expected_ids = sorted(trusted_ids)
           if results.get('schema_version') != 1 or results.get('inventory') != 'active':
               raise SystemExit('review proof requires schema_version=1 and inventory=active')
           if results.get('tested_commit') != source_sha or results.get('ref_commit') != source_sha:

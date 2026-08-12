@@ -406,6 +406,8 @@ def test_workflow_binds_same_run_review_proof_and_opendbc_gitlink():
   assert "workflow_run_id" in workflow
   assert "GITHUB_RUN_ID" in workflow
   assert "HEAD:opendbc_repo" in workflow
+  assert "expected_ids = sorted(trusted_ids)" in workflow
+  assert "len(set(trusted_ids)) != expected_tasks" in workflow
   assert "--expected-opendbc-sha" in workflow
 
 
