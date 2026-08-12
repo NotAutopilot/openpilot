@@ -146,6 +146,11 @@ jobs:
         uv pip install natsort
     - name: Build openpilot
       run: scons -j$(nproc)
+    - name: Validate process replay release contracts
+      run: |
+        pytest -q -n 0 \
+          .github/ci/test_assemble_replay_release.py \
+          .github/ci/test_validate_process_replay_release.py
     - name: Run unit tests
       timeout-minutes: ${{ contains(runner.name, 'nsc') && 2 || 20 }}
       run: |

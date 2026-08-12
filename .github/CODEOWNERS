@@ -1,6 +1,10 @@
 # Longitudinal safety gate and its protected test surface
 /.github/CODEOWNERS @daggerhashjack @SloPOS
 /.github/workflows/ @daggerhashjack
+/.github/ci/process_replay_active_inventory.json @daggerhashjack
+/.github/ci/validate_process_replay_release.py @daggerhashjack
+/.github/ci/test_assemble_replay_release.py @daggerhashjack
+/.github/ci/test_validate_process_replay_release.py @daggerhashjack
 /.github/workflows/tests.yaml @daggerhashjack @SloPOS
 /.github/ci/tesla_preap_longitudinal_mutations.py @daggerhashjack @SloPOS
 /.github/ci/test_tesla_preap_longitudinal_workflow.py @daggerhashjack @SloPOS
@@ -9,4 +13,5 @@
 /selfdrive/test/process_replay/ @daggerhashjack
 /third_party/acados/ @daggerhashjack
 /tools/ci/Dockerfile.replay @daggerhashjack
+/tools/ci/assemble_replay_release.py @daggerhashjack
 /Dockerfile.replay @daggerhashjack

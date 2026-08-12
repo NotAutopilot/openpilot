@@ -33,31 +33,38 @@ def _sha256(data: bytes) -> str:
   return hashlib.sha256(data).hexdigest()
 
 
-def _build_cases(executable: bool = True, pin_sources: bool = True) -> list[dict]:
-  cases = []
-  # 16 active-like full/partial + 2 pending-style ids => 18 cases / 78 tasks
-  # card/controlsd/lagd for all 18 = 54; remaining 24 "other" on first 2 full cases (12 each).
-  # Use exact allowed process set from staged inventory contract.
-  allowed = [
+def _allowed_processes() -> list[str]:
+  return sorted({
     "calibrationd", "card", "controlsd", "dmonitoringd", "lagd", "locationd",
     "paramsd", "plannerd", "radard", "selfdrived", "torqued", "ubloxd",
-  ]
+  })
+
+
+def _build_cases(
+  inventory: str = "staged",
+  *,
+  executable: bool = True,
+  pin_sources: bool = True,
+) -> list[dict]:
+  """Synthetic cases matching exact active (16/66) or staged (18/78) contracts."""
+  allowed = _allowed_processes()
   other = [p for p in allowed if p not in {"card", "controlsd", "lagd"}]
   assert len(other) == 9
-  # two full cases with core+all other (2*(3+9)=24 other tasks), sixteen core-only (16*3=48), total 72?
+  if inventory == "active":
+    # 16 cases / 66 tasks: two full (9 other each => 18), fourteen core-only.
+    n_cases = 16
+    extra_plan = {0: other, 1: other}
+  elif inventory == "staged":
+    # 18 cases / 78 tasks: two full (9 other) + two partial (3 other) => 24 other.
+    n_cases = 18
+    extra_plan = {0: other, 1: other, 2: other[:3], 3: other[:3]}
+  else:
+    raise ValueError(f"unknown inventory {inventory!r}")
 
-  # Need 78 = 18*3 core + 24 other => other tasks across cases must total 24.
-  # 2 full cases with all 9 other would be 18 other; need 24 => use 2 cases with 9 other + 2 cases with 3 other?
-
-  # Simpler: first case has 12 procs? allowed only has 9 other.
-  # 9+9+3+3 = 24 other with four cases carrying extras.
-  for idx in range(18):
+  cases = []
+  for idx in range(n_cases):
     cid = f"case{idx:02d}"
-    procs = ["card", "controlsd", "lagd"]
-    if idx < 2:
-      procs = procs + other  # 9 other each => 18
-    elif idx < 4:
-      procs = procs + other[:3]  # 3 other each => 6; total other 24
+    procs = ["card", "controlsd", "lagd"] + list(extra_plan.get(idx, []))
     source = f"https://example.test/rlogs/{cid}.zst" if executable else ""
     case = {
       "case_id": cid,
@@ -74,17 +81,18 @@ def _build_cases(executable: bool = True, pin_sources: bool = True) -> list[dict
   return cases
 
 
-def _inventory_from_cases(cases: list[dict]) -> dict:
-  allowed = sorted({
-    "calibrationd", "card", "controlsd", "dmonitoringd", "lagd", "locationd",
-    "paramsd", "plannerd", "radard", "selfdrived", "torqued", "ubloxd",
-  })
+def _inventory_from_cases(cases: list[dict], inventory: str = "staged") -> dict:
+  contract = v.INVENTORY_CONTRACTS[inventory]
+  expected_cases = contract["expected_cases"]
+  expected_tasks = contract["expected_tasks"]
+  partition = dict(contract["partition"])
+  allowed = _allowed_processes()
   task_ids = []
   for case in cases:
     for proc in case["processes"]:
       task_ids.append(f"{case['case_id']}:{proc}")
-  assert len(cases) == 18
-  assert len(task_ids) == 78
+  assert len(cases) == expected_cases
+  assert len(task_ids) == expected_tasks
   sorted_cases = sorted(cases, key=lambda c: c["case_id"])
   sources_payload = [
     {
@@ -98,10 +106,10 @@ def _inventory_from_cases(cases: list[dict]) -> dict:
   params_payload = [{"case_id": c["case_id"], "params_digest": c["params_digest"]} for c in sorted_cases]
   return {
     "schema_version": 1,
-    "inventory": "staged",
-    "expected_cases": 18,
-    "expected_tasks": 78,
-    "partition": {"card": 18, "controlsd": 18, "lagd": 18, "other": 24},
+    "inventory": inventory,
+    "expected_cases": expected_cases,
+    "expected_tasks": expected_tasks,
+    "partition": partition,
     "allowed_processes": allowed,
     "cases": cases,
     "task_ids": task_ids,
@@ -110,7 +118,13 @@ def _inventory_from_cases(cases: list[dict]) -> dict:
   }
 
 
-def _write_release(release: Path, cases: list[dict], *, opendbc_sha: str = OPENDBC_SHA) -> str:
+def _write_release(
+  release: Path,
+  cases: list[dict],
+  *,
+  opendbc_sha: str = OPENDBC_SHA,
+  previous_accepted_tag: str = "",
+) -> str:
   release.mkdir(parents=True, exist_ok=True)
   (release / "ref_commit").write_text(SOURCE_SHA + "\n", encoding="utf-8")
   refs = {}
@@ -124,6 +138,10 @@ def _write_release(release: Path, cases: list[dict], *, opendbc_sha: str = OPEND
         "filename": filename,
         "size": len(payload),
         "sha256": _sha256(payload),
+        "source": case["source"],
+        "source_sha256": case["source_sha256"],
+        "source_bytes": case["source_bytes"],
+        "params_digest": case["params_digest"],
       }
   sorted_cases = sorted((v.case_identity(c) for c in cases), key=lambda c: c["case_id"])
   sources_payload = [
@@ -144,7 +162,7 @@ def _write_release(release: Path, cases: list[dict], *, opendbc_sha: str = OPEND
     "opendbc_sha": opendbc_sha,
     "sources_digest": _sha256(_canonical(sources_payload)),
     "params_digest": _sha256(_canonical(params_payload)),
-    "previous_accepted_tag": "",
+    "previous_accepted_tag": previous_accepted_tag,
   }
   raw = _canonical(manifest)
   (release / "manifest.json").write_bytes(raw)
@@ -197,6 +215,91 @@ def test_happy_path_accepts_fully_pinned_inventory(tmp_path: Path):
   assert result["release_source_sha"] == SOURCE_SHA
   assert result["release_manifest_sha256"] == manifest_sha
   assert result["release_tag"] == f"process-replay/v1/{SOURCE_SHA}-{manifest_sha[:12]}"
+
+
+def test_valid_active_inventory_loads(tmp_path: Path):
+  cases = _build_cases("active", executable=True, pin_sources=True)
+  inventory = _inventory_from_cases(cases, inventory="active")
+  inv_path = tmp_path / "active_inventory.json"
+  inv_path.write_bytes(_canonical(inventory))
+  trusted = v.load_trusted_inventory(inv_path)
+  assert trusted["inventory"] == "active"
+  assert trusted["expected_cases"] == 16
+  assert trusted["expected_tasks"] == 66
+  assert trusted["partition"] == {"card": 16, "controlsd": 16, "lagd": 16, "other": 18}
+
+
+def test_active_declared_count_or_partition_mismatch_rejected(tmp_path: Path):
+  cases = _build_cases("active")
+  inventory = _inventory_from_cases(cases, inventory="active")
+
+  bad_counts = dict(inventory)
+  bad_counts["expected_cases"] = 18
+  bad_counts["expected_tasks"] = 78
+  path_counts = tmp_path / "bad_counts.json"
+  path_counts.write_bytes(_canonical(bad_counts))
+  with pytest.raises(SystemExit, match="must declare 16 cases / 66 tasks for inventory=active"):
+    v.load_trusted_inventory(path_counts)
+
+  bad_partition = dict(inventory)
+  bad_partition["partition"] = {"card": 18, "controlsd": 18, "lagd": 18, "other": 24}
+  path_part = tmp_path / "bad_partition.json"
+  path_part.write_bytes(_canonical(bad_partition))
+  with pytest.raises(SystemExit, match="partition mismatch for inventory=active"):
+    v.load_trusted_inventory(path_part)
+
+  cross = dict(inventory)
+  cross["inventory"] = "staged"
+  path_cross = tmp_path / "cross_label.json"
+  path_cross.write_bytes(_canonical(cross))
+  with pytest.raises(SystemExit, match="must declare 18 cases / 78 tasks for inventory=staged"):
+    v.load_trusted_inventory(path_cross)
+
+
+def test_archive_previous_accepted_tag_identity_accepted(tmp_path: Path):
+  cases = _build_cases("staged", executable=True, pin_sources=True)
+  inventory = _inventory_from_cases(cases, inventory="staged")
+  inv_path = tmp_path / "inventory.json"
+  inv_path.write_bytes(_canonical(inventory))
+  archive_tag = f"process-replay/archive/{'f' * 40}"
+  release = tmp_path / "release"
+  manifest_sha = _write_release(release, cases, previous_accepted_tag=archive_tag)
+  trusted = v.load_trusted_inventory(inv_path)
+  result = v.validate_release(
+    release,
+    trusted=trusted,
+    source_sha=SOURCE_SHA,
+    operation="publish",
+    expected_manifest_sha256=manifest_sha,
+    rollback_tag=None,
+    expected_opendbc_sha=OPENDBC_SHA,
+  )
+  assert result["release_manifest_sha256"] == manifest_sha
+
+
+def test_ref_identity_fields_must_match_trusted_case(tmp_path: Path):
+  cases = _build_cases("staged", executable=True, pin_sources=True)
+  inventory = _inventory_from_cases(cases, inventory="staged")
+  inv_path = tmp_path / "inventory.json"
+  inv_path.write_bytes(_canonical(inventory))
+  release = tmp_path / "release"
+  _write_release(release, cases)
+  manifest = json.loads((release / "manifest.json").read_text(encoding="utf-8"))
+  victim = next(iter(manifest["refs"]))
+  manifest["refs"][victim]["source_sha256"] = "e" * 64
+  tampered = _canonical(manifest)
+  (release / "manifest.json").write_bytes(tampered)
+  trusted = v.load_trusted_inventory(inv_path)
+  with pytest.raises(SystemExit, match="ref source_sha256 diverges from trusted case"):
+    v.validate_release(
+      release,
+      trusted=trusted,
+      source_sha=SOURCE_SHA,
+      operation="publish",
+      expected_manifest_sha256=_sha256(tampered),
+      rollback_tag=None,
+      expected_opendbc_sha=OPENDBC_SHA,
+    )
 
 
 def test_opendbc_gitlink_mismatch_is_rejected(tmp_path: Path):
@@ -275,33 +378,44 @@ def test_non_executable_inventory_rejected():
     v.require_publishable_inventory(inventory)
 
 
-def test_workflow_authenticates_controller_run_and_artifact_name():
+def test_workflow_generates_only_current_active_inventory():
   workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-  assert 'EXPECTED_ARTIFACT_NAME="nap-replay-${CONTROLLER_RUN_ID}"' in workflow
-  assert 'repos/${CONTROLLER_REPO}/actions/runs/${CONTROLLER_RUN_ID}' in workflow
-  assert '.github/workflows/replay.yaml' in workflow
-  assert 'nap-replay' in workflow
-  assert "RUN_STATUS" in workflow and "RUN_CONCLUSION" in workflow
-  assert "RUN_HEAD_SHA" in workflow
-  assert "RUN_EVENT" in workflow
-  assert "META_NAME" in workflow
+  assert "generate-active" in workflow
+  assert "generate-staged" not in workflow
+  assert "CONTROLLER_REPO" not in workflow
+  assert "NAP_CI_CONTROLLER_ARTIFACT_READ_TOKEN" not in workflow
+  assert 'EXPECTED_TASKS: "66"' in workflow
+  assert 'github.ref == \'refs/heads/nap-dev\'' in workflow
+  assert 'EXPECTED_WORKFLOW_REF="${SOURCE_REPO}/.github/workflows/process_replay_refs.yaml@refs/heads/nap-dev"' in workflow
 
 
-def test_workflow_rejects_duplicate_and_unsafe_zip_members():
+def test_workflow_rejects_unsafe_downloaded_artifact_layouts():
   workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-  assert "duplicate zip member" in workflow
-  assert "non-regular zip member rejected" in workflow
-  assert "external_attr" in workflow
-  assert "O_EXCL" in workflow
+  assert "unexpected candidate top-level entry" in workflow
+  assert "path traversal in candidate" in workflow
+  assert "symlink forbidden in candidate" in workflow
+  assert "non-regular candidate member" in workflow
+  assert "nested release path forbidden" in workflow
 
 
-def test_workflow_binds_handoff_review_proof_and_opendbc_gitlink():
+def test_workflow_binds_same_run_review_proof_and_opendbc_gitlink():
   workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
   assert "handoff-meta.json" in workflow
   assert "compare" in workflow and "results.json" in workflow
-  assert "pass count must be 78" in workflow or "pass', -1)) != 78" in workflow
+  assert "review proof pass count must be {expected_tasks}" in workflow
+  assert "workflow_run_id" in workflow
+  assert "GITHUB_RUN_ID" in workflow
   assert "HEAD:opendbc_repo" in workflow
   assert "--expected-opendbc-sha" in workflow
+
+
+def test_workflow_preserves_same_source_no_op_and_atomic_publication():
+  workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+  assert 'CURRENT_REF_COMMIT}" == "${SOURCE_SHA}' in workflow
+  assert "manifest.json?ref=${PREVIOUS_HEAD}" in workflow
+  assert "previous_accepted_tag" in workflow
+  assert "git push --atomic" in workflow
+  assert '--force-with-lease="refs/heads/${ARTIFACTS_BRANCH}:${CAPTURED_HEAD}"' in workflow
 
 
 def test_zip_extractor_snippet_rejects_symlink_member(tmp_path: Path):

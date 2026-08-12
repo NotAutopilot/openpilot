@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fail-closed validation of a process-replay release tree.
 
-Trusted staged inventory is loaded from the protected nap-dev checkout
-(GITHUB_SHA). Controller-supplied inventory is never authoritative.
+Trusted inventory is loaded from the protected nap-dev checkout (GITHUB_SHA)
+under the exact active or staged contract declared by the inventory itself.
 """
 
 from __future__ import annotations
@@ -37,13 +37,28 @@ REQUIRED_CASE_KEYS = (
   "custom_params",
   "executable",
 )
-REQUIRED_REF_KEYS = ("filename", "size", "sha256")
+REQUIRED_REF_KEYS = ("filename", "size", "sha256", "source", "source_sha256", "source_bytes", "params_digest")
 CASE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 PROC_RE = re.compile(r"^[a-z0-9_]+$")
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA64_RE = re.compile(r"^[0-9a-f]{64}$")
 TAG_RE = re.compile(r"^process-replay/v1/([0-9a-f]{40})-([0-9a-f]{12})$")
+ARCHIVE_TAG_RE = re.compile(r"^process-replay/archive/([0-9a-f]{40})$")
 CORE_PROCS = frozenset({"card", "controlsd", "lagd"})
+
+# Exact trusted inventory contracts. Counts, partitions, and labels are fail-closed.
+INVENTORY_CONTRACTS: dict[str, dict[str, Any]] = {
+  "active": {
+    "expected_cases": 16,
+    "expected_tasks": 66,
+    "partition": {"card": 16, "controlsd": 16, "lagd": 16, "other": 18},
+  },
+  "staged": {
+    "expected_cases": 18,
+    "expected_tasks": 78,
+    "partition": {"card": 18, "controlsd": 18, "lagd": 18, "other": 24},
+  },
+}
 
 
 def die(msg: str) -> Never:
@@ -66,20 +81,25 @@ def load_trusted_inventory(path: Path) -> dict[str, Any]:
     die("trusted inventory must be an object")
   if inventory.get("schema_version") != 1:
     die("trusted inventory schema_version must be 1")
-  if inventory.get("inventory") != "staged":
-    die("trusted inventory must declare inventory=staged")
-  if inventory.get("expected_cases") != 18 or inventory.get("expected_tasks") != 78:
-    die("trusted inventory must declare 18 cases / 78 tasks")
+  label = inventory.get("inventory")
+  contract = INVENTORY_CONTRACTS.get(label) if isinstance(label, str) else None
+  if contract is None:
+    die(f"trusted inventory must declare inventory as one of {sorted(INVENTORY_CONTRACTS)}")
+  expected_cases = contract["expected_cases"]
+  expected_tasks = contract["expected_tasks"]
+  expected_partition = contract["partition"]
+  if inventory.get("expected_cases") != expected_cases or inventory.get("expected_tasks") != expected_tasks:
+    die(f"trusted inventory must declare {expected_cases} cases / {expected_tasks} tasks for inventory={label}")
   partition = inventory.get("partition")
-  if partition != {"card": 18, "controlsd": 18, "lagd": 18, "other": 24}:
-    die(f"trusted inventory partition mismatch: {partition}")
+  if partition != expected_partition:
+    die(f"trusted inventory partition mismatch for inventory={label}: {partition}")
   cases = inventory.get("cases")
   task_ids = inventory.get("task_ids")
   allowed = inventory.get("allowed_processes")
-  if not isinstance(cases, list) or len(cases) != 18:
-    die("trusted inventory cases must be a list of 18")
-  if not isinstance(task_ids, list) or len(task_ids) != 78:
-    die("trusted inventory task_ids must be a list of 78")
+  if not isinstance(cases, list) or len(cases) != expected_cases:
+    die(f"trusted inventory cases must be a list of {expected_cases}")
+  if not isinstance(task_ids, list) or len(task_ids) != expected_tasks:
+    die(f"trusted inventory task_ids must be a list of {expected_tasks}")
   if not isinstance(allowed, list) or not all(isinstance(p, str) for p in allowed):
     die("trusted inventory allowed_processes must be a string list")
   if list(allowed) != sorted(allowed):
@@ -106,7 +126,7 @@ def load_trusted_inventory(path: Path) -> dict[str, Any]:
       derived.append(f"{cid}:{proc}")
   if derived != task_ids:
     die("trusted task_ids do not match derived case/process inventory")
-  if len(set(task_ids)) != 78:
+  if len(set(task_ids)) != expected_tasks:
     die("trusted task_ids must be unique")
   sorted_cases = sorted(cases, key=lambda c: c["case_id"])
   sources_payload = [
@@ -203,7 +223,7 @@ def validate_release(
   if operation not in {"publish", "rollback"}:
     die(f"unknown operation {operation}")
 
-  # Dormant publisher must not accept current pending inventory.
+  # Publication requires every trusted case to be executable with pinned source digests.
   require_publishable_inventory(trusted)
 
   expected_cases = int(trusted["expected_cases"])
@@ -261,8 +281,11 @@ def validate_release(
   if manifest["opendbc_sha"] != expected_opendbc_sha:
     die(f"manifest opendbc_sha {manifest['opendbc_sha']} != trusted gitlink {expected_opendbc_sha}")
   previous = manifest["previous_accepted_tag"]
-  if previous != "" and not (isinstance(previous, str) and TAG_RE.fullmatch(previous)):
-    die("previous_accepted_tag must be empty or process-replay/v1/<40-hex>-<12-hex>")
+  if previous != "" and not (
+    isinstance(previous, str)
+    and (TAG_RE.fullmatch(previous) or ARCHIVE_TAG_RE.fullmatch(previous))
+  ):
+    die("previous_accepted_tag must be empty, a process-replay/v1 release tag, or a process-replay/archive SHA tag")
 
   cases = manifest["cases"]
   refs = manifest["refs"]
@@ -294,7 +317,7 @@ def validate_release(
   if case_ids != sorted(case_ids):
     die("cases must be sorted by case_id")
   if set(case_ids) != set(trusted_cases):
-    die("manifest case set must equal trusted staged inventory")
+    die("manifest case set must equal trusted inventory")
 
   sorted_cases = sorted((case_identity(c) for c in cases), key=lambda c: c["case_id"])
   sources_payload = [
@@ -317,7 +340,7 @@ def validate_release(
   if list(refs.keys()) != sorted(refs.keys()):
     die("refs must be sorted by task key")
   if set(refs) != trusted_task_set:
-    die("manifest refs task set must equal trusted staged task inventory")
+    die("manifest refs task set must equal trusted task inventory")
 
   counts = {"card": 0, "controlsd": 0, "lagd": 0, "other": 0}
   name_re = re.compile(rf"^[a-z0-9][a-z0-9-]*__[a-z0-9_]+__{re.escape(source_sha)}\.zst$")
@@ -333,6 +356,15 @@ def validate_release(
       die(f"unknown process rejected: {process}")
     if process not in trusted_cases[case_id]["processes"]:
       die(f"process {process} not in trusted case {case_id}")
+    trusted_case = trusted_cases[case_id]
+    if meta.get("source") != trusted_case["source"]:
+      die(f"ref source diverges from trusted case for {task_id}")
+    if meta.get("source_sha256") != trusted_case["source_sha256"]:
+      die(f"ref source_sha256 diverges from trusted case for {task_id}")
+    if meta.get("source_bytes") != trusted_case["source_bytes"]:
+      die(f"ref source_bytes diverges from trusted case for {task_id}")
+    if meta.get("params_digest") != trusted_case["params_digest"]:
+      die(f"ref params_digest diverges from trusted case for {task_id}")
     if process in CORE_PROCS:
       counts[process] += 1
     else:
@@ -375,6 +407,7 @@ def validate_release(
     "release_source_sha": source_sha,
     "release_manifest_sha256": manifest_sha,
     "release_tag": release_tag,
+    "release_previous_accepted_tag": previous,
   }
 
 
