@@ -1,0 +1,53 @@
+# Default-branch entry point for the protected nap-dev reference workflow.
+name: process replay refs
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "generate active refs on protected nap-dev, or rollback to a protected tag"
+        type: choice
+        options:
+          - generate-active
+          - rollback
+        default: generate-active
+      rollback_tag:
+        description: "Protected tag process-replay/v1/<ref_commit>-<manifest12> for rollback"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  retarget-to-nap-dev:
+    name: Retarget dispatch to nap-dev
+    if: github.repository == 'NotAutopilot/openpilot' && github.ref == 'refs/heads/nap-release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Invoke protected nap-dev workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATION: ${{ inputs.operation }}
+          ROLLBACK_TAG: ${{ inputs.rollback_tag }}
+        run: |
+          set -euo pipefail
+          case "${OPERATION}" in
+            generate-active)
+              test -z "${ROLLBACK_TAG}"
+              gh workflow run process_replay_refs.yaml --ref nap-dev -f operation=generate-active
+              ;;
+            rollback)
+              if [[ ! "${ROLLBACK_TAG}" =~ ^process-replay/v1/[0-9a-f]{40}-[0-9a-f]{12}$ ]]; then
+                echo "rollback_tag must match process-replay/v1/<40-hex>-<12-hex>" >&2
+                exit 1
+              fi
+              gh workflow run process_replay_refs.yaml --ref nap-dev -f operation=rollback -f "rollback_tag=${ROLLBACK_TAG}"
+              ;;
+            *)
+              echo "Invalid operation ${OPERATION}" >&2
+              exit 1
+              ;;
+          esac
