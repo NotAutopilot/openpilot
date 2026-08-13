@@ -410,6 +410,7 @@ def test_workflow_binds_same_run_review_proof_and_opendbc_gitlink():
   assert "len(set(trusted_ids)) != expected_tasks" in workflow
   assert "path: .process-replay-publish-release" in workflow
   assert "--release-dir .process-replay-publish-release" in workflow
+  assert 'cp -a "${GITHUB_WORKSPACE}/.process-replay-publish-release/." .' in workflow
   assert "--expected-opendbc-sha" in workflow
 
 
