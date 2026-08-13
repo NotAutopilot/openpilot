@@ -130,6 +130,9 @@ def initialize_params(params) -> list[dict[str, Any]]:
   keys.extend([
     "TeslaCoopSteering",
     "TeslaMadsScreenButton",
+    "NAPForcePreAP",
+    "NAPLateralEngagementMode",
+    "NAPLateralEngagementModeMigrated",
   ])
 
   # toyota
