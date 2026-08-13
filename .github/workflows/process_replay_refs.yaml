@@ -684,7 +684,7 @@ jobs:
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: process-replay-release-verified-${{ github.run_id }}-${{ github.run_attempt }}
-          path: release
+          path: .process-replay-publish-release
 
       - name: Revalidate release tree before push
         env:
@@ -715,7 +715,7 @@ jobs:
             VALIDATOR_OPERATION="publish"
           fi
           python3 "${RELEASE_VALIDATOR}" \
-            --release-dir release \
+            --release-dir .process-replay-publish-release \
             --trusted-inventory "${TRUSTED_INVENTORY_PATH}" \
             --source-sha "${SOURCE_SHA}" \
             --operation "${VALIDATOR_OPERATION}" \
@@ -810,7 +810,7 @@ jobs:
           fi
 
           find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
-          cp -a "${GITHUB_WORKSPACE}/release/." .
+          cp -a "${GITHUB_WORKSPACE}/.process-replay-publish-release/." .
 
           if [[ "${BRANCH_EXISTS}" == "true" ]] && git diff --quiet HEAD -- .; then
             echo "Byte-identical release tree; no-op success"
