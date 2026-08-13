@@ -30,7 +30,11 @@ class ToggleSP(Toggle):
   def _handle_mouse_release(self, mouse_pos: MousePos):
     super()._handle_mouse_release(mouse_pos)
     if self._enabled and self.param_key:
-      self.params.put_bool(self.param_key, self._state)
+      from openpilot.sunnypilot.mads.helpers import coerce_mads_write
+      value = coerce_mads_write(self.params, self.param_key, self._state)
+      if self.param_key == "Mads" and value and not self._state:
+        self.set_state(True)
+      self.params.put_bool(self.param_key, value)
 
   def _render(self, rect: rl.Rectangle):
     self.update()

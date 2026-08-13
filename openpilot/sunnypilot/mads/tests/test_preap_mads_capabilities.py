@@ -119,6 +119,12 @@ class TestPreAPMadsCapabilities(unittest.TestCase):
     mads.read_params()
     self.assertEqual(mads.main_enabled_toggle, frozen_main)
 
+    params.reset_mock()
+    params.get_bool.side_effect = lambda k: False
+    mads.read_params()
+    self.assertTrue(mads.enabled_toggle)
+    params.put_bool.assert_called_once_with("Mads", True, block=True)
+
   def test_nonrequired_version1_keeps_live_params(self):
     from openpilot.sunnypilot.mads.mads import ModularAssistiveDrivingSystem
     from openpilot.selfdrive.selfdrived.events import Events

@@ -98,6 +98,8 @@ def save_param_from_base64_encoded_string(param_name: str, base64_encoded_data: 
 
   # We convert to string anything that isn't bytes first. We later transform further.
   param_value = _convert_param_to_type(value, param_type)
+  from openpilot.sunnypilot.mads.helpers import coerce_mads_write
+  param_value = coerce_mads_write(params, param_name, param_value)
   params.put(param_name, param_value, block=True)
 
 

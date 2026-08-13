@@ -440,7 +440,7 @@ CONFIGS = [
       "longitudinalPlan", "livePose", "liveDelay", "liveParameters", "radarState", "modelV2",
       "driverCameraState", "roadCameraState", "wideRoadCameraState", "managerState", "liveTorqueParameters",
       "accelerometer", "gyroscope", "carOutput", "gpsLocationExternal", "gpsLocation", "controlsState",
-      "carControl", "driverAssistance", "alertDebug", "audioFeedback",
+      "carControl", "driverAssistance", "alertDebug", "audioFeedback", "carStateSP",
     ],
     subs=["selfdriveState", "onroadEvents"],
     ignore=["logMonoTime"],
@@ -464,8 +464,8 @@ CONFIGS = [
   ProcessConfig(
     proc_name="card",
     pubs=["pandaStates", "carControl", "onroadEvents", "can"],
-    subs=["sendcan", "carState", "carParams", "carOutput", "liveTracks"],
-    ignore=["logMonoTime", "carState.cumLagMs"],
+    subs=["sendcan", "carState", "carStateSP", "carParams", "carOutput", "liveTracks"],
+    ignore=["logMonoTime", "carState.cumLagMs", "carStateSP.preapIntentEpoch"],  # normalize only the random transport epoch
     init_callback=card_fingerprint_callback,
     should_recv_callback=card_rcv_callback,
     tolerance=NUMPY_TOLERANCE,

@@ -46,6 +46,47 @@ class MadsCapabilities:
   no_main_cruise: bool
 
 
+def _truthy_mads(value) -> bool:
+  return value in (True, 1, "1", b"1", "true", "True")
+
+
+def is_mads_required(CP_SP=None, params: Params | None = None) -> bool:
+  if CP_SP is not None:
+    return bool(getattr(CP_SP, "madsRequired", False)) and int(getattr(CP_SP, "madsCapabilityContractVersion", 0) or 0) >= 1
+  if params is None:
+    params = Params()
+  try:
+    from openpilot.cereal import custom
+    import openpilot.cereal.messaging as messaging
+    for key in ("CarParamsSP", "CarParamsSPPersistent", "CarParamsSPCache"):
+      raw = params.get(key)
+      if not raw:
+        continue
+      msg = messaging.log_from_bytes(raw, custom.CarParamsSP)
+      return bool(msg.madsRequired) and int(msg.madsCapabilityContractVersion) >= 1
+  except Exception:
+    return False
+  return False
+
+
+def persist_required_mads(params: Params, CP_SP=None) -> bool:
+  """Force and persist Mads=true on required platforms. Returns True if required."""
+  if not is_mads_required(CP_SP, params):
+    return False
+  if not params.get_bool("Mads"):
+    params.put_bool("Mads", True, block=True)
+  return True
+
+
+def coerce_mads_write(params: Params, key: str, value, CP_SP=None):
+  """Reject runtime false writes of Mads on required platforms."""
+  if key != "Mads":
+    return value
+  if persist_required_mads(params, CP_SP) and not _truthy_mads(value):
+    return True
+  return value
+
+
 def _version0_limited_tesla(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params) -> bool:
   if CP.brand != "tesla":
     return False
@@ -105,10 +146,7 @@ def read_steering_mode_param(CP: structs.CarParams, CP_SP: structs.CarParamsSP, 
 
 def set_alternative_experience(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params):
   caps = resolve_mads_capabilities(CP, CP_SP, params)
-  enabled = True if caps.mads_required else params.get_bool("Mads")
-  if caps.mads_required:
-    params.put_bool("Mads", True, block=True)
-
+  enabled = True if persist_required_mads(params, CP_SP) else params.get_bool("Mads")
   steering_mode = caps.steering_mode
 
   if enabled:
@@ -130,8 +168,7 @@ def set_car_specific_params(CP: structs.CarParams, CP_SP: structs.CarParamsSP, p
       CP_SP.safetyParam |= HyundaiSafetyFlagsSP.LONG_MAIN_CRUISE_TOGGLEABLE
 
   caps = resolve_mads_capabilities(CP, CP_SP, params)
-  if caps.mads_required:
-    params.put_bool("Mads", True, block=True)
+  if persist_required_mads(params, CP_SP):
     return
 
   # MADS Partial Support

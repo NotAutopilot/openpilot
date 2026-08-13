@@ -92,6 +92,11 @@ class SelfdriveD(CruiseHelper):
 
     # TODO: de-couple selfdrived with card/conflate on carState without introducing controls mismatches
     self.car_state_sock = messaging.sub_sock('carState', timeout=20)
+    # Intent records are latched and sequence-numbered, so the newest record
+    # can be consumed even when its companion carState arrives first.
+    self.car_state_sp_sock = messaging.sub_sock('carStateSP', conflate=True)
+    self.cs_fresh = False
+    self.cs_sp_fresh = False
 
     ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan'] + ['modelDataV2SP', 'longitudinalPlanSP']
     if SIMULATION:
@@ -122,6 +127,7 @@ class SelfdriveD(CruiseHelper):
       self.params.remove("ExperimentalMode")
 
     self.CS_prev = car.CarState.new_message()
+    self.CS_SP = custom.CarStateSP.new_message()
     self.AM = AlertManager()
     self.events = Events()
 
@@ -254,7 +260,7 @@ class SelfdriveD(CruiseHelper):
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
       self.events.add_from_msg(car_events)
 
-      car_events_sp = self.car_events_sp.update(CS, self.events).to_msg()
+      car_events_sp = self.car_events_sp.update(CS, self.events, self.CS_SP if self.cs_sp_fresh else None).to_msg()
       self.events_sp.add_from_msg(car_events_sp)
 
       if self.CP.notCar:
@@ -500,6 +506,11 @@ class SelfdriveD(CruiseHelper):
   def data_sample(self):
     _car_state = messaging.recv_one(self.car_state_sock)
     CS = _car_state.carState if _car_state else self.CS_prev
+    self.cs_fresh = _car_state is not None
+    _car_state_sp = messaging.recv_one_or_none(self.car_state_sp_sock)
+    self.cs_sp_fresh = _car_state_sp is not None
+    if self.cs_sp_fresh:
+      self.CS_SP = _car_state_sp.carStateSP
 
     self.sm.update(0)
 

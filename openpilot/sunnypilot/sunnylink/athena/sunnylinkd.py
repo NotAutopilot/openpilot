@@ -31,6 +31,7 @@ import openpilot.cereal.messaging as messaging
 from openpilot.sunnypilot.models.default_model import DEFAULT_MODEL
 from openpilot.sunnypilot.selfdrive.car.sync_sunnylink_params import update_car_list_param
 from openpilot.sunnypilot.sunnylink.api import SunnylinkApi
+from openpilot.sunnypilot.mads.helpers import is_mads_required
 from openpilot.sunnypilot.sunnylink.utils import sunnylink_need_register, sunnylink_ready, get_param_as_byte, save_param_from_base64_encoded_string
 from openpilot.sunnypilot.sunnylink.capabilities import generate_capabilities, CAPABILITY_LABELS
 from openpilot.sunnypilot.sunnylink.tools.generate_settings_schema import generate_schema
@@ -230,10 +231,18 @@ def getParams(params_keys: list[str], compression: bool = False) -> str | dict[s
     cloudlog.exception("sunnylinkd.getParams.exception", e)
     raise
 
+def _mads_required() -> bool:
+  return is_mads_required(params=params)
+
 
 @dispatcher.add_method
 def saveParams(params_to_update: dict[str, str], compression: bool = False) -> None:
+  mads_required = _mads_required()
   for key, value in params_to_update.items():
+    if key == "Mads" and mads_required:
+      cloudlog.warning("sunnylinkd.saveParams.blocked: MADS is required for this platform")
+      params.put_bool("Mads", True, block=True)
+      continue
     # disallow modifications to blocked parameters
     if key in BLOCKED_PARAMS:
       cloudlog.warning(f"sunnylinkd.saveParams.blocked: Attempted to modify blocked parameter '{key}'")

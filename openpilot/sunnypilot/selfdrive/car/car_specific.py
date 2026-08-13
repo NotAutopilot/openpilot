@@ -11,6 +11,7 @@ from opendbc.car import structs
 from opendbc.car.chrysler.values import RAM_DT
 from openpilot.selfdrive.selfdrived.events import Events
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+from openpilot.sunnypilot.selfdrive.car.preap_intent import PreAPIntentConsumer
 
 EventName = log.OnroadEvent.EventName
 EventNameSP = custom.OnroadEventSP.EventName
@@ -23,9 +24,17 @@ class CarSpecificEventsSP:
     self.CP_SP = CP_SP
 
     self.low_speed_alert = False
+    self.preap_intent = PreAPIntentConsumer() if CP.carFingerprint == "TESLA_MODEL_S_PREAP" else None
 
-  def update(self, CS: structs.CarState, events: Events):
+  def update(self, CS: structs.CarState, events: Events, CS_SP=None):
     events_sp = EventsSP()
+
+    # Consume each new Pre-AP intent record before the standard state transition.
+    if self.preap_intent is not None and CS_SP is not None:
+      self.preap_intent.update(
+        CS_SP, events, events_sp,
+        apply_longitudinal=bool(self.CP.openpilotLongitudinalControl),
+      )
 
     if self.CP.brand == 'chrysler':
       if self.CP.carFingerprint in RAM_DT:

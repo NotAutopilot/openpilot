@@ -127,7 +127,12 @@ class SteeringLayout(Widget):
     else:
       self._mads_toggle.set_description(f"<b>{self._mads_check_compat_desc}</b><br><br>{self._mads_base_desc}")
 
-    self._mads_toggle.action_item.set_enabled(ui_state.is_offroad())
+    mads_required = ui_state.CP_SP is not None and bool(getattr(ui_state.CP_SP, "madsRequired", False))
+    if mads_required:
+      self._mads_toggle.action_item.set_state(True)
+      self._mads_toggle.action_item.set_enabled(False)
+    else:
+      self._mads_toggle.action_item.set_enabled(ui_state.is_offroad())
     self._mads_settings_button.action_item.set_enabled(ui_state.is_offroad() and self._mads_toggle.action_item.get_state())
     self._blinker_control_options.set_visible(self._blinker_control_toggle.action_item.get_state())
     self._blinker_reengage_delay.set_visible(self._blinker_control_toggle.action_item.get_state())

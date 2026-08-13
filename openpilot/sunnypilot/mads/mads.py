@@ -5,12 +5,16 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 
+import time
+
 from openpilot.cereal import log, custom
 
 from opendbc.car import structs
 from opendbc.car.hyundai.values import HyundaiFlags
 from openpilot.common.params import Params
-from openpilot.sunnypilot.mads.helpers import MadsSteeringModeOnBrake, read_steering_mode_param, resolve_mads_capabilities
+from openpilot.sunnypilot.mads.helpers import (
+  MadsSteeringModeOnBrake, persist_required_mads, read_steering_mode_param, resolve_mads_capabilities,
+)
 from openpilot.sunnypilot.mads.state import StateMachine, GEARS_ALLOW_PAUSED_SILENT
 
 State = custom.ModularAssistiveDrivingSystem.ModularAssistiveDrivingSystemState
@@ -22,6 +26,17 @@ SafetyModel = structs.CarParams.SafetyModel
 
 SET_SPEED_BUTTONS = (ButtonType.accelCruise, ButtonType.resumeCruise, ButtonType.decelCruise, ButtonType.setCruise)
 IGNORED_SAFETY_MODES = (SafetyModel.silent, SafetyModel.noOutput)
+HANDS_ON_PAUSE_LEVEL = 2
+HANDS_ON_RESUME_US = 1_000_000
+UINT32_MASK = 0xFFFFFFFF
+
+
+def _mono_us() -> int:
+  return (time.monotonic_ns() // 1000) & UINT32_MASK
+
+
+def _elapsed_us(now: int, start: int) -> int:
+  return (now - start) & UINT32_MASK
 
 
 class ModularAssistiveDrivingSystem:
@@ -53,9 +68,16 @@ class ModularAssistiveDrivingSystem:
     self._freeze_mads_snapshot = (
       caps.mads_required and getattr(self.CP_SP, "madsCapabilityContractVersion", 0) >= 1
     )
+    self._hands_on_pause_available = caps.hands_on_pause_available
+    self._hands_on_steering_inhibited = False
+    self._hands_on_clear_timing = False
+    self._hands_on_clear_ts = 0
 
     # Required-MADS platforms consume only the frozen typed snapshot.
-    self.enabled_toggle = True if caps.mads_required else self.params.get_bool("Mads")
+    if persist_required_mads(self.params, self.CP_SP):
+      self.enabled_toggle = True
+    else:
+      self.enabled_toggle = self.params.get_bool("Mads")
     self.steering_mode_on_brake = read_steering_mode_param(self.CP, self.CP_SP, self.params)
     if self._freeze_mads_snapshot:
       self.main_enabled_toggle = caps.main_cruise_allowed
@@ -65,8 +87,12 @@ class ModularAssistiveDrivingSystem:
       self.unified_engagement_mode = self.params.get_bool("MadsUnifiedEngagementMode")
 
   def read_params(self):
-    if self._freeze_mads_snapshot:
-      return
+    if persist_required_mads(self.params, self.CP_SP):
+      self.enabled_toggle = True
+      if self._freeze_mads_snapshot:
+        return
+    else:
+      self.enabled_toggle = self.params.get_bool("Mads")
     self.main_enabled_toggle = self.params.get_bool("MadsMainCruiseAllowed")
     self.unified_engagement_mode = self.params.get_bool("MadsUnifiedEngagementMode")
 
@@ -78,6 +104,9 @@ class ModularAssistiveDrivingSystem:
     return False
 
   def should_silent_lkas_enable(self, CS: structs.CarState) -> bool:
+    if self._hands_on_steering_inhibited:
+      return False
+
     if self.steering_mode_on_brake == MadsSteeringModeOnBrake.PAUSE and (CS.brakePressed or CS.regenBraking or self.pedal_pressed_non_gas_pressed(CS)):
       return False
 
@@ -109,6 +138,82 @@ class ModularAssistiveDrivingSystem:
   def transition_paused_state(self):
     if self.state_machine.state != State.paused:
       self.events_sp.add(EventNameSP.silentLkasDisable)
+
+  def _reset_hands_on_clear_timer(self):
+    self._hands_on_clear_timing = False
+    self._hands_on_clear_ts = 0
+
+  def _update_hands_on_pause(self, CS: structs.CarState) -> None:
+    if not self._hands_on_pause_available:
+      return
+
+    # EPAS faults are a full disable, never a hands-on pause.
+    epas_fault = bool(getattr(CS, "steerFaultPermanent", False) or getattr(CS, "steerFaultTemporary", False))
+    if epas_fault or self.events_sp.has(EventNameSP.lkasDisable):
+      self._hands_on_steering_inhibited = False
+      self._reset_hands_on_clear_timer()
+      return
+
+    if not hasattr(CS, "handsOnLevel"):
+      # Exact host field is required. Absence cannot prove host/panda agreement.
+      self._hands_on_steering_inhibited = True
+      self._reset_hands_on_clear_timer()
+      if self.enabled:
+        self.transition_paused_state()
+        if self.events_sp.has(EventNameSP.silentLkasEnable):
+          self.events_sp.remove(EventNameSP.silentLkasEnable)
+      return
+
+    level = int(CS.handsOnLevel or 0)
+    host_hands = level >= HANDS_ON_PAUSE_LEVEL
+    host_clear = level < HANDS_ON_PAUSE_LEVEL
+
+    tesla_preap = getattr(SafetyModel, "teslaPreap", None)
+    pandas = []
+    for ps in self.selfdrive.sm['pandaStates']:
+      if tesla_preap is not None and ps.safetyModel == tesla_preap:
+        pandas.append(ps)
+      elif ps.safetyModel not in IGNORED_SAFETY_MODES and getattr(ps, "steeringControlInhibited", False):
+        pandas.append(ps)
+
+    updated = getattr(self.selfdrive.sm, "updated", None)
+    if hasattr(self.selfdrive.sm, "all_checks"):
+      panda_fresh = bool(self.selfdrive.sm.all_checks(["pandaStates"]))
+    else:
+      panda_fresh = True if updated is None else bool(updated.get("pandaStates", False))
+    cs_fresh = bool(getattr(self.selfdrive, "cs_fresh", True))
+    panda_inhibited = (not pandas) or any(bool(getattr(ps, "steeringControlInhibited", False)) for ps in pandas)
+
+    blockers = bool(getattr(CS, "doorOpen", False) or CS.gearShifter != GearShifter.drive)
+
+    if host_hands or panda_inhibited:
+      self._hands_on_steering_inhibited = True
+
+    mismatch = host_hands != panda_inhibited
+    if mismatch:
+      self._hands_on_steering_inhibited = True
+
+    # Count host-observed clear concurrently with panda's independent hold.
+    # Panda clearing its inhibit proves its own continuous one-second clear.
+    host_clear_healthy = (
+      self._hands_on_steering_inhibited and host_clear and cs_fresh and
+      panda_fresh and (not blockers) and bool(pandas)
+    )
+    if not host_clear_healthy:
+      self._reset_hands_on_clear_timer()
+    else:
+      now = _mono_us()
+      if not self._hands_on_clear_timing:
+        self._hands_on_clear_timing = True
+        self._hands_on_clear_ts = now
+      elif _elapsed_us(now, self._hands_on_clear_ts) >= HANDS_ON_RESUME_US and not panda_inhibited:
+        self._hands_on_steering_inhibited = False
+        self._reset_hands_on_clear_timer()
+
+    if self._hands_on_steering_inhibited and self.enabled:
+      self.transition_paused_state()
+      if self.events_sp.has(EventNameSP.silentLkasEnable):
+        self.events_sp.remove(EventNameSP.silentLkasEnable)
 
   def replace_event(self, old_event: int, new_event: int):
     self.events.remove(old_event)
@@ -205,6 +310,8 @@ class ModularAssistiveDrivingSystem:
             self.events_sp.remove(EventNameSP.lkasEnable)
             self.events_sp.add(EventNameSP.pedalPressedAlertOnly)
 
+    self._update_hands_on_pause(CS)
+
     if self.should_silent_lkas_enable(CS):
       if self.state_machine.state == State.paused:
         self.events_sp.add(EventNameSP.silentLkasEnable)
@@ -218,6 +325,8 @@ class ModularAssistiveDrivingSystem:
     self.events.remove(EventName.wrongCruiseMode)
 
   def update(self, CS: structs.CarState):
+    if persist_required_mads(self.params, self.CP_SP):
+      self.enabled_toggle = True
     if not self.enabled_toggle:
       return
 

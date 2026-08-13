@@ -182,6 +182,7 @@ class Car:
 
     self.v_cruise_helper = VCruiseHelper(self.CP, self.CP_SP)
     self.preap_intent_epoch = preap_boot.new_preap_intent_epoch() if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP" else 0
+    self.preap_intent_seed_pending = self.preap_intent_epoch != 0
 
     self.is_metric = self.params.get_bool("IsMetric")
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
@@ -192,6 +193,16 @@ class Car:
     # log fingerprint in sentry
     sunnypilot_interfaces.log_fingerprint(self.CP)
 
+  def stamp_preap_intent_epoch(self, CS_SP: structs.CarStateSP) -> None:
+    if not self.preap_intent_epoch:
+      return
+    if self.preap_intent_seed_pending:
+      CS_SP.preapLateralIntent = structs.CarStateSP.PreapLateralIntent.none
+      CS_SP.preapLongitudinalIntent = structs.CarStateSP.PreapLongitudinalIntent.none
+      CS_SP.preapIntentSequence = 0
+      self.preap_intent_seed_pending = False
+    CS_SP.preapIntentEpoch = self.preap_intent_epoch
+
   def state_update(self) -> tuple[car.CarState, custom.CarStateSP, structs.RadarDataT | None]:
     """carState update loop, driven by can"""
 
@@ -200,8 +211,7 @@ class Car:
 
     # Update carState from CAN
     CS, CS_SP = self.CI.update(can_list)
-    if self.preap_intent_epoch:
-      CS_SP.preapIntentEpoch = self.preap_intent_epoch
+    self.stamp_preap_intent_epoch(CS_SP)
     CS_SP = convert_to_capnp(CS_SP)
 
     # Update radar tracks from CAN

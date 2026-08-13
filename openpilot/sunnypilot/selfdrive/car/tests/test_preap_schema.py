@@ -61,6 +61,7 @@ class TestPreAPSchemaContract(unittest.TestCase):
 
     car_state = _ordinals(structs.CarState.schema)
     self.assertEqual(car_state["turnSignalStalkState"], 61)
+    self.assertEqual(car_state["handsOnLevel"], 62)
 
   def test_version0_bytes_keep_old_fields(self):
     raw = (FIXTURES / "carparams_sp_v0_tesla_vehicle_bus.bin").read_bytes()

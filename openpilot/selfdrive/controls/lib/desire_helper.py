@@ -25,6 +25,7 @@ class DesireHelper:
     self.lane_change_timer = 0.0
     self.prev_one_blinker = False
     self.desire = log.Desire.none
+    self.prev_turn_lever = 0
     self.alc = AutoLaneChangeController(self)
     self.lane_turn_controller = LaneTurnController(self)
     self.lane_turn_direction = TurnDirection.none
@@ -40,6 +41,16 @@ class DesireHelper:
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN
 
+    lever = getattr(carstate, "turnSignalStalkState", 0)
+    left_tap = lever == 1 and self.prev_turn_lever != 1
+    right_tap = lever == 2 and self.prev_turn_lever != 2
+    self.prev_turn_lever = lever
+
+    opposite_tap = (
+      (self.lane_change_direction == LaneChangeDirection.left and right_tap) or
+      (self.lane_change_direction == LaneChangeDirection.right and left_tap)
+    )
+
     # Lane turn controller update
     self.lane_turn_controller.update_lane_turn(blindspot_left=carstate.leftBlindspot, blindspot_right=carstate.rightBlindspot,
                                                left_blinker=carstate.leftBlinker, right_blinker=carstate.rightBlinker, v_ego=v_ego)
@@ -50,7 +61,11 @@ class DesireHelper:
       self.lane_change_direction = LaneChangeDirection.none
       self.lane_change_timer = 0.0
     else:
-      if self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker and not below_lane_change_speed:
+      if self.lane_change_state != LaneChangeState.off and opposite_tap:
+        self.lane_change_state = LaneChangeState.off
+        self.lane_change_direction = LaneChangeDirection.none
+        self.lane_change_timer = 0.0
+      elif self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker and not below_lane_change_speed:
         self.lane_change_state = LaneChangeState.preLaneChange
         self.lane_change_timer = 0.0
         # Initialize lane change direction to prevent UI alert flicker

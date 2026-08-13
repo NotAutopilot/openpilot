@@ -45,6 +45,16 @@ class TestSunnylinkdMethods:
     assert "SpeedLimitOffset" in keys_saved
     assert "MyCustomParam" in keys_saved
 
+  def test_required_mads_cannot_be_modified(self, monkeypatch):
+    monkeypatch.setattr(sunnylinkd, "_mads_required", lambda: True)
+    sunnylinkd.saveParams({"Mads": "0", "SpeedLimitOffset": "5"})
+    assert [item[0] for item in self.saved_params] == ["SpeedLimitOffset"]
+
+  def test_optional_mads_remains_writable(self, monkeypatch):
+    monkeypatch.setattr(sunnylinkd, "_mads_required", lambda: False)
+    sunnylinkd.saveParams({"Mads": "0"})
+    assert [item[0] for item in self.saved_params] == ["Mads"]
+
   def test_saveParams_mixed(self):
     mixed_params = {
       "GithubUsername": "attacker",
