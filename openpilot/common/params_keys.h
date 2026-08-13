@@ -229,8 +229,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
 
     // Pre-AP Tesla (NAP) retained keys. Shared sunnypilot leaves NAPForcePreAP
     // absent/false. Do not register NAPAdaptiveAccel.
-    {"NAPForcePreAP", {PERSISTENT | BACKUP, BOOL, "0"}},
-    {"NAPLateralEngagementMode", {PERSISTENT | BACKUP, INT, "0"}},
+    {"NAPForcePreAP", {PERSISTENT | BACKUP, BOOL}},
+    {"NAPLateralEngagementMode", {PERSISTENT | BACKUP, INT}},
     {"NAPLateralEngagementModeMigrated", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"NAPFollowDistance", {PERSISTENT | BACKUP, INT, "4"}},
     {"NAPPedalEnabled", {PERSISTENT | BACKUP, BOOL}},

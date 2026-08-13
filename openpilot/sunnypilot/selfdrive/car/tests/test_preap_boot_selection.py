@@ -1,12 +1,14 @@
 import os
 import unittest
 from unittest.mock import MagicMock, patch
+from openpilot.common.params import Params
 
 from opendbc.car import structs
 from opendbc.car.car_helpers import get_car
 from opendbc.car.tesla.preap.boot import PREAP_PLATFORM
 from openpilot.sunnypilot.selfdrive.car.preap_boot import (
   migrate_preap_engagement_mode,
+  seed_preap_installer,
   resolve_card_boot,
   snapshot_param_list,
 )
@@ -48,6 +50,19 @@ def _get_car(selection, params, extra_params=None):
 
 
 class TestPreAPBootSelection(unittest.TestCase):
+  def test_selection_and_mode_have_no_manager_defaults(self):
+    params = Params()
+    self.assertIsNone(params.get_default_value("NAPForcePreAP"))
+    self.assertIsNone(params.get_default_value("NAPLateralEngagementMode"))
+
+    params.put_bool("MadsMainCruiseAllowed", False, block=True)
+    params.put_bool("MadsUnifiedEngagementMode", True, block=True)
+    self.assertEqual(migrate_preap_engagement_mode(params), 1)
+
+    params.remove("NAPForcePreAP")
+    self.assertTrue(seed_preap_installer(params, PREAP_PLATFORM))
+    self.assertTrue(params.get("NAPForcePreAP"))
+
   def test_explicit_bundle_wins_over_force(self):
     params = FakeParams({"CarPlatformBundle": {"platform": "TESLA_MODEL_3"}, "NAPForcePreAP": True})
     sel, fingerprint = resolve_card_boot(params, environ={})
@@ -118,6 +133,7 @@ class TestPreAPBootSelection(unittest.TestCase):
     self.assertEqual(migrate_preap_engagement_mode(params), 1)
 
     params.store.pop("NAPLateralEngagementMode")
+    params.store.pop("NAPLateralEngagementModeMigrated", None)
     params.store["MadsMainCruiseAllowed"] = False
     params.store["MadsUnifiedEngagementMode"] = False
     self.assertEqual(migrate_preap_engagement_mode(params), 2)
@@ -130,6 +146,16 @@ class TestPreAPBootSelection(unittest.TestCase):
 
     params = FakeParams()
     self.assertEqual(migrate_preap_engagement_mode(params), 0)
+    self.assertTrue(params.get("NAPLateralEngagementModeMigrated"))
+
+  def test_completed_migration_never_rereads_legacy_pair(self):
+    params = FakeParams({
+      "NAPLateralEngagementModeMigrated": True,
+      "MadsMainCruiseAllowed": False,
+      "MadsUnifiedEngagementMode": True,
+    })
+    self.assertEqual(migrate_preap_engagement_mode(params), 0)
+    self.assertEqual(params.get("NAPLateralEngagementMode"), 0)
     self.assertTrue(params.get("NAPLateralEngagementModeMigrated"))
 
   def test_mode0_migration_requires_present_readback(self):

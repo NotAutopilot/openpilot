@@ -76,20 +76,23 @@ def migrate_preap_engagement_mode(params) -> int:
   if canonical is not None:
     return parse_engagement_mode(canonical)
 
-  main = params.get("MadsMainCruiseAllowed")
-  uem = params.get("MadsUnifiedEngagementMode")
-  # Absent legacy pair is not an explicit "both off" — default independent.
-  if main is None and uem is None:
+  if _truthy_force_preap(params.get("NAPLateralEngagementModeMigrated")):
     mode = 0
   else:
-    main_on = main not in (None, False, 0, "0", b"0", "")
-    uem_on = uem not in (None, False, 0, "0", b"0", "")
-    if main_on:
-      mode = 0  # independent
-    elif uem_on:
-      mode = 1  # cruiseCoupled
+    main = params.get("MadsMainCruiseAllowed")
+    uem = params.get("MadsUnifiedEngagementMode")
+    # Absent legacy pair is not an explicit "both off" — default independent.
+    if main is None and uem is None:
+      mode = 0
     else:
-      mode = 2  # longitudinalOnly
+      main_on = main not in (None, False, 0, "0", b"0", "")
+      uem_on = uem not in (None, False, 0, "0", b"0", "")
+      if main_on:
+        mode = 0  # independent
+      elif uem_on:
+        mode = 1  # cruiseCoupled
+      else:
+        mode = 2  # longitudinalOnly
 
   params.put("NAPLateralEngagementMode", int(mode), block=True)
   written = params.get("NAPLateralEngagementMode")

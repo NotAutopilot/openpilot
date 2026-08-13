@@ -1,5 +1,7 @@
 import unittest
 
+from panda import Panda
+
 from openpilot.cereal import log
 from opendbc.car import structs
 from opendbc.safety.tests.common import CANPackerSafety
@@ -8,9 +10,17 @@ from openpilot.system.manager.process_config import only_onroad, procs
 from openpilot.system.hardware.hardwared import ignition_from_panda_states
 
 
-def _panda_state(ignition_can):
+HEALTH_STRUCT = Panda.HEALTH_STRUCT
+IGNITION_CAN_INDEX = 9
+
+
+def _panda_state_from_health(ignition_can):
+  health_fields = [0] * len(HEALTH_STRUCT.unpack(bytes(HEALTH_STRUCT.size)))
+  health_fields[IGNITION_CAN_INDEX] = int(ignition_can)
+  health = HEALTH_STRUCT.unpack(HEALTH_STRUCT.pack(*health_fields))
+
   ps = log.PandaState.new_message()
-  ps.ignitionCan = ignition_can
+  ps.ignitionCan = bool(health[IGNITION_CAN_INDEX])
   ps.ignitionLine = False
   ps.pandaType = log.PandaState.PandaType.uno
   return ps
@@ -33,7 +43,7 @@ class TestPreAPIgnitionPandaState(unittest.TestCase):
   def test_ignition_can_pkt_feeds_pandastate_ignitionCan(self):
     self.safety.ignition_can_hook(self._msg(0, 1))
     self.safety.ignition_can_hook(self._msg(1, 1))
-    ps = _panda_state(bool(self.safety.get_ignition_can()))
+    ps = _panda_state_from_health(self.safety.get_ignition_can())
     self.assertTrue(ps.ignitionCan)
     started = ignition_from_panda_states([ps])
     card = next(proc for proc in procs if proc.name == "card")

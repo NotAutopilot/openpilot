@@ -1,5 +1,7 @@
 import unittest
 
+from panda import Panda
+
 from openpilot.cereal import log
 from opendbc.car import structs
 from opendbc.safety.tests.common import CANPackerSafety
@@ -8,10 +10,18 @@ from openpilot.system.manager.process_config import only_onroad, procs
 from openpilot.system.hardware.hardwared import ignition_from_panda_states
 
 
-def _panda_state(*, ignition_can=False, ignition_line=False, panda_type=None):
+HEALTH_STRUCT = Panda.HEALTH_STRUCT
+IGNITION_CAN_INDEX = 9
+
+
+def _panda_state_from_health(ignition_can, *, panda_type=None):
+  health_fields = [0] * len(HEALTH_STRUCT.unpack(bytes(HEALTH_STRUCT.size)))
+  health_fields[IGNITION_CAN_INDEX] = int(ignition_can)
+  health = HEALTH_STRUCT.unpack(HEALTH_STRUCT.pack(*health_fields))
+
   ps = log.PandaState.new_message()
-  ps.ignitionCan = ignition_can
-  ps.ignitionLine = ignition_line
+  ps.ignitionCan = bool(health[IGNITION_CAN_INDEX])
+  ps.ignitionLine = False
   ps.pandaType = log.PandaState.PandaType.uno if panda_type is None else panda_type
   return ps
 
@@ -37,7 +47,7 @@ class TestPreAPIgnitionOnroadContract(unittest.TestCase):
     self.safety.ignition_can_hook(self._msg(1, 1))
     self.assertTrue(self.safety.get_ignition_can())
 
-    ps = _panda_state(ignition_can=bool(self.safety.get_ignition_can()))
+    ps = _panda_state_from_health(self.safety.get_ignition_can())
     started = ignition_from_panda_states([ps])
     self.assertTrue(started)
 
@@ -51,14 +61,14 @@ class TestPreAPIgnitionOnroadContract(unittest.TestCase):
     self.safety.ignition_can_hook(self._msg(2, 0))
     self.safety.ignition_can_hook(self._msg(3, 0))
     self.assertFalse(self.safety.get_ignition_can())
-    ps = _panda_state(ignition_can=bool(self.safety.get_ignition_can()))
+    ps = _panda_state_from_health(self.safety.get_ignition_can())
     started = ignition_from_panda_states([ps])
     card = next(proc for proc in procs if proc.name == "card")
     self.assertFalse(only_onroad(started, None, structs.CarParams()))
     self.assertIs(card.should_run, only_onroad)
 
   def test_unknown_panda_cannot_start_card(self):
-    ps = _panda_state(ignition_can=True, panda_type=log.PandaState.PandaType.unknown)
+    ps = _panda_state_from_health(True, panda_type=log.PandaState.PandaType.unknown)
     started = ignition_from_panda_states([ps])
     self.assertFalse(started)
     self.assertFalse(only_onroad(started, None, structs.CarParams()))
