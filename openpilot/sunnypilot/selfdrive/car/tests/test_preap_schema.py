@@ -1,3 +1,4 @@
+import capnp
 import unittest
 from pathlib import Path
 
@@ -7,6 +8,10 @@ from opendbc.car import structs
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _ordinals(schema):
+  return {field.proto.name: getattr(field.proto.ordinal, field.proto.ordinal.which()) for field in schema.fields_list}
 
 
 class TestPreAPSchemaContract(unittest.TestCase):
@@ -26,6 +31,35 @@ class TestPreAPSchemaContract(unittest.TestCase):
     self.assertEqual(int(custom.CarStateSP.PreapLongitudinalIntent.none), 0)
     self.assertEqual(int(custom.CarStateSP.PreapLongitudinalIntent.enable), 1)
     self.assertEqual(int(custom.CarStateSP.PreapLongitudinalIntent.disable), 2)
+
+  def test_field_ordinal_pins(self):
+    cp = _ordinals(custom.CarParamsSP.schema)
+    self.assertEqual(cp["flags"], 0)
+    self.assertEqual(cp["safetyParam"], 1)
+    self.assertEqual(cp["neuralNetworkLateralControl"], 2)
+    self.assertEqual(cp["pcmCruiseSpeed"], 3)
+    self.assertEqual(cp["intelligentCruiseButtonManagementAvailable"], 4)
+    self.assertEqual(cp["enableGasInterceptor"], 5)
+    self.assertEqual(cp["madsFullSettingsAvailable"], 6)
+    self.assertEqual(cp["madsMainCruiseInputKind"], 7)
+    self.assertEqual(cp["madsMainCruiseAllowed"], 8)
+    self.assertEqual(cp["madsRequired"], 9)
+    self.assertEqual(cp["teslaCoopSteeringAvailable"], 10)
+    self.assertEqual(cp["madsUnifiedEngagementMode"], 11)
+    self.assertEqual(cp["madsSteeringMode"], 12)
+    self.assertEqual(cp["madsCapabilityContractVersion"], 13)
+    self.assertEqual(cp["madsHandsOnPauseAvailable"], 14)
+    self.assertEqual(cp["preapLateralEngagementMode"], 15)
+
+    cs = _ordinals(custom.CarStateSP.schema)
+    self.assertEqual(cs["speedLimit"], 0)
+    self.assertEqual(cs["preapLateralIntent"], 1)
+    self.assertEqual(cs["preapLongitudinalIntent"], 2)
+    self.assertEqual(cs["preapIntentSequence"], 3)
+    self.assertEqual(cs["preapIntentEpoch"], 4)
+
+    car_state = _ordinals(structs.CarState.schema)
+    self.assertEqual(car_state["turnSignalStalkState"], 61)
 
   def test_version0_bytes_keep_old_fields(self):
     raw = (FIXTURES / "carparams_sp_v0_tesla_vehicle_bus.bin").read_bytes()
@@ -63,33 +97,32 @@ class TestPreAPSchemaContract(unittest.TestCase):
       self.assertTrue(msg.madsRequired)
       self.assertEqual(msg.neuralNetworkLateralControl.model.name, "BAR")
 
-    # Old schema fixture must still see @0-@5.
-    import capnp
     capnp.remove_import_hook()
-    old = capnp.load(str(FIXTURES / "custom_v0.capnp"), imports=["/usr/local/include", str(Path(__file__).resolve().parents[4] / "cereal")])
-    try:
-      with old.CarParamsSP.from_bytes(raw) as old_msg:
-        self.assertEqual(old_msg.flags, 7)
-        self.assertEqual(old_msg.safetyParam, 2)
-        self.assertFalse(old_msg.pcmCruiseSpeed)
-        self.assertEqual(old_msg.neuralNetworkLateralControl.model.name, "BAR")
-        self.assertFalse(hasattr(old_msg, "madsRequired") and old_msg.schema.fields.get("madsRequired") is not None or False)
-    except Exception as exc:
-      # Include path can fail in some environments; the current-schema parse above still
-      # proves old ordinals are intact. Re-raise only if old fields themselves broke.
-      if "flags" in str(exc).lower():
-        raise
+    old = capnp.load(str(FIXTURES / "custom_v0.capnp"))
+    with old.CarParamsSP.from_bytes(raw) as old_msg:
+      self.assertEqual(old_msg.flags, 7)
+      self.assertEqual(old_msg.safetyParam, 2)
+      self.assertFalse(old_msg.pcmCruiseSpeed)
+      self.assertEqual(old_msg.neuralNetworkLateralControl.model.name, "BAR")
+      self.assertFalse(hasattr(old_msg, "madsRequired"))
 
     cs = structs.CarStateSP()
     cs.speedLimit = 11.0
     cs.preapLateralIntent = structs.CarStateSP.PreapLateralIntent.forceDisable
+    cs.preapLongitudinalIntent = structs.CarStateSP.PreapLongitudinalIntent.disable
     cs.preapIntentSequence = 9
     cs.preapIntentEpoch = 99
     raw_cs = convert_to_capnp(cs).to_bytes()
     with custom.CarStateSP.from_bytes(raw_cs) as msg:
       self.assertAlmostEqual(msg.speedLimit, 11.0, places=4)
+      self.assertEqual(msg.preapLateralIntent, custom.CarStateSP.PreapLateralIntent.forceDisable)
+      self.assertEqual(msg.preapLongitudinalIntent, custom.CarStateSP.PreapLongitudinalIntent.disable)
       self.assertEqual(msg.preapIntentSequence, 9)
       self.assertEqual(msg.preapIntentEpoch, 99)
+
+    with old.CarStateSP.from_bytes(raw_cs) as old_cs:
+      self.assertAlmostEqual(old_cs.speedLimit, 11.0, places=4)
+      self.assertFalse(hasattr(old_cs, "preapLateralIntent"))
 
 
 if __name__ == "__main__":

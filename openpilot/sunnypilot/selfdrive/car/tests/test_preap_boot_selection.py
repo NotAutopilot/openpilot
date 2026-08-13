@@ -95,6 +95,12 @@ class TestPreAPBootSelection(unittest.TestCase):
     stored["MadsUnifiedEngagementMode"] = False
     self.assertEqual(migrate_preap_engagement_mode(params), 2)
 
+    stored.pop("NAPLateralEngagementMode")
+    stored.pop("NAPLateralEngagementModeMigrated")
+    stored["MadsMainCruiseAllowed"] = True
+    stored["MadsUnifiedEngagementMode"] = True
+    self.assertEqual(migrate_preap_engagement_mode(params), 0)
+
     stored.clear()
     self.assertEqual(migrate_preap_engagement_mode(params), 0)
 
@@ -128,6 +134,16 @@ class TestPreAPSnapshotKeys(unittest.TestCase):
     self.assertNotIn("NAPAdaptiveAccel", keys)
     self.assertIn("NAPForcePreAP", keys)
     self.assertIn("NAPLateralEngagementMode", keys)
+    self.assertIn("NAPPedalEnabled", keys)
+    self.assertIn("NAPRadarEnabled", keys)
+    self.assertIn("NAPFollowDistance", keys)
+    self.assertIn("MadsSteeringMode", keys)
+
+  def test_intent_epoch_is_nonzero(self):
+    from openpilot.sunnypilot.selfdrive.car.preap_boot import new_preap_intent_epoch
+    epochs = {new_preap_intent_epoch() for _ in range(8)}
+    self.assertTrue(all(value != 0 for value in epochs))
+    self.assertGreaterEqual(len(epochs), 7)
 
 
 if __name__ == "__main__":
