@@ -364,6 +364,17 @@ struct CarParamsSP @0x80ae746ee2596b11 {
 
   neuralNetworkLateralControl @2 :NeuralNetworkLateralControl;
 
+  madsFullSettingsAvailable @6 :Bool;
+  madsMainCruiseInputKind @7 :MadsMainCruiseInputKind;
+  madsMainCruiseAllowed @8 :Bool;
+  madsRequired @9 :Bool;
+  teslaCoopSteeringAvailable @10 :Bool;
+  madsUnifiedEngagementMode @11 :Bool;
+  madsSteeringMode @12 :MadsSteeringMode;
+  madsCapabilityContractVersion @13 :UInt8;
+  madsHandsOnPauseAvailable @14 :Bool;
+  preapLateralEngagementMode @15 :PreapLateralEngagementMode;
+
   struct NeuralNetworkLateralControl {
     model @0 :Model;
     fuzzyFingerprint @1 :Bool;
@@ -372,6 +383,24 @@ struct CarParamsSP @0x80ae746ee2596b11 {
       path @0 :Text;
       name @1 :Text;
     }
+  }
+
+  enum MadsMainCruiseInputKind {
+    none @0;
+    stateful @1;
+    momentary @2;
+  }
+
+  enum MadsSteeringMode {
+    remainActive @0;
+    pause @1;
+    disengage @2;
+  }
+
+  enum PreapLateralEngagementMode {
+    independent @0;
+    cruiseCoupled @1;
+    longitudinalOnly @2;
   }
 }
 
@@ -445,6 +474,22 @@ struct BackupManagerSP @0xf98d843bfd7004a3 {
 
 struct CarStateSP @0xb86e6369214c01c8 {
   speedLimit @0 :Float32;
+  preapLateralIntent @1 :PreapLateralIntent;
+  preapLongitudinalIntent @2 :PreapLongitudinalIntent;
+  preapIntentSequence @3 :UInt32;
+  preapIntentEpoch @4 :UInt64;
+
+  enum PreapLateralIntent {
+    none @0;
+    mainCruiseRequest @1;
+    forceDisable @2;
+  }
+
+  enum PreapLongitudinalIntent {
+    none @0;
+    enable @1;
+    disable @2;
+  }
 }
 
 struct LiveMapDataSP @0xf416ec09499d9d19 {

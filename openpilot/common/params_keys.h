@@ -226,6 +226,25 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SubaruStopAndGoManualParkingBrake", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"TeslaCoopSteering", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"TeslaMadsScreenButton", {PERSISTENT | BACKUP, INT, "0"}},
+
+    // Pre-AP Tesla (NAP) retained keys. Shared sunnypilot leaves NAPForcePreAP
+    // absent/false. Do not register NAPAdaptiveAccel.
+    {"NAPForcePreAP", {PERSISTENT | BACKUP, BOOL}},
+    {"NAPLateralEngagementMode", {PERSISTENT | BACKUP, INT}},
+    {"NAPLateralEngagementModeMigrated", {PERSISTENT | BACKUP, BOOL}},
+    {"NAPFollowDistance", {PERSISTENT | BACKUP, INT, "4"}},
+    {"NAPPedalEnabled", {PERSISTENT | BACKUP, BOOL}},
+    {"NAPPedalCanBus", {PERSISTENT | BACKUP, INT, "2"}},
+    {"NAPPedalProfile", {PERSISTENT | BACKUP, INT, "4"}},
+    {"NAPPedalCalibDone", {PERSISTENT | BACKUP, BOOL}},
+    {"NAPPedalCalibFactor", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
+    {"NAPPedalCalibMin", {PERSISTENT | BACKUP, FLOAT, "-3.0"}},
+    {"NAPPedalCalibMax", {PERSISTENT | BACKUP, FLOAT, "99.6"}},
+    {"NAPPedalCalibZero", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
+    {"NAPRadarEnabled", {PERSISTENT | BACKUP, BOOL}},
+    {"NAPRadarBehindNosecone", {PERSISTENT | BACKUP, BOOL}},
+    {"NAPRadarOffset", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
+    {"NAPBrakeFactor", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"ToyotaEnforceStockLongitudinal", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"ToyotaStopAndGoHack", {PERSISTENT | BACKUP, BOOL, "0"}},
 

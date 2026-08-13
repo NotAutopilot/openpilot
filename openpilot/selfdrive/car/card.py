@@ -24,6 +24,7 @@ from openpilot.selfdrive.car.helpers import convert_carControlSP, convert_to_cap
 
 from openpilot.sunnypilot.mads.helpers import set_alternative_experience, set_car_specific_params
 from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfaces
+from openpilot.sunnypilot.selfdrive.car import preap_boot
 
 REPLAY = "REPLAY" in os.environ
 
@@ -106,11 +107,25 @@ class Car:
         with car.CarParams.from_bytes(cached_params_raw) as _cached_params:
           cached_params = _cached_params
 
-      fixed_fingerprint = (self.params.get("CarPlatformBundle") or {}).get("platform", None)
+      bundle = self.params.get("CarPlatformBundle") or {}
+      if not isinstance(bundle, dict):
+        bundle = {}
+      bundle_platform = bundle.get("platform", None)
+      preap_boot.seed_preap_installer(self.params, bundle_platform)
+      selection = preap_boot.resolve_preap_boot_selection(
+        bundle_platform=bundle_platform,
+        env_fingerprint=os.environ.get("FINGERPRINT") or None,
+        nap_force_preap=self.params.get("NAPForcePreAP"),
+      )
+      if selection.lock_preap:
+        preap_boot.migrate_preap_engagement_mode(self.params)
+        preap_boot.force_mads_required(self.params)
+      fixed_fingerprint = selection.candidate if selection.candidate is not None else bundle_platform
       init_params_list_sp = sunnypilot_interfaces.initialize_params(self.params)
+      init_params_list_sp.extend(preap_boot.snapshot_param_list(self.params))
 
       self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, cached_params,
-                        fixed_fingerprint, init_params_list_sp, is_release_sp)
+                        fixed_fingerprint, init_params_list_sp, is_release_sp, selection.skip_fw_query)
       sunnypilot_interfaces.setup_interfaces(self.CI, self.params)
       self.RI = interfaces[self.CI.CP.carFingerprint].RadarInterface(self.CI.CP, self.CI.CP_SP)
       self.CP = self.CI.CP
@@ -179,6 +194,7 @@ class Car:
     self.params.put("CarParamsSPPersistent", cp_sp_bytes)
 
     self.v_cruise_helper = VCruiseHelper(self.CP, self.CP_SP)
+    self.preap_intent_epoch = preap_boot.new_preap_intent_epoch() if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP" else 0
 
     self.is_metric = self.params.get_bool("IsMetric")
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
@@ -197,6 +213,8 @@ class Car:
 
     # Update carState from CAN
     CS, CS_SP = self.CI.update(can_list)
+    if self.preap_intent_epoch:
+      CS_SP.preapIntentEpoch = self.preap_intent_epoch
     CS_SP = convert_to_capnp(CS_SP)
 
     # Update radar tracks from CAN

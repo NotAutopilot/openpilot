@@ -5,6 +5,8 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 
+from dataclasses import dataclass
+
 from openpilot.common.params import Params
 from opendbc.car import structs
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
@@ -14,6 +16,9 @@ from opendbc.sunnypilot.car.tesla.values import MadsScreenButtonType, TeslaFlags
 
 MADS_NO_ACC_MAIN_BUTTON = ("rivian", "tesla")
 
+MadsMainCruiseInputKind = structs.CarParamsSP.MadsMainCruiseInputKind
+MadsSteeringMode = structs.CarParamsSP.MadsSteeringMode
+
 
 class MadsSteeringModeOnBrake:
   REMAIN_ACTIVE = 0
@@ -21,28 +26,90 @@ class MadsSteeringModeOnBrake:
   DISENGAGE = 2
 
 
-def get_mads_limited_brands(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params) -> bool:
-  if CP.brand == 'rivian':
-    return True
-  if CP.brand == 'tesla':
-    if not CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
-      return True
-    screen_button = int(params.get("TeslaMadsScreenButton", return_default=True))
-    return screen_button == MadsScreenButtonType.OFF
+STEERING_MODE_TO_INT = {
+  MadsSteeringMode.remainActive: MadsSteeringModeOnBrake.REMAIN_ACTIVE,
+  MadsSteeringMode.pause: MadsSteeringModeOnBrake.PAUSE,
+  MadsSteeringMode.disengage: MadsSteeringModeOnBrake.DISENGAGE,
+}
 
+
+@dataclass(frozen=True)
+class MadsCapabilities:
+  full_settings_available: bool
+  main_cruise_input_kind: structs.CarParamsSP.MadsMainCruiseInputKind
+  main_cruise_allowed: bool
+  mads_required: bool
+  tesla_coop_steering_available: bool
+  unified_engagement_mode: bool
+  steering_mode: int
+  hands_on_pause_available: bool
+  no_main_cruise: bool
+
+
+def _version0_limited_tesla(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params) -> bool:
+  if CP.brand != "tesla":
+    return False
+  if not CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
+    return True
+  screen_button = int(params.get("TeslaMadsScreenButton", return_default=True) or 0)
+  return screen_button == MadsScreenButtonType.OFF
+
+
+def get_mads_limited_brands(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params) -> bool:
+  caps = resolve_mads_capabilities(CP, CP_SP, params)
+  if caps.mads_required:
+    return False
+  if CP.brand == "rivian":
+    return True
+  if CP.brand == "tesla":
+    return not caps.full_settings_available
   return False
 
 
-def read_steering_mode_param(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params):
-  if get_mads_limited_brands(CP, CP_SP, params):
-    return MadsSteeringModeOnBrake.DISENGAGE
+def resolve_mads_capabilities(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params | None = None) -> MadsCapabilities:
+  if getattr(CP_SP, "madsCapabilityContractVersion", 0) >= 1:
+    kind = CP_SP.madsMainCruiseInputKind
+    return MadsCapabilities(
+      full_settings_available=bool(CP_SP.madsFullSettingsAvailable),
+      main_cruise_input_kind=kind,
+      main_cruise_allowed=bool(CP_SP.madsMainCruiseAllowed),
+      mads_required=bool(CP_SP.madsRequired),
+      tesla_coop_steering_available=bool(CP_SP.teslaCoopSteeringAvailable),
+      unified_engagement_mode=bool(CP_SP.madsUnifiedEngagementMode),
+      steering_mode=STEERING_MODE_TO_INT.get(CP_SP.madsSteeringMode, MadsSteeringModeOnBrake.REMAIN_ACTIVE),
+      hands_on_pause_available=bool(CP_SP.madsHandsOnPauseAvailable),
+      no_main_cruise=kind in (MadsMainCruiseInputKind.none, MadsMainCruiseInputKind.momentary),
+    )
 
-  return params.get("MadsSteeringMode", return_default=True)
+  if params is None:
+    params = Params()
+  limited = CP.brand == "rivian" or _version0_limited_tesla(CP, CP_SP, params)
+  kind = MadsMainCruiseInputKind.none if CP.brand in MADS_NO_ACC_MAIN_BUTTON else MadsMainCruiseInputKind.stateful
+  steering = MadsSteeringModeOnBrake.DISENGAGE if limited else int(params.get("MadsSteeringMode", return_default=True) or 0)
+  return MadsCapabilities(
+    full_settings_available=not limited,
+    main_cruise_input_kind=kind,
+    main_cruise_allowed=bool(params.get_bool("MadsMainCruiseAllowed")) if kind == MadsMainCruiseInputKind.stateful else False,
+    mads_required=False,
+    tesla_coop_steering_available=CP.brand == "tesla",
+    unified_engagement_mode=bool(params.get_bool("MadsUnifiedEngagementMode")),
+    steering_mode=steering,
+    hands_on_pause_available=False,
+    no_main_cruise=kind in (MadsMainCruiseInputKind.none, MadsMainCruiseInputKind.momentary),
+  )
+
+
+def read_steering_mode_param(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params):
+  return resolve_mads_capabilities(CP, CP_SP, params).steering_mode
 
 
 def set_alternative_experience(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params):
-  enabled = params.get_bool("Mads")
-  steering_mode = read_steering_mode_param(CP, CP_SP, params)
+  caps = resolve_mads_capabilities(CP, CP_SP, params)
+  enabled = True if caps.mads_required else params.get_bool("Mads")
+  if caps.mads_required:
+    params.put_bool("Mads", True, block=True)
+
+  steering_mode = caps.steering_mode
 
   if enabled:
     CP.alternativeExperience |= ALTERNATIVE_EXPERIENCE.ENABLE_MADS
@@ -62,6 +129,11 @@ def set_car_specific_params(CP: structs.CarParams, CP_SP: structs.CarParamsSP, p
       CP_SP.flags |= HyundaiFlagsSP.LONGITUDINAL_MAIN_CRUISE_TOGGLEABLE.value
       CP_SP.safetyParam |= HyundaiSafetyFlagsSP.LONG_MAIN_CRUISE_TOGGLEABLE
 
+  caps = resolve_mads_capabilities(CP, CP_SP, params)
+  if caps.mads_required:
+    params.put_bool("Mads", True, block=True)
+    return
+
   # MADS Partial Support
   # MADS is currently partially supported for these platforms due to lack of consistent states to engage controls
   # Only MadsSteeringModeOnBrake.DISENGAGE is supported for these platforms
@@ -72,5 +144,5 @@ def set_car_specific_params(CP: structs.CarParams, CP_SP: structs.CarParamsSP, p
     params.put_bool("MadsUnifiedEngagementMode", True, block=True)
 
   # no ACC MAIN button for these brands
-  if CP.brand in MADS_NO_ACC_MAIN_BUTTON:
+  if caps.no_main_cruise:
     params.remove("MadsMainCruiseAllowed")

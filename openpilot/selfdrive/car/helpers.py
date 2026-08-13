@@ -1,4 +1,5 @@
 import capnp
+from enum import Enum
 from typing import Any
 
 from openpilot.cereal import custom
@@ -20,6 +21,8 @@ def _asdictref_inner(obj) -> dict[str, Any] | Any:
     return ret
   elif isinstance(obj, (tuple, list)):
     return type(obj)(_asdictref_inner(v) for v in obj)
+  elif isinstance(obj, Enum):
+    return obj.value
   else:
     return obj
 
