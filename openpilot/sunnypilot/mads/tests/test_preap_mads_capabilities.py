@@ -10,6 +10,9 @@ from openpilot.sunnypilot.mads.helpers import (
   set_car_specific_params,
 )
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
+from openpilot.cereal import custom
+
+EventNameSP = custom.OnroadEventSP.EventName
 
 
 class TestPreAPMadsCapabilities(unittest.TestCase):
@@ -69,6 +72,84 @@ class TestPreAPMadsCapabilities(unittest.TestCase):
     caps = resolve_mads_capabilities(rivian, structs.CarParamsSP(), params)
     self.assertTrue(caps.no_main_cruise)
     self.assertFalse(caps.mads_required)
+
+
+  def test_version1_preap_does_not_emit_lkas_from_cruise_available(self):
+    from openpilot.sunnypilot.mads.mads import ModularAssistiveDrivingSystem
+    from openpilot.selfdrive.selfdrived.events import Events
+    from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+
+    CP = structs.CarParams()
+    CP.brand = "tesla"
+    CP.carFingerprint = "TESLA_MODEL_S_PREAP"
+    CP_SP = structs.CarParamsSP()
+    CP_SP.madsCapabilityContractVersion = 1
+    CP_SP.madsRequired = True
+    CP_SP.madsMainCruiseInputKind = structs.CarParamsSP.MadsMainCruiseInputKind.momentary
+    CP_SP.madsMainCruiseAllowed = True
+    CP_SP.madsUnifiedEngagementMode = False
+    CP_SP.madsSteeringMode = structs.CarParamsSP.MadsSteeringMode.remainActive
+
+    params = MagicMock()
+    params.get_bool.side_effect = lambda k: {"Mads": False, "MadsMainCruiseAllowed": True}.get(k, False)
+    sd = MagicMock()
+    sd.CP = CP
+    sd.CP_SP = CP_SP
+    sd.params = params
+    sd.events = Events()
+    sd.events_sp = EventsSP()
+    sd.enabled = False
+    sd.enabled_prev = False
+    sd.initialized = True
+    prev = structs.CarState()
+    prev.cruiseState.available = False
+    sd.CS_prev = prev
+    sd.sm = {"pandaStates": []}
+
+    mads = ModularAssistiveDrivingSystem(sd)
+    self.assertTrue(mads.no_main_cruise)
+    self.assertTrue(mads.enabled_toggle)
+    cs = structs.CarState()
+    cs.cruiseState.available = True
+    mads.update(cs)
+    self.assertFalse(sd.events_sp.has(EventNameSP.lkasEnable))
+
+    frozen_main = mads.main_enabled_toggle
+    params.get_bool.side_effect = lambda k: False
+    mads.read_params()
+    self.assertEqual(mads.main_enabled_toggle, frozen_main)
+
+  def test_version0_stateful_main_still_uses_params(self):
+    from openpilot.sunnypilot.mads.mads import ModularAssistiveDrivingSystem
+    from openpilot.selfdrive.selfdrived.events import Events
+    from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+
+    CP = structs.CarParams()
+    CP.brand = "hyundai"
+    CP_SP = structs.CarParamsSP()
+    params = MagicMock()
+    params.get_bool.side_effect = lambda k: {"Mads": True, "MadsMainCruiseAllowed": True}.get(k, False)
+    params.get.return_value = 0
+    sd = MagicMock()
+    sd.CP = CP
+    sd.CP_SP = CP_SP
+    sd.params = params
+    sd.events = Events()
+    sd.events_sp = EventsSP()
+    sd.enabled = False
+    sd.enabled_prev = False
+    sd.initialized = True
+    prev = structs.CarState()
+    prev.cruiseState.available = False
+    sd.CS_prev = prev
+    sd.sm = {"pandaStates": []}
+    mads = ModularAssistiveDrivingSystem(sd)
+    self.assertFalse(mads.no_main_cruise)
+    cs = structs.CarState()
+    cs.cruiseState.available = True
+    mads.update(cs)
+    self.assertTrue(sd.events_sp.has(EventNameSP.lkasEnable))
+
 
 
 if __name__ == "__main__":

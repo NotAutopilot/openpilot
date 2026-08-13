@@ -1,24 +1,74 @@
 import unittest
 
-from pathlib import Path
+from openpilot.cereal import log
+from opendbc.car import structs
+from opendbc.safety.tests.common import CANPackerSafety
+from opendbc.safety.tests.libsafety import libsafety_py
+from openpilot.system.manager.process_config import only_onroad, procs
+
+try:
+  libsafety_py.ffi.cdef("void ignition_can_1hz_tick(void);")
+except Exception:
+  pass
+
+
+def _panda_state(*, ignition_can=False, ignition_line=False, panda_type=None):
+  ps = log.PandaState.new_message()
+  ps.ignitionCan = ignition_can
+  ps.ignitionLine = ignition_line
+  ps.pandaType = log.PandaState.PandaType.uno if panda_type is None else panda_type
+  return ps
+
+
+def _ignition_from_panda_states(panda_states):
+  # Production hardwared/manager predicate: any non-unknown panda with line or CAN ignition.
+  return any(ps.ignitionLine or ps.ignitionCan for ps in panda_states if ps.pandaType != log.PandaState.PandaType.unknown)
 
 
 class TestPreAPIgnitionOnroadContract(unittest.TestCase):
-  def test_pandad_and_manager_treat_ignition_can_as_onroad(self):
-    root = Path("/home/jack/projects/personal/notautopilot/.worktrees/naponsp-port/openpilot")
-    pandad = (root / "selfdrive/pandad/pandad.cc").read_text()
-    manager = (root / "system/manager/manager.py").read_text()
-    self.assertIn("health.ignition_can_pkt", pandad)
-    self.assertIn("ignition_line_pkt", pandad)
-    self.assertIn("ps.ignitionLine or ps.ignitionCan", manager)
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+    self.safety.init_tests()
+    for _ in range(4):
+      self.safety.ignition_can_1hz_tick()
+    self.safety.init_tests()
+    self.packer = CANPackerSafety("tesla_preap")
 
-    def harness_onroad(ignition_line: bool, ignition_can: bool, always_offroad: bool = False) -> bool:
-      return ((ignition_line or ignition_can) and not always_offroad)
+  def _msg(self, counter, drive_rail, bus=0):
+    return self.packer.make_can_msg_safety(
+      "GTW_status", bus, {"GTW_statusCounter": counter, "GTW_driveRailReq": int(drive_rail)},
+    )
 
-    self.assertTrue(harness_onroad(False, True))
-    self.assertFalse(harness_onroad(False, False))
-    self.assertTrue(harness_onroad(True, False))
-    self.assertFalse(harness_onroad(True, True, always_offroad=True))
+  def test_valid_0x348_sets_pandastate_and_starts_card(self):
+    self.safety.ignition_can_hook(self._msg(0, 1))
+    self.safety.ignition_can_hook(self._msg(1, 1))
+    self.assertTrue(self.safety.get_ignition_can())
+
+    ps = _panda_state(ignition_can=bool(self.safety.get_ignition_can()))
+    started = _ignition_from_panda_states([ps])
+    self.assertTrue(started)
+
+    card = next(proc for proc in procs if proc.name == "card")
+    self.assertIs(card.should_run, only_onroad)
+    self.assertTrue(only_onroad(started, None, structs.CarParams()))
+
+  def test_ignition_off_stops_card(self):
+    self.safety.ignition_can_hook(self._msg(0, 1))
+    self.safety.ignition_can_hook(self._msg(1, 1))
+    self.safety.ignition_can_hook(self._msg(2, 0))
+    self.safety.ignition_can_hook(self._msg(3, 0))
+    self.assertFalse(self.safety.get_ignition_can())
+    ps = _panda_state(ignition_can=bool(self.safety.get_ignition_can()))
+    started = _ignition_from_panda_states([ps])
+    card = next(proc for proc in procs if proc.name == "card")
+    self.assertFalse(only_onroad(started, None, structs.CarParams()))
+    self.assertIs(card.should_run, only_onroad)
+
+  def test_unknown_panda_cannot_start_card(self):
+    ps = _panda_state(ignition_can=True, panda_type=log.PandaState.PandaType.unknown)
+    started = _ignition_from_panda_states([ps])
+    self.assertFalse(started)
+    self.assertFalse(only_onroad(started, None, structs.CarParams()))
 
 
 if __name__ == "__main__":

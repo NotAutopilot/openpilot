@@ -107,20 +107,7 @@ class Car:
         with car.CarParams.from_bytes(cached_params_raw) as _cached_params:
           cached_params = _cached_params
 
-      bundle = self.params.get("CarPlatformBundle") or {}
-      if not isinstance(bundle, dict):
-        bundle = {}
-      bundle_platform = bundle.get("platform", None)
-      preap_boot.seed_preap_installer(self.params, bundle_platform)
-      selection = preap_boot.resolve_preap_boot_selection(
-        bundle_platform=bundle_platform,
-        env_fingerprint=os.environ.get("FINGERPRINT") or None,
-        nap_force_preap=self.params.get("NAPForcePreAP"),
-      )
-      if selection.lock_preap:
-        preap_boot.migrate_preap_engagement_mode(self.params)
-        preap_boot.force_mads_required(self.params)
-      fixed_fingerprint = selection.candidate if selection.candidate is not None else bundle_platform
+      selection, fixed_fingerprint = preap_boot.resolve_card_boot(self.params)
       init_params_list_sp = sunnypilot_interfaces.initialize_params(self.params)
       init_params_list_sp.extend(preap_boot.snapshot_param_list(self.params))
 

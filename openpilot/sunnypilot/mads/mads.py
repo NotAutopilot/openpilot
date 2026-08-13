@@ -50,14 +50,21 @@ class ModularAssistiveDrivingSystem:
 
     caps = resolve_mads_capabilities(self.CP, self.CP_SP, self.params)
     self.no_main_cruise = caps.no_main_cruise
+    self._freeze_mads_snapshot = getattr(self.CP_SP, "madsCapabilityContractVersion", 0) >= 1
 
-    # read params on init
+    # read params on init. Version-1 / required-MADS consume only the frozen typed snapshot.
     self.enabled_toggle = True if caps.mads_required else self.params.get_bool("Mads")
-    self.main_enabled_toggle = self.params.get_bool("MadsMainCruiseAllowed")
     self.steering_mode_on_brake = read_steering_mode_param(self.CP, self.CP_SP, self.params)
-    self.unified_engagement_mode = self.params.get_bool("MadsUnifiedEngagementMode")
+    if self._freeze_mads_snapshot:
+      self.main_enabled_toggle = caps.main_cruise_allowed
+      self.unified_engagement_mode = caps.unified_engagement_mode
+    else:
+      self.main_enabled_toggle = self.params.get_bool("MadsMainCruiseAllowed")
+      self.unified_engagement_mode = self.params.get_bool("MadsUnifiedEngagementMode")
 
   def read_params(self):
+    if self._freeze_mads_snapshot:
+      return
     self.main_enabled_toggle = self.params.get_bool("MadsMainCruiseAllowed")
     self.unified_engagement_mode = self.params.get_bool("MadsUnifiedEngagementMode")
 
@@ -163,7 +170,8 @@ class ModularAssistiveDrivingSystem:
         self.events.remove(EventName.pcmEnable)
         self.events.remove(EventName.buttonEnable)
     else:
-      if self.main_enabled_toggle:
+      # Stateful MAIN only. Momentary Pre-AP must not treat cruiseState.available as a stalk.
+      if self.main_enabled_toggle and not self.no_main_cruise:
         if CS.cruiseState.available and not self.selfdrive.CS_prev.cruiseState.available:
           self.events_sp.add(EventNameSP.lkasEnable)
 

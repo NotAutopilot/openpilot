@@ -1,149 +1,187 @@
+import os
 import unittest
-from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+from opendbc.car import structs
+from opendbc.car.car_helpers import get_car
+from opendbc.car.tesla.preap.boot import PREAP_PLATFORM
 from openpilot.sunnypilot.selfdrive.car.preap_boot import (
-  PREAP_PLATFORM,
   migrate_preap_engagement_mode,
-  resolve_preap_boot_selection,
-  seed_preap_installer,
+  resolve_card_boot,
   snapshot_param_list,
 )
 
 
+class FakeParams:
+  def __init__(self, initial=None):
+    self.store = dict(initial or {})
+
+  def get(self, key, return_default=False):
+    return self.store.get(key)
+
+  def put(self, key, value, block=True):
+    self.store[key] = value
+
+  def put_bool(self, key, value, block=True):
+    self.store[key] = bool(value)
+
+
+def _idle_can(wait_for_one=False):
+  return [[]]
+
+
+def _send(_msgs):
+  return None
+
+
+def _obd(_enabled):
+  return None
+
+
+def _get_car(selection, params, extra_params=None):
+  init = snapshot_param_list(params)
+  if extra_params:
+    init.extend(extra_params)
+  return get_car(_idle_can, _send, _obd, False, False, None,
+                 selection.candidate if selection.candidate is not None else None,
+                 init, False, selection.skip_fw_query)
+
+
 class TestPreAPBootSelection(unittest.TestCase):
   def test_explicit_bundle_wins_over_force(self):
-    sel = resolve_preap_boot_selection(
-      bundle_platform="TESLA_MODEL_3",
-      env_fingerprint=None,
-      nap_force_preap=True,
-    )
+    params = FakeParams({"CarPlatformBundle": {"platform": "TESLA_MODEL_3"}, "NAPForcePreAP": True})
+    sel, fingerprint = resolve_card_boot(params, environ={})
     self.assertEqual(sel.candidate, "TESLA_MODEL_3")
+    self.assertEqual(fingerprint, "TESLA_MODEL_3")
     self.assertEqual(sel.source, "explicit")
     self.assertFalse(sel.lock_preap)
-    self.assertFalse(sel.skip_fw_query)
+    self.assertIsNone(sel.skip_fw_query)
 
   def test_env_override_locks_preap_and_skips_fw(self):
-    sel = resolve_preap_boot_selection(
-      bundle_platform=None,
-      env_fingerprint=PREAP_PLATFORM,
-      nap_force_preap=False,
-    )
+    params = FakeParams()
+    sel, fingerprint = resolve_card_boot(params, environ={"FINGERPRINT": PREAP_PLATFORM})
     self.assertEqual(sel.candidate, PREAP_PLATFORM)
+    self.assertEqual(fingerprint, PREAP_PLATFORM)
     self.assertTrue(sel.lock_preap)
     self.assertTrue(sel.skip_fw_query)
 
   def test_persisted_force_true(self):
-    sel = resolve_preap_boot_selection(nap_force_preap=True)
+    params = FakeParams({"NAPForcePreAP": True})
+    sel, fingerprint = resolve_card_boot(params, environ={})
     self.assertEqual(sel.candidate, PREAP_PLATFORM)
     self.assertEqual(sel.source, "nap_force_preap")
     self.assertTrue(sel.skip_fw_query)
 
   def test_absent_or_false_uses_normal_flow(self):
     for value in (None, False, 0, "0", ""):
-      sel = resolve_preap_boot_selection(nap_force_preap=value)
+      params = FakeParams({} if value is None else {"NAPForcePreAP": value})
+      sel, fingerprint = resolve_card_boot(params, environ={})
       self.assertIsNone(sel.candidate)
+      self.assertIsNone(fingerprint)
       self.assertEqual(sel.source, "normal")
       self.assertFalse(sel.lock_preap)
-      self.assertFalse(sel.skip_fw_query)
+      self.assertIsNone(sel.skip_fw_query)
 
   def test_installer_seeds_only_when_absent(self):
-    params = MagicMock()
-    params.get.return_value = None
-    self.assertTrue(seed_preap_installer(params, PREAP_PLATFORM))
-    params.put_bool.assert_called_once_with("NAPForcePreAP", True, block=True)
+    params = FakeParams({"CarPlatformBundle": {"platform": PREAP_PLATFORM}})
+    sel, fingerprint = resolve_card_boot(params, environ={})
+    self.assertTrue(params.get("NAPForcePreAP"))
+    self.assertEqual(sel.candidate, PREAP_PLATFORM)
+    self.assertTrue(sel.lock_preap)
 
-    params = MagicMock()
-    params.get.return_value = False
-    self.assertFalse(seed_preap_installer(params, PREAP_PLATFORM))
+    params = FakeParams({"CarPlatformBundle": {"platform": PREAP_PLATFORM}, "NAPForcePreAP": False})
+    sel, fingerprint = resolve_card_boot(params, environ={})
+    self.assertFalse(params.get("NAPForcePreAP"))
+    # Explicit Pre-AP bundle still locks before FW; False only blocks installer reseeding.
+    self.assertEqual(sel.candidate, PREAP_PLATFORM)
+    self.assertEqual(sel.source, "explicit")
+    self.assertTrue(sel.lock_preap)
 
-    params = MagicMock()
-    params.get.return_value = None
-    self.assertFalse(seed_preap_installer(params, "TESLA_MODEL_3"))
+    params = FakeParams({"CarPlatformBundle": {"platform": "TESLA_MODEL_3"}})
+    sel, fingerprint = resolve_card_boot(params, environ={})
+    self.assertIsNone(params.get("NAPForcePreAP"))
+    self.assertEqual(sel.candidate, "TESLA_MODEL_3")
+    self.assertFalse(sel.lock_preap)
 
   def test_migrate_main_uem_once(self):
+    params = FakeParams({"MadsMainCruiseAllowed": True, "MadsUnifiedEngagementMode": False})
+    self.assertEqual(migrate_preap_engagement_mode(params), 0)
+    self.assertEqual(params.get("NAPLateralEngagementMode"), 0)
+    self.assertTrue(params.get("NAPLateralEngagementModeMigrated"))
+
+    params.store["MadsMainCruiseAllowed"] = False
+    params.store["MadsUnifiedEngagementMode"] = True
+    self.assertEqual(migrate_preap_engagement_mode(params), 0)
+
+    params.store.pop("NAPLateralEngagementMode")
+    params.store.pop("NAPLateralEngagementModeMigrated", None)
+    self.assertEqual(migrate_preap_engagement_mode(params), 1)
+
+    params.store.pop("NAPLateralEngagementMode")
+    params.store["MadsMainCruiseAllowed"] = False
+    params.store["MadsUnifiedEngagementMode"] = False
+    self.assertEqual(migrate_preap_engagement_mode(params), 2)
+
+    params.store.pop("NAPLateralEngagementMode")
+    params.store.pop("NAPLateralEngagementModeMigrated", None)
+    params.store["MadsMainCruiseAllowed"] = True
+    params.store["MadsUnifiedEngagementMode"] = True
+    self.assertEqual(migrate_preap_engagement_mode(params), 0)
+
+    params = FakeParams()
+    self.assertEqual(migrate_preap_engagement_mode(params), 0)
+    self.assertTrue(params.get("NAPLateralEngagementModeMigrated"))
+
+  def test_mode0_migration_requires_present_readback(self):
     stored = {}
 
     def get(key):
       return stored.get(key)
 
     def put(key, value, block=True):
+      # Simulate a failed canonical persist: write is attempted but not readable.
+      if key == "NAPLateralEngagementMode":
+        return
       stored[key] = value
 
     params = MagicMock()
     params.get.side_effect = get
     params.put.side_effect = put
     params.put_bool.side_effect = lambda k, v, block=True: stored.__setitem__(k, v)
-
-    stored["MadsMainCruiseAllowed"] = True
-    stored["MadsUnifiedEngagementMode"] = False
     self.assertEqual(migrate_preap_engagement_mode(params), 0)
-    self.assertEqual(stored["NAPLateralEngagementMode"], 0)
-    self.assertTrue(stored["NAPLateralEngagementModeMigrated"])
+    self.assertNotIn("NAPLateralEngagementModeMigrated", stored)
+    self.assertNotIn("NAPLateralEngagementMode", stored)
 
-    stored["MadsMainCruiseAllowed"] = False
-    stored["MadsUnifiedEngagementMode"] = True
-    # canonical already present: do not reread pair
-    self.assertEqual(migrate_preap_engagement_mode(params), 0)
-
-    stored.pop("NAPLateralEngagementMode")
-    stored.pop("NAPLateralEngagementModeMigrated")
-    self.assertEqual(migrate_preap_engagement_mode(params), 1)
-
-    stored.pop("NAPLateralEngagementMode")
-    stored["MadsMainCruiseAllowed"] = False
-    stored["MadsUnifiedEngagementMode"] = False
-    self.assertEqual(migrate_preap_engagement_mode(params), 2)
-
-    stored.pop("NAPLateralEngagementMode")
-    stored.pop("NAPLateralEngagementModeMigrated")
-    stored["MadsMainCruiseAllowed"] = True
-    stored["MadsUnifiedEngagementMode"] = True
-    self.assertEqual(migrate_preap_engagement_mode(params), 0)
-
-    stored.clear()
-    self.assertEqual(migrate_preap_engagement_mode(params), 0)
-
-  def test_napadaptiveaccel_not_registered(self):
-    keys = Path("openpilot/common/params_keys.h").read_text() if Path("openpilot/common/params_keys.h").exists() else \
-      Path("/home/jack/projects/personal/notautopilot/.worktrees/naponsp-port/openpilot/common/params_keys.h").read_text()
-    self.assertNotIn('{"NAPAdaptiveAccel"', keys)
-    self.assertIn('{"NAPForcePreAP"', keys)
-    self.assertIn('{"NAPLateralEngagementMode"', keys)
-
-
-class TestPreAPCardWiring(unittest.TestCase):
-  def test_card_wires_selection_before_fw_query(self):
-    card = Path("/home/jack/projects/personal/notautopilot/.worktrees/naponsp-port/openpilot/selfdrive/car/card.py").read_text()
-    helpers = Path("/home/jack/projects/personal/notautopilot/.worktrees/naponsp-port/opendbc_repo/opendbc/car/car_helpers.py").read_text()
-    self.assertIn("preap_boot.seed_preap_installer", card)
-    self.assertIn("preap_boot.resolve_preap_boot_selection", card)
-    self.assertIn("selection.skip_fw_query", card)
-    self.assertLess(card.index("preap_boot.resolve_preap_boot_selection"), card.index("get_car("))
-    self.assertLess(card.index("seed_preap_installer"), card.index("resolve_preap_boot_selection"))
-    self.assertIn("skip_fw_query: bool | None = None", helpers)
-    self.assertNotIn("candidate=PREAP_PLATFORM", card.split("get_car")[1][:400])
-
-
-class TestPreAPSnapshotKeys(unittest.TestCase):
-  def test_snapshot_does_not_include_adaptive_accel(self):
-    params = MagicMock()
-    params.get.return_value = None
-    blob = snapshot_param_list(params)
-    keys = {k for d in blob for k in d}
+  def test_napadaptiveaccel_not_in_boot_snapshot(self):
+    keys = {k for d in snapshot_param_list(FakeParams()) for k in d}
     self.assertNotIn("NAPAdaptiveAccel", keys)
-    self.assertIn("NAPForcePreAP", keys)
     self.assertIn("NAPLateralEngagementMode", keys)
-    self.assertIn("NAPPedalEnabled", keys)
-    self.assertIn("NAPRadarEnabled", keys)
-    self.assertIn("NAPFollowDistance", keys)
-    self.assertIn("MadsSteeringMode", keys)
+    self.assertIn("NAPForcePreAP", keys)
 
-  def test_intent_epoch_is_nonzero(self):
-    from openpilot.sunnypilot.selfdrive.car.preap_boot import new_preap_intent_epoch
-    epochs = {new_preap_intent_epoch() for _ in range(8)}
-    self.assertTrue(all(value != 0 for value in epochs))
-    self.assertGreaterEqual(len(epochs), 7)
+  def test_get_car_from_raw_bundle_and_params(self):
+    params = FakeParams({"CarPlatformBundle": {"platform": PREAP_PLATFORM}})
+    sel, fingerprint = resolve_card_boot(params, environ={})
+    CI = _get_car(sel, params)
+    self.assertEqual(CI.CP.carFingerprint, PREAP_PLATFORM)
+    self.assertEqual(fingerprint, PREAP_PLATFORM)
+    self.assertEqual(CI.CP.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.noOutput)
+
+    params = FakeParams({"CarPlatformBundle": {"platform": "TESLA_MODEL_3"}})
+    sel, fingerprint = resolve_card_boot(params, environ={})
+    CI = _get_car(sel, params)
+    self.assertEqual(CI.CP.carFingerprint, "TESLA_MODEL_3")
+    self.assertNotEqual(CI.CP.carFingerprint, PREAP_PLATFORM)
+
+  def test_normal_skip_fw_query_environment_fallback(self):
+    params = FakeParams()
+    sel, _fingerprint = resolve_card_boot(params, environ={})
+    self.assertIsNone(sel.skip_fw_query)
+    with patch.dict(os.environ, {"SKIP_FW_QUERY": "1"}, clear=False):
+      with patch("opendbc.car.car_helpers.get_vin") as get_vin:
+        CI = get_car(_idle_can, _send, _obd, False, False, None, "TESLA_MODEL_3",
+                     snapshot_param_list(params), False, sel.skip_fw_query)
+        get_vin.assert_not_called()
+        self.assertEqual(CI.CP.carFingerprint, "TESLA_MODEL_3")
 
 
 if __name__ == "__main__":

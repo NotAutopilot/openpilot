@@ -1,6 +1,6 @@
 """Pre-AP boot selection, installer seeding, and one-time mode migration.
 
-Params live here (openpilot), never in opendbc vehicle modules.
+Card-boundary helpers. Opendbc vehicle modules must not import Params.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ assert STALK_DOUBLE_PULL_MS == 400
 @dataclass(frozen=True)
 class PreAPBootSelection:
   candidate: str | None
-  skip_fw_query: bool
+  skip_fw_query: bool | None
   source: str
   lock_preap: bool
 
@@ -37,14 +37,17 @@ def resolve_preap_boot_selection(
   1. explicit CarPlatformBundle / FINGERPRINT environment override
   2. persisted NAPForcePreAP = true
   3. normal fingerprint / FW flow
+
+  Locked Pre-AP skips FW. Every other path leaves skip_fw_query unspecified so
+  fingerprint retains the existing SKIP_FW_QUERY environment fallback.
   """
   explicit = (bundle_platform or None) or (env_fingerprint or None) or None
   if explicit:
     lock = explicit == PREAP_PLATFORM
-    return PreAPBootSelection(candidate=explicit, skip_fw_query=lock, source="explicit", lock_preap=lock)
+    return PreAPBootSelection(candidate=explicit, skip_fw_query=True if lock else None, source="explicit", lock_preap=lock)
   if _truthy_force_preap(nap_force_preap):
     return PreAPBootSelection(candidate=PREAP_PLATFORM, skip_fw_query=True, source="nap_force_preap", lock_preap=True)
-  return PreAPBootSelection(candidate=None, skip_fw_query=False, source="normal", lock_preap=False)
+  return PreAPBootSelection(candidate=None, skip_fw_query=None, source="normal", lock_preap=False)
 
 
 def seed_preap_installer(params, bundle_platform: str | None) -> bool:
@@ -55,6 +58,16 @@ def seed_preap_installer(params, bundle_platform: str | None) -> bool:
     return False
   params.put_bool("NAPForcePreAP", True, block=True)
   return True
+
+
+def _canonical_mode_readback_matches(written, mode: int) -> bool:
+  """Require an actually present exact raw readback. Enum-zero parsing must not mask absence."""
+  if written is None or written == "" or written == b"":
+    return False
+  try:
+    return int(written) == int(mode)
+  except (TypeError, ValueError):
+    return parse_engagement_mode(written) == mode and written not in (None, "", b"")
 
 
 def migrate_preap_engagement_mode(params) -> int:
@@ -80,7 +93,7 @@ def migrate_preap_engagement_mode(params) -> int:
 
   params.put("NAPLateralEngagementMode", int(mode), block=True)
   written = params.get("NAPLateralEngagementMode")
-  if parse_engagement_mode(written) != mode:
+  if not _canonical_mode_readback_matches(written, mode):
     return 0
   params.put_bool("NAPLateralEngagementModeMigrated", True, block=True)
   return mode
@@ -110,8 +123,31 @@ def snapshot_param_list(params) -> list[dict[str, Any]]:
     "MadsMainCruiseAllowed",
     "MadsUnifiedEngagementMode",
     "MadsSteeringMode",
+    "TeslaMadsScreenButton",
+    "TeslaCoopSteering",
   ]
   return [{k: params.get(k)} for k in keys]
+
+
+def resolve_card_boot(params, environ=None) -> tuple[PreAPBootSelection, str | None]:
+  """Production card fingerprinting inputs. Does not inject a final get_car candidate."""
+  if environ is None:
+    environ = os.environ
+  bundle = params.get("CarPlatformBundle") or {}
+  if not isinstance(bundle, dict):
+    bundle = {}
+  bundle_platform = bundle.get("platform", None)
+  seed_preap_installer(params, bundle_platform)
+  selection = resolve_preap_boot_selection(
+    bundle_platform=bundle_platform,
+    env_fingerprint=environ.get("FINGERPRINT") or None,
+    nap_force_preap=params.get("NAPForcePreAP"),
+  )
+  if selection.lock_preap:
+    migrate_preap_engagement_mode(params)
+    force_mads_required(params)
+  fixed_fingerprint = selection.candidate if selection.candidate is not None else bundle_platform
+  return selection, fixed_fingerprint
 
 
 def new_preap_intent_epoch() -> int:
