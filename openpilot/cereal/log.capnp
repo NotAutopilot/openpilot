@@ -567,6 +567,9 @@ struct PandaState @0xa7649e2575e4591e {
   # reserved for forks building alternate experiences.
   controlsAllowedLateral @38 :Bool;
   controlsAllowedLongitudinal @39 :Bool;
+  steeringControlInhibited @40 :Bool;
+  stockCcReengageCounter @41 :UInt8;
+  stockCcReengageConfirmed @42 :Bool;
 
   enum FaultStatus {
     none @0;

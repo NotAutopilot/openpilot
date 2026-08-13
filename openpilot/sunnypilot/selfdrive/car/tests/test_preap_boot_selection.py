@@ -190,7 +190,7 @@ class TestPreAPBootSelection(unittest.TestCase):
     CI = _get_car(sel, params)
     self.assertEqual(CI.CP.carFingerprint, PREAP_PLATFORM)
     self.assertEqual(fingerprint, PREAP_PLATFORM)
-    self.assertEqual(CI.CP.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.noOutput)
+    self.assertEqual(CI.CP.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.teslaPreap)
 
     params = FakeParams({"CarPlatformBundle": {"platform": "TESLA_MODEL_3"}})
     sel, fingerprint = resolve_card_boot(params, environ={})
