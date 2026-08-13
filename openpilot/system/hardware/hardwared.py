@@ -141,6 +141,14 @@ def hw_state_thread(end_event, hw_queue):
     time.sleep(DT_HW)
 
 
+def ignition_from_panda_states(panda_states) -> bool:
+  return any(
+    panda_state.ignitionLine or panda_state.ignitionCan
+    for panda_state in panda_states
+    if panda_state.pandaType != log.PandaState.PandaType.unknown
+  )
+
+
 def hardware_thread(end_event, hw_queue) -> None:
   system_stats = LinuxSystemStats()
   pm = messaging.PubMaster(['deviceState'])
@@ -207,7 +215,7 @@ def hardware_thread(end_event, hw_queue) -> None:
     if sm.updated['pandaStates'] and len(pandaStates) > 0:
 
       # Set ignition based on any panda connected
-      onroad_conditions["ignition"] = any(ps.ignitionLine or ps.ignitionCan for ps in pandaStates if ps.pandaType != log.PandaState.PandaType.unknown)
+      onroad_conditions["ignition"] = ignition_from_panda_states(pandaStates)
 
       pandaState = pandaStates[0]
 

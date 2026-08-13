@@ -50,6 +50,7 @@ class TestPreAPSchemaContract(unittest.TestCase):
     self.assertEqual(cp["madsCapabilityContractVersion"], 13)
     self.assertEqual(cp["madsHandsOnPauseAvailable"], 14)
     self.assertEqual(cp["preapLateralEngagementMode"], 15)
+    self.assertEqual(cp["radarOffset"], 16)
 
     cs = _ordinals(custom.CarStateSP.schema)
     self.assertEqual(cs["speedLimit"], 0)
@@ -87,6 +88,7 @@ class TestPreAPSchemaContract(unittest.TestCase):
     cp.madsRequired = True
     cp.madsMainCruiseInputKind = structs.CarParamsSP.MadsMainCruiseInputKind.momentary
     cp.preapLateralEngagementMode = structs.CarParamsSP.PreapLateralEngagementMode.cruiseCoupled
+    cp.radarOffset = 1.25
     cp.neuralNetworkLateralControl.model.name = "BAR"
     raw = convert_to_capnp(cp).to_bytes()
     with custom.CarParamsSP.from_bytes(raw) as msg:
@@ -96,6 +98,7 @@ class TestPreAPSchemaContract(unittest.TestCase):
       self.assertEqual(msg.madsCapabilityContractVersion, 1)
       self.assertTrue(msg.madsRequired)
       self.assertEqual(msg.neuralNetworkLateralControl.model.name, "BAR")
+      self.assertAlmostEqual(msg.radarOffset, 1.25, places=4)
 
     capnp.remove_import_hook()
     old = capnp.load(str(FIXTURES / "custom_v0.capnp"))

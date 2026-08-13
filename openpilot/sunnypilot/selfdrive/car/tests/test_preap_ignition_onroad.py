@@ -5,6 +5,7 @@ from opendbc.car import structs
 from opendbc.safety.tests.common import CANPackerSafety
 from opendbc.safety.tests.libsafety import libsafety_py
 from openpilot.system.manager.process_config import only_onroad, procs
+from openpilot.system.hardware.hardwared import ignition_from_panda_states
 
 
 def _panda_state(*, ignition_can=False, ignition_line=False, panda_type=None):
@@ -15,9 +16,6 @@ def _panda_state(*, ignition_can=False, ignition_line=False, panda_type=None):
   return ps
 
 
-def _ignition_from_panda_states(panda_states):
-  # Production hardwared/manager predicate: any non-unknown panda with line or CAN ignition.
-  return any(ps.ignitionLine or ps.ignitionCan for ps in panda_states if ps.pandaType != log.PandaState.PandaType.unknown)
 
 
 class TestPreAPIgnitionOnroadContract(unittest.TestCase):
@@ -40,7 +38,7 @@ class TestPreAPIgnitionOnroadContract(unittest.TestCase):
     self.assertTrue(self.safety.get_ignition_can())
 
     ps = _panda_state(ignition_can=bool(self.safety.get_ignition_can()))
-    started = _ignition_from_panda_states([ps])
+    started = ignition_from_panda_states([ps])
     self.assertTrue(started)
 
     card = next(proc for proc in procs if proc.name == "card")
@@ -54,14 +52,14 @@ class TestPreAPIgnitionOnroadContract(unittest.TestCase):
     self.safety.ignition_can_hook(self._msg(3, 0))
     self.assertFalse(self.safety.get_ignition_can())
     ps = _panda_state(ignition_can=bool(self.safety.get_ignition_can()))
-    started = _ignition_from_panda_states([ps])
+    started = ignition_from_panda_states([ps])
     card = next(proc for proc in procs if proc.name == "card")
     self.assertFalse(only_onroad(started, None, structs.CarParams()))
     self.assertIs(card.should_run, only_onroad)
 
   def test_unknown_panda_cannot_start_card(self):
     ps = _panda_state(ignition_can=True, panda_type=log.PandaState.PandaType.unknown)
-    started = _ignition_from_panda_states([ps])
+    started = ignition_from_panda_states([ps])
     self.assertFalse(started)
     self.assertFalse(only_onroad(started, None, structs.CarParams()))
 

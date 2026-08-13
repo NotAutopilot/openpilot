@@ -5,6 +5,7 @@ from opendbc.car import structs
 from opendbc.safety.tests.common import CANPackerSafety
 from opendbc.safety.tests.libsafety import libsafety_py
 from openpilot.system.manager.process_config import only_onroad, procs
+from openpilot.system.hardware.hardwared import ignition_from_panda_states
 
 
 def _panda_state(ignition_can):
@@ -34,7 +35,7 @@ class TestPreAPIgnitionPandaState(unittest.TestCase):
     self.safety.ignition_can_hook(self._msg(1, 1))
     ps = _panda_state(bool(self.safety.get_ignition_can()))
     self.assertTrue(ps.ignitionCan)
-    started = any(p.ignitionLine or p.ignitionCan for p in [ps] if p.pandaType != log.PandaState.PandaType.unknown)
+    started = ignition_from_panda_states([ps])
     card = next(proc for proc in procs if proc.name == "card")
     self.assertTrue(only_onroad(started, None, structs.CarParams()))
     self.assertIs(card.should_run, only_onroad)

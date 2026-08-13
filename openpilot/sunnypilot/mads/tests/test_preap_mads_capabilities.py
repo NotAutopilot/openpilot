@@ -119,7 +119,7 @@ class TestPreAPMadsCapabilities(unittest.TestCase):
     mads.read_params()
     self.assertEqual(mads.main_enabled_toggle, frozen_main)
 
-  def test_version0_stateful_main_still_uses_params(self):
+  def test_nonrequired_version1_keeps_live_params(self):
     from openpilot.sunnypilot.mads.mads import ModularAssistiveDrivingSystem
     from openpilot.selfdrive.selfdrived.events import Events
     from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
@@ -127,8 +127,11 @@ class TestPreAPMadsCapabilities(unittest.TestCase):
     CP = structs.CarParams()
     CP.brand = "hyundai"
     CP_SP = structs.CarParamsSP()
+    CP_SP.madsCapabilityContractVersion = 1
+    CP_SP.madsRequired = False
+    values = {"Mads": True, "MadsMainCruiseAllowed": True, "MadsUnifiedEngagementMode": False}
     params = MagicMock()
-    params.get_bool.side_effect = lambda k: {"Mads": True, "MadsMainCruiseAllowed": True}.get(k, False)
+    params.get_bool.side_effect = lambda key: values.get(key, False)
     params.get.return_value = 0
     sd = MagicMock()
     sd.CP = CP
@@ -144,12 +147,19 @@ class TestPreAPMadsCapabilities(unittest.TestCase):
     sd.CS_prev = prev
     sd.sm = {"pandaStates": []}
     mads = ModularAssistiveDrivingSystem(sd)
-    self.assertFalse(mads.no_main_cruise)
+    self.assertTrue(mads.main_enabled_toggle)
+    self.assertFalse(mads.unified_engagement_mode)
+
+    values["MadsMainCruiseAllowed"] = False
+    values["MadsUnifiedEngagementMode"] = True
+    mads.read_params()
+    self.assertFalse(mads.main_enabled_toggle)
+    self.assertTrue(mads.unified_engagement_mode)
+
     cs = structs.CarState()
     cs.cruiseState.available = True
     mads.update(cs)
-    self.assertTrue(sd.events_sp.has(EventNameSP.lkasEnable))
-
+    self.assertFalse(sd.events_sp.has(EventNameSP.lkasEnable))
 
 
 if __name__ == "__main__":

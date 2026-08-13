@@ -50,9 +50,11 @@ class ModularAssistiveDrivingSystem:
 
     caps = resolve_mads_capabilities(self.CP, self.CP_SP, self.params)
     self.no_main_cruise = caps.no_main_cruise
-    self._freeze_mads_snapshot = getattr(self.CP_SP, "madsCapabilityContractVersion", 0) >= 1
+    self._freeze_mads_snapshot = (
+      caps.mads_required and getattr(self.CP_SP, "madsCapabilityContractVersion", 0) >= 1
+    )
 
-    # read params on init. Version-1 / required-MADS consume only the frozen typed snapshot.
+    # Required-MADS platforms consume only the frozen typed snapshot.
     self.enabled_toggle = True if caps.mads_required else self.params.get_bool("Mads")
     self.steering_mode_on_brake = read_steering_mode_param(self.CP, self.CP_SP, self.params)
     if self._freeze_mads_snapshot:

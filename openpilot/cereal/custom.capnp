@@ -374,6 +374,7 @@ struct CarParamsSP @0x80ae746ee2596b11 {
   madsCapabilityContractVersion @13 :UInt8;
   madsHandsOnPauseAvailable @14 :Bool;
   preapLateralEngagementMode @15 :PreapLateralEngagementMode;
+  radarOffset @16 :Float32;
 
   struct NeuralNetworkLateralControl {
     model @0 :Model;
