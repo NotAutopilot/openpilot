@@ -6,11 +6,6 @@ from opendbc.safety.tests.common import CANPackerSafety
 from opendbc.safety.tests.libsafety import libsafety_py
 from openpilot.system.manager.process_config import only_onroad, procs
 
-try:
-  libsafety_py.ffi.cdef("void ignition_can_1hz_tick(void);")
-except Exception:
-  pass
-
 
 def _panda_state(ignition_can):
   ps = log.PandaState.new_message()
