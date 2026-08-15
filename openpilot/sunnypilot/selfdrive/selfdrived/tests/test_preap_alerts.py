@@ -267,6 +267,26 @@ def test_from_snapshot_inactive_configured_pedal_timeout_alerts():
   assert select_preap_alerts(inputs) == (EventNameSP.pedalUnavailable,)
 
 
+def test_from_snapshot_active_configured_pedal_timeout_alerts():
+  from types import SimpleNamespace
+  from opendbc.car.tesla.preap.constants import PEDAL_FEEDBACK_TIMEOUT_STATE
+  from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
+  from openpilot.sunnypilot.selfdrive.selfdrived.preap_alerts import preap_alert_inputs_from_snapshot
+
+  CP = SimpleNamespace(carFingerprint="TESLA_MODEL_S_PREAP", radarUnavailable=False)
+  flags = int(TeslaFlagsSP.PREAP_PEDAL_PRESENT | TeslaFlagsSP.PREAP_PEDAL_CALIB_AVAILABLE)
+  CP_SP = SimpleNamespace(flags=flags)
+  cs_sp = SimpleNamespace(
+    pedalFeedbackState=PEDAL_FEEDBACK_TIMEOUT_STATE, pedalFeedbackCounter=3,
+    pedalAuthorityState=int(PedalAuthorityState.ACTIVE), pedalAuthorityFailed=False,
+  )
+  inputs = preap_alert_inputs_from_snapshot(CP, CP_SP, cs_sp)
+  assert inputs.pedal_timeout is True
+  assert inputs.pedal_available is False
+  assert inputs.pedal_authority_state == int(PedalAuthorityState.ACTIVE)
+  assert select_preap_alerts(inputs) == (EventNameSP.pedalUnavailable,)
+
+
 def test_hyundai_non_scc_does_not_take_preap_radar_error_path():
   from types import SimpleNamespace
   from opendbc.car.tesla.preap.boot import preap_radar_present
