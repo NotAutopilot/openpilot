@@ -959,3 +959,6 @@ if __name__ == '__main__':
     for p, alert_list in evs:
       print(f"  {repr(p)}:")
       print("   ", ', '.join(alert_list), "\n")
+
+# Pedal regen under-delivery alert. EventNameSP.pedalMaxRegen is registered at selfdrived start.
+from openpilot.selfdrive.selfdrived.preap_regen import PREAP_REGEN_ALERT  # noqa: F401

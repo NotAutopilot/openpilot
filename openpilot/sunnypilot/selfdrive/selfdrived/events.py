@@ -73,21 +73,6 @@ def speed_limit_pre_active_alert(CP: car.CarParams, CS: car.CarState, sm: messag
     Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleLow, .1)
 
 
-class EventsSP(EventsBase):
-  def __init__(self):
-    super().__init__()
-    self.event_counters = dict.fromkeys(EVENTS_SP.keys(), 0)
-
-  def get_events_mapping(self) -> dict[int, dict[str, Alert | AlertCallbackType]]:
-    return EVENTS_SP
-
-  def get_event_name(self, event: int):
-    return EVENT_NAME_SP[event]
-
-  def get_event_msg_type(self):
-    return custom.OnroadEventSP.Event
-
-
 EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
   # sunnypilot
   EventNameSP.lkasEnable: {
@@ -253,3 +238,22 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
       Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 0.1),
   },
 }
+
+# Register Pre-AP states before EventsSP snapshots the existing event keys.
+from openpilot.sunnypilot.selfdrive.selfdrived.preap_alerts import register_preap_alerts
+register_preap_alerts()
+
+
+class EventsSP(EventsBase):
+  def __init__(self):
+    super().__init__()
+    self.event_counters = dict.fromkeys(EVENTS_SP.keys(), 0)
+
+  def get_events_mapping(self) -> dict[int, dict[str, Alert | AlertCallbackType]]:
+    return EVENTS_SP
+
+  def get_event_name(self, event: int):
+    return EVENT_NAME_SP[event]
+
+  def get_event_msg_type(self):
+    return custom.OnroadEventSP.Event

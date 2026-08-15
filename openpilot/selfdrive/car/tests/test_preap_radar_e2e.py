@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -8,6 +8,7 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.tesla.interface import CarInterface
 from opendbc.car.tesla.preap.radar_interface import RadarInterface as PreAPRadarInterface
 from opendbc.car.tesla.values import CAR
+from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 from openpilot.selfdrive.controls.radard import RADAR_MEASUREMENT_TIMEOUT, RADAR_TO_CAMERA, RadarD
 
 
@@ -20,7 +21,7 @@ ROUTE_RADARD_PROOF = {
 
 # Minimal verified numeric vectors from the same window: contemporaneous
 # carState/modelV2 plus the first nonempty radarInterface cycle that fused.
-ROUTE_LIFECYCLE_EVENTS = [
+ROUTE_LIFECYCLE_EVENTS: list[dict[str, Any]] = [
   {
     "window": "lead_to_silence_reuse",
     "rel_ns": 580018953926,
@@ -98,7 +99,7 @@ class FakeRadarParser:
   def __init__(self):
     self.can_valid = True
     self.updated_addresses: set[int] = set()
-    self.vl = {
+    self.vl: dict[str, dict[str, Any]] = {
       "TeslaRadarSguInfo": {
         "RADC_HWFail": 0,
         "RADC_SGUFail": 0,
@@ -146,7 +147,9 @@ class RadarHarness:
   def __init__(self, v_ego=20.0):
     services = ["modelV2", "carState", "liveTracks"]
     self.sm = messaging.SubMaster(services, ignore_alive=services, ignore_avg_freq=services)
-    self.radar = RadarD(SimpleNamespace(brand="tesla"), SimpleNamespace(flags=0))
+    CP, CP_SP = _cp_pair()
+    CP_SP.flags |= int(TeslaFlagsSP.PREAP_RADAR_PRESENT)
+    self.radar = RadarD(CP, CP_SP)
     self.v_ego = v_ego
     self.frame = 0
 
@@ -166,6 +169,7 @@ class RadarHarness:
         slot.dRel = float(point.dRel)
         slot.yRel = float(point.yRel)
         slot.vRel = float(point.vRel)
+        slot.deprecated.measured = bool(point.deprecated.measured)
       messages.append(live)
     self.sm.update_msgs(time_s, [message.as_reader() for message in messages])
     self.radar.update(self.sm, self.sm["liveTracks"])
@@ -232,7 +236,9 @@ class TestRouteDerivedReplay:
 
     services = ["modelV2", "carState", "liveTracks"]
     sm = messaging.SubMaster(services, ignore_alive=services, ignore_avg_freq=services)
-    radar = RadarD(SimpleNamespace(brand="tesla"), SimpleNamespace(flags=0))
+    CP, CP_SP = _cp_pair()
+    CP_SP.flags |= int(TeslaFlagsSP.PREAP_RADAR_PRESENT)
+    radar = RadarD(CP, CP_SP)
     fused_ids = []
     saw_radar = False
     for event in ROUTE_LIFECYCLE_EVENTS:
@@ -270,6 +276,7 @@ class TestRouteDerivedReplay:
           dst.dRel = src["dRel"]
           dst.yRel = src["yRel"]
           dst.vRel = src["vRel"]
+          dst.deprecated.measured = True
         messages.append(message)
       if not messages:
         continue

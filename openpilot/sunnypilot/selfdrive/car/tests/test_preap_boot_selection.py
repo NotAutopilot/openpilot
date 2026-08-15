@@ -181,8 +181,8 @@ class TestPreAPBootSelection(unittest.TestCase):
   def test_napadaptiveaccel_not_in_boot_snapshot(self):
     keys = {k for d in snapshot_param_list(FakeParams()) for k in d}
     self.assertNotIn("NAPAdaptiveAccel", keys)
-    self.assertIn("NAPLateralEngagementMode", keys)
-    self.assertIn("NAPForcePreAP", keys)
+    assert "NAPLateralEngagementMode" in keys
+    assert "NAPForcePreAP" in keys
 
   def test_get_car_from_raw_bundle_and_params(self):
     params = FakeParams({"CarPlatformBundle": {"platform": PREAP_PLATFORM}})
@@ -208,6 +208,41 @@ class TestPreAPBootSelection(unittest.TestCase):
                      snapshot_param_list(params), False, sel.skip_fw_query)
         get_vin.assert_not_called()
         self.assertEqual(CI.CP.carFingerprint, "TESLA_MODEL_3")
+
+
+  def test_hostile_upgrade_forces_mads_and_disables_coop(self):
+    from opendbc.car.tesla.preap.constants import STALK_DOUBLE_PULL_MS
+    params = FakeParams({
+      "Mads": False,
+      "TeslaCoopSteering": True,
+      "CarPlatformBundle": {"platform": PREAP_PLATFORM},
+    })
+    sel, fingerprint = resolve_card_boot(params, environ={})
+    self.assertTrue(params.get("Mads"))
+    self.assertEqual(fingerprint, PREAP_PLATFORM)
+    self.assertEqual(STALK_DOUBLE_PULL_MS, 400)
+    CI = _get_car(sel, params)
+    self.assertTrue(CI.CP_SP.madsRequired)
+    self.assertFalse(CI.CP_SP.teslaCoopSteeringAvailable)
+    snap = snapshot_param_list(params)
+    merged = {k: v for row in snap for k, v in row.items()}
+    self.assertTrue(merged["Mads"])
+    self.assertFalse(merged["TeslaCoopSteering"])
+
+  def test_modern_tesla_absent_force_preap_unchanged(self):
+    params = FakeParams({
+      "Mads": False,
+      "TeslaCoopSteering": True,
+      "CarPlatformBundle": {"platform": "TESLA_MODEL_3"},
+    })
+    sel, fingerprint = resolve_card_boot(params, environ={})
+    self.assertIsNone(params.get("NAPForcePreAP"))
+    self.assertFalse(params.get("Mads"))
+    self.assertTrue(params.get("TeslaCoopSteering"))
+    self.assertEqual(fingerprint, "TESLA_MODEL_3")
+    CI = _get_car(sel, params)
+    self.assertEqual(CI.CP.carFingerprint, "TESLA_MODEL_3")
+    self.assertNotEqual(CI.CP.carFingerprint, PREAP_PLATFORM)
 
 
 if __name__ == "__main__":

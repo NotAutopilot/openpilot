@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import patch
+from typing import Any, cast
 
 from opendbc.car import structs
 from opendbc.car.tesla.preap.stock_cc import StockCcTransaction
@@ -196,13 +197,13 @@ def _card_with_producers(epoch, stock_cc):
   card.dynamic_experimental_control = False
   card.CS_prev = SimpleNamespace()
   card.CC_prev = SimpleNamespace(enabled=False)
-  card.v_cruise_helper = SimpleNamespace(
+  card.v_cruise_helper = cast(Any, SimpleNamespace(
     update_speed_limit_assist=lambda *a, **k: None,
     update_v_cruise=lambda *a, **k: None,
     v_cruise_kph=0.0,
     v_cruise_cluster_kph=0.0,
-  )
-  card.sm = _FakeSM()
+  ))
+  card.sm = cast(Any, _FakeSM())
   card.RI = SimpleNamespace(update=lambda _can: None)
 
   def ci_update(_can):

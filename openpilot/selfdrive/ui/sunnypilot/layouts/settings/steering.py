@@ -8,6 +8,7 @@ from opendbc.car.structs import car
 from enum import IntEnum
 
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.sunnypilot.selfdrive.car.preap_boot import is_preap_ui_platform
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.sunnypilot.widgets.list_view import toggle_item_sp, simple_button_item_sp, option_item_sp, LineSeparatorSP
 from openpilot.system.ui.widgets.scroller_tici import Scroller
@@ -127,13 +128,20 @@ class SteeringLayout(Widget):
     else:
       self._mads_toggle.set_description(f"<b>{self._mads_check_compat_desc}</b><br><br>{self._mads_base_desc}")
 
+    # Pre-AP forces and blocks the internal MADS master. Customize MADS stays reachable.
+    bundle = ui_state.params.get("CarPlatformBundle")
+    bundle_platform = bundle.get("platform", "") if isinstance(bundle, dict) else ""
+    is_preap = is_preap_ui_platform(bundle_platform, ui_state.CP)
     mads_required = ui_state.CP_SP is not None and bool(getattr(ui_state.CP_SP, "madsRequired", False))
-    if mads_required:
+    if is_preap or mads_required:
       self._mads_toggle.action_item.set_state(True)
       self._mads_toggle.action_item.set_enabled(False)
     else:
       self._mads_toggle.action_item.set_enabled(ui_state.is_offroad())
-    self._mads_settings_button.action_item.set_enabled(ui_state.is_offroad() and self._mads_toggle.action_item.get_state())
+    self._mads_toggle.set_visible(True)
+    self._mads_settings_button.action_item.set_enabled(
+      bool(self._mads_toggle.action_item.get_state() or mads_required or is_preap)
+    )
     self._blinker_control_options.set_visible(self._blinker_control_toggle.action_item.get_state())
     self._blinker_reengage_delay.set_visible(self._blinker_control_toggle.action_item.get_state())
 

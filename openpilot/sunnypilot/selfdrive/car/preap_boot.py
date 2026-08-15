@@ -8,10 +8,18 @@ from dataclasses import dataclass
 import os
 from typing import Any
 
-from opendbc.car.tesla.preap.boot import PREAP_PLATFORM, parse_engagement_mode
+from opendbc.car.tesla.preap.boot import PREAP_PLATFORM, is_preap_platform, parse_engagement_mode
 from opendbc.car.tesla.preap.constants import STALK_DOUBLE_PULL_MS
 
 assert STALK_DOUBLE_PULL_MS == 400
+
+
+def is_preap_ui_platform(bundle_platform: str = "", CP=None) -> bool:
+  """Settings visibility. Bundle platform wins when present; never HAS_VEHICLE_BUS."""
+  if bundle_platform:
+    return bundle_platform == PREAP_PLATFORM
+  return bool(CP is not None and is_preap_platform(CP))
+
 
 
 @dataclass(frozen=True)
@@ -105,6 +113,9 @@ def migrate_preap_engagement_mode(params) -> int:
 def force_mads_required(params) -> None:
   params.put_bool("Mads", True, block=True)
 
+def reject_unsupported_cooperative_steering(params) -> None:
+  params.put_bool("TeslaCoopSteering", False, block=True)
+
 
 def snapshot_param_list(params) -> list[dict[str, Any]]:
   keys = [
@@ -149,6 +160,7 @@ def resolve_card_boot(params, environ=None) -> tuple[PreAPBootSelection, str | N
   if selection.lock_preap:
     migrate_preap_engagement_mode(params)
     force_mads_required(params)
+    reject_unsupported_cooperative_steering(params)
   fixed_fingerprint = selection.candidate if selection.candidate is not None else bundle_platform
   return selection, fixed_fingerprint
 

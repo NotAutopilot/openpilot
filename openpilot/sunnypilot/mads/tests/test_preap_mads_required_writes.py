@@ -48,7 +48,7 @@ class TestRequiredMadsWrites(unittest.TestCase):
     params = FakeParams({"Mads": False})
     self.assertTrue(persist_required_mads(params, _required_cp_sp()))
     self.assertTrue(params.get_bool("Mads"))
-    self.assertIn(("Mads", True), params.puts)
+    assert ("Mads", True) in params.puts
 
   def test_reboot_uses_persistent_capabilities(self):
     params = FakeParams({

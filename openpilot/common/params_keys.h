@@ -244,7 +244,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"NAPRadarEnabled", {PERSISTENT | BACKUP, BOOL}},
     {"NAPRadarBehindNosecone", {PERSISTENT | BACKUP, BOOL}},
     {"NAPRadarOffset", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
-    {"NAPBrakeFactor", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
+    {"NAPScriptRunning", {CLEAR_ON_MANAGER_START, BOOL, "0"}},
+    {"NAPEpasRiskAccepted", {CLEAR_ON_MANAGER_START, BOOL, "0"}},
     {"ToyotaEnforceStockLongitudinal", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"ToyotaStopAndGoHack", {PERSISTENT | BACKUP, BOOL, "0"}},
 

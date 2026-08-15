@@ -352,6 +352,10 @@ struct OnroadEventSP @0xda96579883444c35 {
     speedLimitPending @22;
     e2eChime @23;
     laneChangeRoadEdge @24;
+    pedalMaxRegen @25;
+    pedalCruiseEnabled @26;
+    pedalCruiseDisabled @27;
+    pedalUnavailable @28;
   }
 }
 
@@ -483,6 +487,17 @@ struct CarStateSP @0xb86e6369214c01c8 {
   preapStockCcBoundCounter @6 :UInt8;
   preapStockCcHostDiConfirmed @7 :Bool;
   preapStockCcEnablePending @8 :Bool;
+  pedalMaxRegen @9 :Bool;
+  pedalLongActive @10 :Bool;
+  pedalAuthorityRequested @11 :Bool;
+  pedalAuthorityState @12 :UInt8;
+  pedalAuthorityAction @13 :UInt8;
+  pedalCommandCounter @14 :UInt8;
+  pedalFeedbackState @15 :UInt8;
+  pedalFeedbackCounter @16 :UInt8;
+  pedalCommandDi @17 :Float32;
+  pedalAuthorityFailed @18 :Bool;
+  vdasLimitedAccel @19 :Float32;
 
   enum PreapLateralIntent {
     none @0;

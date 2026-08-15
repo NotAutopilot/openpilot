@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import MagicMock
+from typing import Any, cast
 
 from openpilot.cereal import custom
 from opendbc.car import structs
@@ -129,7 +130,7 @@ class TestPreAPHandsOnPause(unittest.TestCase):
 
     import openpilot.sunnypilot.mads.mads as mads_mod
     orig = mads_mod.time.monotonic_ns
-    mads_mod.time.monotonic_ns = fake_ns
+    cast(Any, mads_mod.time).monotonic_ns = fake_ns
     try:
       cs = FakeCS(hands_on_level=2)
       sd.sm = FakeSM([_panda(True)])
@@ -167,7 +168,7 @@ class TestPreAPHandsOnPause(unittest.TestCase):
       mads.update_events(cs)
       self.assertFalse(mads._hands_on_steering_inhibited)
     finally:
-      mads_mod.time.monotonic_ns = orig
+      cast(Any, mads_mod.time).monotonic_ns = orig
 
   def test_epas_fault_is_not_hands_on_pause(self):
     mads, sd = make_mads()

@@ -15,6 +15,7 @@ from openpilot.common.simple_kalman import KF1D
 
 from opendbc.car import structs
 from opendbc.car.hyundai.values import HyundaiFlags
+from opendbc.car.tesla.preap.boot import preap_radar_present
 from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
 
 
@@ -44,6 +45,10 @@ ASSOCIATION_MIN_VELOCITY_STD = 1.0
 # repeated radar/vision fallback transitions.
 ASSOCIATION_MIN_SCORE = 0.001
 ASSOCIATION_SWITCH_MARGIN = 1.5
+
+
+def _preap_radar_hardening(CP: structs.CarParams, CP_SP: structs.CarParamsSP) -> bool:
+  return preap_radar_present(CP, CP_SP)
 
 
 class KalmanParams:
@@ -160,8 +165,8 @@ def is_association_candidate(v_ego: float, vision_d_rel: float, lead: capnp._Dyn
   return distance_compatible and lateral_compatible and velocity_compatible and score >= ASSOCIATION_MIN_SCORE
 
 
-def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, tracks: dict[int, Track],
-                          incumbent_track_id: int | None = None) -> Track | None:
+def match_vision_to_track_preap(v_ego: float, lead: capnp._DynamicStructReader, tracks: dict[int, Track],
+                                incumbent_track_id: int | None = None) -> Track | None:
   vision_d_rel = lead.x[0] - RADAR_TO_CAMERA
   scores = {track_id: association_score(v_ego, vision_d_rel, lead, track) for track_id, track in tracks.items()}
   eligible_track_ids = [
@@ -180,6 +185,29 @@ def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, tracks
   return tracks[challenger_track_id]
 
 
+def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, tracks: dict[int, Track]):
+  offset_vision_dist = lead.x[0] - RADAR_TO_CAMERA
+
+  def prob(c):
+    prob_d = laplacian_pdf(c.dRel, offset_vision_dist, lead.xStd[0])
+    prob_y = laplacian_pdf(c.yRel, -lead.y[0], lead.yStd[0])
+    prob_v = laplacian_pdf(c.vRel + v_ego, lead.v[0], lead.vStd[0])
+
+    # This isn't exactly right, but it's a good heuristic
+    return prob_d * prob_y * prob_v
+
+  track = max(tracks.values(), key=prob)
+
+  # if no 'sane' match is found return -1
+  # stationary radar points can be false positives
+  dist_sane = abs(track.dRel - offset_vision_dist) < max([(offset_vision_dist)*.25, 5.0])
+  vel_sane = (abs(track.vRel + v_ego - lead.v[0]) < 10) or (v_ego + track.vRel > 3)
+  if dist_sane and vel_sane:
+    return track
+  else:
+    return None
+
+
 def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: float, model_v_ego: float, lead_prob: float):
   lead_v_rel_pred = lead_msg.v[0] - model_v_ego
   return {
@@ -195,6 +223,34 @@ def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: floa
     "radar": False,
     "radarTrackId": -1,
   }
+
+
+def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capnp._DynamicStructReader,
+             model_v_ego: float, lead_prob: float, CP: structs.CarParams, CP_SP: structs.CarParamsSP,
+             low_speed_override: bool = True) -> dict[str, Any]:
+  # Determine leads, this is where the essential logic happens
+  if len(tracks) > 0 and ready and lead_prob > .5:
+    track = match_vision_to_track(v_ego, lead_msg, tracks)
+  else:
+    track = None
+
+  lead_dict = {'present': False}
+  if track is not None:
+    lead_dict = track.get_RadarState(lead_prob)
+    lead_dict = get_custom_yrel(CP, CP_SP, lead_dict, lead_msg)
+  elif (track is None) and ready and (lead_prob > .5):
+    lead_dict = get_RadarState_from_vision(lead_msg, v_ego, model_v_ego, lead_prob)
+
+  if low_speed_override:
+    low_speed_tracks = [c for c in tracks.values() if c.potential_low_speed_lead(v_ego)]
+    if len(low_speed_tracks) > 0:
+      closest_track = min(low_speed_tracks, key=lambda c: c.dRel)
+
+      # Only choose new track if it is actually closer than the previous one
+      if (not lead_dict['present']) or (closest_track.dRel < lead_dict['dRel']):
+        lead_dict = closest_track.get_RadarState()
+
+  return lead_dict
 
 
 def get_custom_yrel(CP: structs.CarParams, CP_SP: structs.CarParamsSP, lead_dict: dict[str, Any],
@@ -217,7 +273,7 @@ class LeadTrackAssociation:
       self.incumbent_track_id = None
 
     if tracks and ready and lead_prob > .5:
-      track = match_vision_to_track(v_ego, lead_msg, tracks, self.incumbent_track_id)
+      track = match_vision_to_track_preap(v_ego, lead_msg, tracks, self.incumbent_track_id)
     else:
       track = None
 
@@ -244,13 +300,12 @@ class RadarD:
   def __init__(self, CP: structs.CarParams, CP_SP: structs.CarParamsSP, delay: float = 0.0):
     self.CP = CP
     self.CP_SP = CP_SP
+    self.preap_radar = _preap_radar_hardening(CP, CP_SP)
 
     self.current_time = 0.0
 
     self.tracks: dict[int, Track] = {}
-    self.kalman_params = KalmanParams(RADAR_DT)
-    self.last_radar_update_time: float | None = None
-    self.last_live_tracks_healthy = False
+    self.kalman_params = KalmanParams(RADAR_DT if self.preap_radar else DT_MDL)
     self.lead_prob_filters = [FirstOrderFilter(0.0, 0.2, DT_MDL) for _ in range(2)]
 
     self.v_ego = 0.0
@@ -261,10 +316,72 @@ class RadarD:
     self.radar_state_valid = False
 
     self.ready = False
-    self.lead_one_association = LeadTrackAssociation(low_speed_override=True)
-    self.lead_two_association = LeadTrackAssociation(low_speed_override=False)
+    if self.preap_radar:
+      self.last_radar_update_time: float | None = None
+      self.last_live_tracks_healthy = False
+      self.lead_one_association = LeadTrackAssociation(low_speed_override=True)
+      self.lead_two_association = LeadTrackAssociation(low_speed_override=False)
 
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
+    if self.preap_radar:
+      self._update_preap(sm, rr)
+    else:
+      self._update_default(sm, rr)
+
+  def _update_default(self, sm: messaging.SubMaster, rr: car.RadarData):
+    self.ready = sm.seen['modelV2']
+    self.current_time = 1e-9*max(sm.logMonoTime.values())
+
+    if sm.recv_frame['carState'] != self.last_v_ego_frame:
+      self.v_ego = sm['carState'].vEgo
+      self.v_ego_hist.append(self.v_ego)
+      self.last_v_ego_frame = sm.recv_frame['carState']
+
+    ar_pts = {pt.trackId: [pt.dRel, pt.yRel, pt.vRel] for pt in rr.points}
+
+    # *** remove missing points from meta data ***
+    for ids in list(self.tracks.keys()):
+      if ids not in ar_pts:
+        self.tracks.pop(ids, None)
+
+    # *** compute the tracks ***
+    for ids in ar_pts:
+      rpt = ar_pts[ids]
+
+      # align v_ego by a fixed time to align it with the radar measurement
+      v_lead = rpt[2] + self.v_ego_hist[0]
+
+      # create the track if it doesn't exist or it's a new track
+      if ids not in self.tracks:
+        self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
+      self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead)
+
+    # *** publish radarState ***
+    self.radar_state_valid = sm.all_checks()
+    self.radar_state = log.RadarState.new_message()
+    self.radar_state.mdMonoTime = sm.logMonoTime['modelV2']
+    self.radar_state.radarErrors = rr.errors
+
+    if len(sm['modelV2'].velocity.x):
+      model_v_ego = sm['modelV2'].velocity.x[0]
+    else:
+      model_v_ego = self.v_ego
+    leads_v3 = sm['modelV2'].leadsV3
+    if len(leads_v3) > 1:
+      for i in range(2):
+        # Asymmetric filter on lead prob to keep lead when uncertain
+        lead_prob = leads_v3[i].prob
+        if lead_prob > self.lead_prob_filters[i].x:
+          self.lead_prob_filters[i].x = lead_prob
+        else:
+          self.lead_prob_filters[i].update(lead_prob)
+
+      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x,
+                                          self.CP, self.CP_SP, low_speed_override=True)
+      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, self.lead_prob_filters[1].x,
+                                          self.CP, self.CP_SP, low_speed_override=False)
+
+  def _update_preap(self, sm: messaging.SubMaster, rr: car.RadarData):
     self.ready = sm.seen['modelV2']
     self.current_time = 1e-9*max(sm.logMonoTime.values())
 
@@ -289,7 +406,7 @@ class RadarD:
         self.last_radar_update_time = radar_update_time
         self.last_live_tracks_healthy = True
         self.kalman_params = KalmanParams(radar_dt)
-        ar_pts = {pt.trackId: [pt.dRel, pt.yRel, pt.vRel] for pt in rr.points}
+        ar_pts = {pt.trackId: [pt.dRel, pt.yRel, pt.vRel, pt.deprecated.measured] for pt in rr.points}
 
         for ids in list(self.tracks.keys()):
           if ids not in ar_pts:
@@ -300,7 +417,7 @@ class RadarD:
           v_lead = rpt[2] + self.v_ego_hist[0]
           if ids not in self.tracks:
             self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
-          self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, kalman_params=self.kalman_params)
+          self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, measured=bool(rpt[3]), kalman_params=self.kalman_params)
     elif self.last_radar_update_time is None or self.current_time - self.last_radar_update_time > RADAR_MEASUREMENT_TIMEOUT:
       self.tracks.clear()
       self.lead_one_association.incumbent_track_id = None

@@ -152,9 +152,19 @@ class TestSchemaStructure:
 
 class TestSchemaCoverage:
   def test_all_schema_keys_exist_in_params(self, schema, all_param_keys):
-    """Schema keys must exist in Params().all_keys()."""
+    """Schema keys must exist in Params().all_keys().
+
+    Blocked info widgets whose keys are declared capability fields are the
+    existing read-only status pattern and are not Params.
+    """
     schema_keys = collect_all_keys(schema)
-    missing = schema_keys - all_param_keys
+    preap_status_info_keys = {
+      "tesla_preap_active_mode",
+      "tesla_preap_longitudinal_path",
+      "tesla_preap_pedal_health",
+      "tesla_preap_radar_health",
+    }
+    missing = schema_keys - all_param_keys - preap_status_info_keys
     assert not missing, f"Schema references keys not in Params: {missing}"
 
   def test_all_capability_fields_are_declared(self, schema):

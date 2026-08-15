@@ -32,9 +32,8 @@ macros:
       condition: {type: capability, field: device_type, equals: mici}
 
   # Mirrors selfdrive/ui/sunnypilot/layouts/.../mads_settings.py:_mads_limited_settings()
-  # Rivian + Tesla-without-vehicle-bus get the limited MADS UI (3-toggle subset).
-  # On those platforms these toggles are disabled — full MADS settings are
-  # only writable on platforms NOT in the limited-set.
+  # Rivian + Tesla-without-vehicle-bus (AP) get the limited MADS UI (Disengage/UEM).
+  # tesla_preap is not listed here; native _mads_limited_settings() carves PREAP_PLATFORM.
   mads_full_platforms:
     - type: not
       condition:
@@ -47,8 +46,7 @@ macros:
               - type: not
                 condition: {type: capability, field: tesla_has_vehicle_bus, equals: true}
 
-  # Inverse of mads_full_platforms: present only on the limited platforms.
-  # Useful for "show this only on rivian/tesla-no-bus" toggles.
+  # Inverse of mads_full_platforms: Rivian / Tesla-no-bus AP. Pre-AP carve is native-only.
   mads_limited_platforms:
     - type: any
       conditions:
@@ -58,6 +56,23 @@ macros:
             - {type: capability, field: brand, equals: tesla}
             - type: not
               condition: {type: capability, field: tesla_has_vehicle_bus, equals: true}
+
+  tesla_preap:
+    - {type: capability, field: tesla_preap, equals: true}
+
+  not_tesla_preap:
+    - type: not
+      condition: {type: capability, field: tesla_preap, equals: true}
+
+  tesla_preap_pedal:
+    - {type: capability, field: tesla_preap_pedal, equals: true}
+
+  tesla_preap_radar:
+    - {type: capability, field: tesla_preap_radar, equals: true}
+
+  tesla_preap_independent_brake:
+    - {type: capability, field: tesla_preap, equals: true}
+    - {type: capability, field: tesla_preap_independent_brake, equals: true}
 
   # Hide on sunnypilot release branches (is_release is hardcoded False everywhere; is_sp_release is the active gate).
   release_branches_hide:

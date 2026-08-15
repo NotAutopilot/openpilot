@@ -32,9 +32,21 @@ msgstr "24時間365日のLTE接続"
 msgid "2G"
 msgstr "2G"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "3-Finger"
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "3G"
 msgstr "3G"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "4-Finger"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "5-Finger"
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "5G"
@@ -52,7 +64,7 @@ msgstr "<br><br>ステアリング遅延のキャリブレーションは{}%完�
 msgid "ADD"
 msgstr "追加"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "APN Setting"
 msgstr "APN設定"
 
@@ -60,7 +72,11 @@ msgstr "APN設定"
 msgid "Acknowledge Excessive Actuation"
 msgstr "過度な作動を承認"
 
-#: system/ui/widgets/network.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Active Engagement Mode"
+msgstr ""
+
+#: openpilot/system/ui/widgets/network.py
 msgid "Advanced"
 msgstr "詳細設定"
 
@@ -71,6 +87,10 @@ msgstr "アグレッシブ"
 #: openpilot/selfdrive/ui/layouts/onboarding.py
 msgid "Agree"
 msgstr "同意する"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Allows the driver to provide limited steering input while openpilot is engaged."
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Always-On Driver Monitoring"
@@ -92,10 +112,18 @@ msgstr "本当にキャリブレーションをリセットしますか？"
 msgid "Are you sure you want to uninstall?"
 msgstr "本当にアンインストールしますか？"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Attenuate radar mounted behind the nosecone. Local and offroad only."
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/onboarding.py
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Back"
 msgstr "戻る"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Backup EPAS"
+msgstr ""
 
 #: openpilot/selfdrive/ui/widgets/prime.py
 msgid "Become a comma prime member at connect.comma.ai"
@@ -104,6 +132,22 @@ msgstr "connect.comma.aiで comma prime に加入"
 #: openpilot/selfdrive/ui/widgets/pairing_dialog.py
 msgid "Bookmark connect.comma.ai to your home screen to use it like an app"
 msgstr "connect.comma.aiをホーム画面に追加してアプリのように使いましょう"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Bosch Radar"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Bus 0"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Bus 2"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "CAN bus for the Comma Pedal. Local and offroad only."
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "CHANGE"
@@ -118,22 +162,30 @@ msgid "CHILL MODE ON"
 msgstr "チルモードON"
 
 #: openpilot/selfdrive/ui/layouts/sidebar.py
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "CONNECT"
 msgstr "接続"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "CONNECTING..."
 msgstr "接続中..."
 
-#: system/ui/widgets/confirm_dialog.py
-#: system/ui/widgets/keyboard.py
-#: system/ui/widgets/network.py
-#: system/ui/widgets/option_dialog.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Calibrate Pedal"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Calibrate Radar"
+msgstr ""
+
+#: openpilot/system/ui/widgets/confirm_dialog.py
+#: openpilot/system/ui/widgets/keyboard.py
+#: openpilot/system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/option_dialog.py
 msgid "Cancel"
 msgstr "キャンセル"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Cellular Metered"
 msgstr "従量課金の携帯回線"
 
@@ -145,7 +197,7 @@ msgstr "言語を変更"
 msgid "Changing this setting will restart sunnypilot if the car is powered on."
 msgstr ""
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
+#: openpilot/system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
 msgid "Choose your sponsorship tier and confirm your support"
 msgstr ""
 
@@ -156,6 +208,14 @@ msgstr "\"add new device\"を押して右側のQRコードをスキャン"
 #: openpilot/selfdrive/ui/widgets/offroad_alerts.py
 msgid "Close"
 msgstr "閉じる"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Cooperative Steering (Beta)"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Cruise Coupled"
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/software.py
 msgid "Current Version"
@@ -180,6 +240,10 @@ msgstr "開発者"
 #: openpilot/selfdrive/ui/layouts/settings/settings.py
 msgid "Device"
 msgstr "デバイス"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Diagnose Radar"
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Disengage on Accelerator Pedal"
@@ -217,9 +281,43 @@ msgstr "ドライバーカメラ"
 msgid "Driving Personality"
 msgstr "走行性格"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "EDIT"
 msgstr "編集"
+
+#: openpilot/sunnypilot/selfdrive/car/tesla/preap/tools/instructions.py
+msgid ""
+"EPAS Firmware Backup\n"
+"\n"
+"Extracts stock EPAS firmware. No flashing is performed.\n"
+"\n"
+"POWER THE CAR ON before starting.\n"
+"\n"
+"Press START to extract the backup."
+msgstr ""
+
+#: openpilot/sunnypilot/selfdrive/car/tesla/preap/tools/instructions.py
+msgid ""
+"EPAS Firmware Flash\n"
+"\n"
+"WARNING: This modifies steering-system firmware.\n"
+"\n"
+"POWER THE CAR ON, stay in Park, do not drive.\n"
+"Power loss during the flash can brick EPAS.\n"
+"\n"
+"Press START only if you accept these risks."
+msgstr ""
+
+#: openpilot/sunnypilot/selfdrive/car/tesla/preap/tools/instructions.py
+msgid ""
+"EPAS Firmware Restore\n"
+"\n"
+"WARNING: This reflashes steering-system firmware from the stock image.\n"
+"\n"
+"POWER THE CAR ON, stay in Park, do not drive.\n"
+"\n"
+"Press START only if you accept these risks."
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "ERROR"
@@ -233,7 +331,7 @@ msgstr "ETH"
 msgid "EXPERIMENTAL MODE ON"
 msgstr "実験モードON"
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
+#: openpilot/system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
 msgid "Early Access: Become a sunnypilot Sponsor"
 msgstr ""
 
@@ -242,15 +340,27 @@ msgstr ""
 msgid "Enable"
 msgstr "有効化"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Enable \"Always Offroad\" in Device panel, or turn vehicle off to change."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Enable \"Always Offroad\" in Device panel, or turn vehicle off to toggle."
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "Enable ADB"
 msgstr "ADBを有効化"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Enable Comma Pedal hardware. Local and offroad only."
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Enable Lane Departure Warnings"
 msgstr "車線逸脱警報を有効化"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Enable Roaming"
 msgstr "ローミングを有効化"
 
@@ -258,12 +368,16 @@ msgstr "ローミングを有効化"
 msgid "Enable SSH"
 msgstr "SSHを有効化"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Enable Tethering"
 msgstr "テザリングを有効化"
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Enable driver monitoring even when sunnypilot is not engaged."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Enable stock Bosch radar. Local and offroad only."
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
@@ -274,23 +388,23 @@ msgstr ""
 msgid "Enable the sunnypilot longitudinal control (alpha) toggle to allow Experimental mode."
 msgstr ""
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Enter APN"
 msgstr "APNを入力"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Enter SSID"
 msgstr "SSIDを入力"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Enter new tethering password"
 msgstr "新しいテザリングのパスワードを入力"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Enter password"
 msgstr "パスワードを入力"
 
-#: system/ui/sunnypilot/widgets/tree_dialog.py
+#: openpilot/system/ui/sunnypilot/widgets/tree_dialog.py
 msgid "Enter search query"
 msgstr ""
 
@@ -298,7 +412,7 @@ msgstr ""
 msgid "Enter your GitHub username"
 msgstr "GitHubユーザー名を入力"
 
-#: system/ui/widgets/list_view.py
+#: openpilot/system/ui/widgets/list_view.py
 msgid "Error"
 msgstr "エラー"
 
@@ -310,7 +424,7 @@ msgstr "実験モード"
 msgid "Experimental mode is currently unavailable on this car since the car's stock ACC is used for longitudinal control."
 msgstr "この車では縦制御に純正ACCを使用するため、現在実験モードは利用できません。"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "FORGETTING..."
 msgstr "削除中..."
 
@@ -326,15 +440,27 @@ msgstr "大量配信"
 msgid "Firehose Mode"
 msgstr "Firehoseモード"
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Flash EPAS"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Follow Distance"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Follow distance (1=closest, 7=farthest). Writes apply live."
+msgstr ""
+
+#: openpilot/system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
 msgid "Follow the prompts to complete the pairing process"
 msgstr ""
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Forget"
 msgstr "削除"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Forget Wi-Fi Network \"{}\"?"
 msgstr "Wi‑Fiネットワーク「{}」を削除しますか？"
 
@@ -350,7 +476,11 @@ msgstr "スマートフォンで https://connect.comma.ai にアクセス"
 msgid "HIGH"
 msgstr "高温"
 
-#: system/ui/widgets/network.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Hardware settings are only available offroad."
+msgstr ""
+
+#: openpilot/system/ui/widgets/network.py
 msgid "Hidden Network"
 msgstr "非公開ネットワーク"
 
@@ -358,19 +488,23 @@ msgstr "非公開ネットワーク"
 msgid "INSTALL"
 msgstr "インストール"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "IP Address"
 msgstr "IPアドレス"
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
+#: openpilot/system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
 msgid "If sponsorship status was not updated, please contact a moderator on the community forum at https://community.sunnypilot.ai"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Independent"
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/software.py
 msgid "Install Update"
 msgstr "アップデートをインストール"
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
+#: openpilot/system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
 msgid "Join our Community Forum at https://community.sunnypilot.ai and reach out to a moderator if you have issues"
 msgstr ""
 
@@ -386,13 +520,33 @@ msgstr "読み込み中"
 msgid "LTE"
 msgstr "LTE"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Lateral Engagement Mode"
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "Lateral Maneuver Mode"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Lateral offset in meters added to radar yRel. Negative shifts leads left of the current radar reading; positive shifts right. Local and offroad only."
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "Longitudinal Maneuver Mode"
 msgstr "縦制御マヌーバーモード"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Longitudinal Only"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Longitudinal Path"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "MADS Screen Activation"
+msgstr ""
 
 #: openpilot/selfdrive/ui/onroad/hud_renderer.py
 msgid "MAX"
@@ -422,19 +576,31 @@ msgstr "ユーザー'{}'のSSH鍵が見つかりません"
 msgid "No release notes available."
 msgstr "リリースノートはありません。"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "None"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Note: Setting this to Off will reset your MADS settings to default."
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "OFFLINE"
 msgstr "オフライン"
 
-#: openpilot/selfdrive/ui/layouts/sidebar.py
-#: system/ui/widgets/confirm_dialog.py
-#: system/ui/widgets/html_render.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+#: openpilot/system/ui/widgets/confirm_dialog.py
+#: openpilot/system/ui/widgets/html_render.py
 msgid "OK"
 msgstr "OK"
 
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "ONLINE"
 msgstr "オンライン"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Off"
+msgstr ""
 
 #: openpilot/selfdrive/ui/widgets/setup.py
 msgid "Open"
@@ -464,7 +630,7 @@ msgstr "デバイスをペアリング"
 msgid "Pair device"
 msgstr "デバイスをペアリング"
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
+#: openpilot/system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
 msgid "Pair your GitHub account"
 msgstr ""
 
@@ -477,6 +643,40 @@ msgstr "デバイスをあなたの comma アカウントにペアリング"
 msgid "Pair your device with comma connect (connect.comma.ai) and claim your comma prime offer."
 msgstr "デバイスを comma connect（connect.comma.ai）とペアリングして、comma prime 特典を受け取りましょう。"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Pedal"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Pedal CAN Bus"
+msgstr ""
+
+#: openpilot/sunnypilot/selfdrive/car/tesla/preap/tools/instructions.py
+msgid ""
+"Pedal Calibration\n"
+"\n"
+"This calibrates the comma pedal interceptor for Pre-AP Tesla Model S.\n"
+"\n"
+"PRECONDITIONS:\n"
+"  1. Device must be offroad\n"
+"  2. Car must be ON, Neutral, brake held\n"
+"  3. Do NOT press the accelerator\n"
+"\n"
+"Press START to confirm and begin."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Pedal Health"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Pedal Interceptor"
+msgstr ""
+
+#: openpilot/sunnypilot/selfdrive/selfdrived/preap_alerts.py
+msgid "Pedal Unavailable"
+msgstr ""
+
 #: openpilot/selfdrive/ui/widgets/setup.py
 msgid "Please connect to Wi-Fi to complete initial pairing"
 msgstr "初回ペアリングを完了するにはWi‑Fiに接続してください"
@@ -485,11 +685,19 @@ msgstr "初回ペアリングを完了するにはWi‑Fiに接続してくだ�
 msgid "Power Off"
 msgstr "電源オフ"
 
-#: system/ui/widgets/network.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Pre-AP stalk engagement. Onroad writes apply on the next drive."
+msgstr ""
+
+#: openpilot/sunnypilot/selfdrive/selfdrived/preap_alerts.py
+msgid "Press Brake to Slow Down"
+msgstr ""
+
+#: openpilot/system/ui/widgets/network.py
 msgid "Prevent large data uploads when on a metered Wi-Fi connection"
 msgstr "従量課金のWi‑Fi接続時は大きなデータのアップロードを抑制"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Prevent large data uploads when on a metered cellular connection"
 msgstr "従量課金の携帯回線接続時は大きなデータのアップロードを抑制"
 
@@ -513,7 +721,58 @@ msgstr "リセット"
 msgid "REVIEW"
 msgstr "確認"
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Radar Behind Nosecone"
+msgstr ""
+
+#: openpilot/sunnypilot/selfdrive/car/tesla/preap/tools/instructions.py
+msgid ""
+"Radar Calibration\n"
+"\n"
+"Displays filtered Bosch radar points to help align the sensor.\n"
+"\n"
+"PRECONDITIONS:\n"
+"  1. Device must be offroad\n"
+"  2. Vehicle parked with a target 3-10m ahead\n"
+"\n"
+"Press START to confirm and begin."
+msgstr ""
+
+#: openpilot/sunnypilot/selfdrive/car/tesla/preap/tools/instructions.py
+msgid ""
+"Radar Diagnosis\n"
+"\n"
+"Reads Bosch radar health without changing panda safety mode.\n"
+"\n"
+"Press START to begin."
+msgstr ""
+
+#: openpilot/sunnypilot/selfdrive/selfdrived/preap_alerts.py
+msgid "Radar Error: Restart the Car"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Radar Health"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Radar Lateral Offset"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Radar Lateral Offset (m)"
+msgstr ""
+
+#: openpilot/sunnypilot/selfdrive/car/tesla/preap/tools/instructions.py
+msgid ""
+"Radar Test\n"
+"\n"
+"Displays live Bosch radar tracks for installation checks.\n"
+"\n"
+"Press START to begin."
+msgstr ""
+
+#: openpilot/system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
 msgid "Re-enter the \"sunnylink\" panel to verify sponsorship status"
 msgstr ""
 
@@ -540,6 +799,10 @@ msgstr "マイク音声を記録してアップロード"
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Record and store microphone audio while driving. The audio will be included in the dashcam video in comma connect."
 msgstr "走行中にマイク音声を記録・保存します。音声は comma connect のドライブレコーダー動画に含まれます。"
+
+#: openpilot/sunnypilot/selfdrive/selfdrived/preap_alerts.py
+msgid "Regen Limit Reached"
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "Regulatory"
@@ -569,6 +832,10 @@ msgstr "リセット"
 msgid "Reset Calibration"
 msgstr "キャリブレーションをリセット"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Restore EPAS"
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "Review Training Guide"
 msgstr "トレーニングガイドを確認"
@@ -585,23 +852,23 @@ msgstr "選択"
 msgid "SSH Keys"
 msgstr "SSH鍵"
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
+#: openpilot/system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
 msgid "Scan the QR code to login to your GitHub account"
 msgstr ""
 
-#: system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
+#: openpilot/system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
 msgid "Scan the QR code to visit sunnyhaibin's GitHub Sponsors page"
 msgstr ""
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Scanning Wi-Fi networks..."
 msgstr "Wi‑Fiネットワークを検索中..."
 
-#: system/ui/sunnypilot/widgets/tree_dialog.py
+#: openpilot/system/ui/sunnypilot/widgets/tree_dialog.py
 msgid "Search"
 msgstr ""
 
-#: system/ui/widgets/option_dialog.py
+#: openpilot/system/ui/widgets/option_dialog.py
 msgid "Select"
 msgstr "選択"
 
@@ -612,6 +879,10 @@ msgstr "ブランチを選択"
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "Select a language"
 msgstr "言語を選択"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Selecting a higher finger count may reduce accidental activations."
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "Serial"
@@ -629,6 +900,18 @@ msgstr "ソフトウェア"
 msgid "Standard"
 msgstr "スタンダード"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Start"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Stock DI"
+msgstr ""
+
+#: openpilot/sunnypilot/selfdrive/selfdrived/preap_alerts.py
+msgid "Stock cruise required"
+msgstr ""
+
 #: openpilot/selfdrive/ui/onroad/alert_renderer.py
 msgid "System Unresponsive"
 msgstr "システムが応答しません"
@@ -645,13 +928,25 @@ msgstr "温度"
 msgid "Target Branch"
 msgstr "対象ブランチ"
 
-#: system/ui/widgets/network.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Test Radar"
+msgstr ""
+
+#: openpilot/system/ui/widgets/network.py
 msgid "Tethering Password"
 msgstr "テザリングのパスワード"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "This allows the use of full MADS functionality when enabled."
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/settings.py
 msgid "Toggles"
 msgstr "トグル"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Tools are only available offroad."
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "UI Debug Mode"
@@ -664,6 +959,14 @@ msgstr "アンインストール"
 #: openpilot/selfdrive/ui/layouts/home.py
 msgid "UPDATE"
 msgstr "更新"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Uncalibrated"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Unconfigured"
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/software.py
 msgid "Uninstall"
@@ -689,6 +992,10 @@ msgstr "ドライバー向きカメラのデータをアップロードしてモ
 msgid "Use Metric System"
 msgstr "メートル法を使用"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Use a multi-finger press on the infotainment screen to toggle MADS."
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "VEHICLE"
 msgstr "車両"
@@ -713,11 +1020,11 @@ msgstr ""
 msgid "Wi-Fi"
 msgstr "Wi‑Fi"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Wi-Fi Network Metered"
 msgstr "Wi‑Fiネットワーク（従量課金）"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "Wrong password"
 msgstr "パスワードが違います"
 
@@ -741,7 +1048,7 @@ msgstr "チェック中..."
 msgid "comma prime"
 msgstr "comma prime"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "default"
 msgstr "既定"
 
@@ -761,7 +1068,7 @@ msgstr "アップデートの確認に失敗しました"
 msgid "finalizing update..."
 msgstr "アップデートを終了しています..."
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "for \"{}\""
 msgstr "「{}」向け"
 
@@ -769,7 +1076,7 @@ msgstr "「{}」向け"
 msgid "km/h"
 msgstr "km/h"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "leave blank for automatic configuration"
 msgstr "自動設定の場合は空欄のままにしてください"
 
@@ -777,7 +1084,7 @@ msgstr "自動設定の場合は空欄のままにしてください"
 msgid "left"
 msgstr "左"
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "metered"
 msgstr "従量"
 
@@ -813,7 +1120,7 @@ msgstr ""
 msgid "sunnypilot requires the device to be mounted within 4° left or right and within 5° up or 9° down."
 msgstr ""
 
-#: system/ui/widgets/network.py
+#: openpilot/system/ui/widgets/network.py
 msgid "unmetered"
 msgstr "非従量"
 
@@ -852,11 +1159,6 @@ msgstr[0] "{}時間前"
 msgid "{} minute ago"
 msgid_plural "{} minutes ago"
 msgstr[0] "{}分前"
-
-#: openpilot/selfdrive/ui/layouts/settings/firehose.py
-msgid "{} segment of your driving is in the training dataset so far."
-msgid_plural "{} segments of your driving is in the training dataset so far."
-msgstr[0] "これまでにあなたの走行の{}セグメントが学習データセットに含まれています。"
 
 #: openpilot/selfdrive/ui/widgets/prime.py
 msgid "✓ SUBSCRIBED"

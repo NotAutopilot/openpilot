@@ -33,9 +33,19 @@
               "label": "MADS Settings",
               "trigger_key": "Mads",
               "trigger_condition": {
-                "type": "param",
-                "key": "Mads",
-                "equals": true
+                "type": "any",
+                "conditions": [
+                  {
+                    "type": "param",
+                    "key": "Mads",
+                    "equals": true
+                  },
+                  {
+                    "type": "capability",
+                    "field": "tesla_preap",
+                    "equals": true
+                  }
+                ]
               },
               "items": [
                 {
@@ -43,6 +53,16 @@
                   "widget": "toggle",
                   "title": "Toggle with Main Cruise",
                   "description": "Note: For vehicles without LFA/LKAS button, disabling this will prevent lateral control engagement.",
+                  "visibility": [
+                    {
+                      "type": "not",
+                      "condition": {
+                        "type": "capability",
+                        "field": "tesla_preap",
+                        "equals": true
+                      }
+                    }
+                  ],
                   "enablement": [
                     {
                       "type": "offroad_only"
@@ -85,6 +105,16 @@
                   "widget": "toggle",
                   "title": "Unified Engagement Mode (UEM)",
                   "description": "Engage lateral and longitudinal control with cruise control engagement. Note: Once lateral control is engaged via UEM, it will remain engaged until it is manually disabled via the MADS button or car shut off.",
+                  "visibility": [
+                    {
+                      "type": "not",
+                      "condition": {
+                        "type": "capability",
+                        "field": "tesla_preap",
+                        "equals": true
+                      }
+                    }
+                  ],
                   "enablement": [
                     {
                       "type": "offroad_only"
@@ -125,43 +155,54 @@
                 {
                   "key": "MadsSteeringMode",
                   "widget": "multiple_button",
+                  "needs_onroad_cycle": true,
                   "title": "Steering Mode on Brake Pedal",
-                  "description": "Choose how Automatic Lane Centering (ALC) behaves after the brake pedal is manually pressed in sunnypilot.",
+                  "description": "Choose how Automatic Lane Centering (ALC) behaves after the brake pedal is manually pressed in sunnypilot. Onroad writes apply on the next drive.",
                   "options": [
                     {
                       "value": 0,
                       "label": "Remain Active",
                       "enablement": [
                         {
-                          "type": "not",
-                          "condition": {
-                            "type": "any",
-                            "conditions": [
-                              {
-                                "type": "capability",
-                                "field": "brand",
-                                "equals": "rivian"
-                              },
-                              {
-                                "type": "all",
+                          "type": "any",
+                          "conditions": [
+                            {
+                              "type": "not",
+                              "condition": {
+                                "type": "any",
                                 "conditions": [
                                   {
                                     "type": "capability",
                                     "field": "brand",
-                                    "equals": "tesla"
+                                    "equals": "rivian"
                                   },
                                   {
-                                    "type": "not",
-                                    "condition": {
-                                      "type": "capability",
-                                      "field": "tesla_has_vehicle_bus",
-                                      "equals": true
-                                    }
+                                    "type": "all",
+                                    "conditions": [
+                                      {
+                                        "type": "capability",
+                                        "field": "brand",
+                                        "equals": "tesla"
+                                      },
+                                      {
+                                        "type": "not",
+                                        "condition": {
+                                          "type": "capability",
+                                          "field": "tesla_has_vehicle_bus",
+                                          "equals": true
+                                        }
+                                      }
+                                    ]
                                   }
                                 ]
                               }
-                            ]
-                          }
+                            },
+                            {
+                              "type": "capability",
+                              "field": "tesla_preap",
+                              "equals": true
+                            }
+                          ]
                         }
                       ]
                     },
@@ -170,35 +211,45 @@
                       "label": "Pause",
                       "enablement": [
                         {
-                          "type": "not",
-                          "condition": {
-                            "type": "any",
-                            "conditions": [
-                              {
-                                "type": "capability",
-                                "field": "brand",
-                                "equals": "rivian"
-                              },
-                              {
-                                "type": "all",
+                          "type": "any",
+                          "conditions": [
+                            {
+                              "type": "not",
+                              "condition": {
+                                "type": "any",
                                 "conditions": [
                                   {
                                     "type": "capability",
                                     "field": "brand",
-                                    "equals": "tesla"
+                                    "equals": "rivian"
                                   },
                                   {
-                                    "type": "not",
-                                    "condition": {
-                                      "type": "capability",
-                                      "field": "tesla_has_vehicle_bus",
-                                      "equals": true
-                                    }
+                                    "type": "all",
+                                    "conditions": [
+                                      {
+                                        "type": "capability",
+                                        "field": "brand",
+                                        "equals": "tesla"
+                                      },
+                                      {
+                                        "type": "not",
+                                        "condition": {
+                                          "type": "capability",
+                                          "field": "tesla_has_vehicle_bus",
+                                          "equals": true
+                                        }
+                                      }
+                                    ]
                                   }
                                 ]
                               }
-                            ]
-                          }
+                            },
+                            {
+                              "type": "capability",
+                              "field": "tesla_preap",
+                              "equals": true
+                            }
+                          ]
                         }
                       ]
                     },
@@ -207,9 +258,24 @@
                       "label": "Disengage"
                     }
                   ],
-                  "enablement": [
+                  "visibility": [
                     {
-                      "type": "offroad_only"
+                      "type": "any",
+                      "conditions": [
+                        {
+                          "type": "not",
+                          "condition": {
+                            "type": "capability",
+                            "field": "tesla_preap",
+                            "equals": true
+                          }
+                        },
+                        {
+                          "type": "capability",
+                          "field": "tesla_preap_independent_brake",
+                          "equals": true
+                        }
+                      ]
                     }
                   ]
                 }
@@ -2254,6 +2320,16 @@
           "key": "TeslaCoopSteering",
           "widget": "toggle",
           "title": "Cooperative Steering (Beta)",
+          "visibility": [
+            {
+              "type": "not",
+              "condition": {
+                "type": "capability",
+                "field": "tesla_preap",
+                "equals": true
+              }
+            }
+          ],
           "enablement": [
             {
               "type": "offroad_only"
@@ -2287,6 +2363,231 @@
             {
               "type": "capability",
               "field": "tesla_has_vehicle_bus",
+              "equals": true
+            },
+            {
+              "type": "not",
+              "condition": {
+                "type": "capability",
+                "field": "tesla_preap",
+                "equals": true
+              }
+            }
+          ],
+          "enablement": [
+            {
+              "type": "offroad_only"
+            }
+          ]
+        },
+        {
+          "key": "NAPLateralEngagementMode",
+          "widget": "multiple_button",
+          "needs_onroad_cycle": true,
+          "title": "Lateral Engagement Mode",
+          "description": "Pre-AP stalk engagement. Onroad writes apply on the next drive.",
+          "options": [
+            {
+              "value": 0,
+              "label": "Independent"
+            },
+            {
+              "value": 1,
+              "label": "Cruise Coupled"
+            },
+            {
+              "value": 2,
+              "label": "Longitudinal Only"
+            }
+          ],
+          "visibility": [
+            {
+              "type": "capability",
+              "field": "tesla_preap",
+              "equals": true
+            }
+          ]
+        },
+        {
+          "key": "NAPFollowDistance",
+          "widget": "multiple_button",
+          "title": "Follow Distance",
+          "description": "Follow distance (1=closest, 7=farthest). Writes apply live.",
+          "options": [
+            {
+              "value": 1,
+              "label": "1"
+            },
+            {
+              "value": 2,
+              "label": "2"
+            },
+            {
+              "value": 3,
+              "label": "3"
+            },
+            {
+              "value": 4,
+              "label": "4"
+            },
+            {
+              "value": 5,
+              "label": "5"
+            },
+            {
+              "value": 6,
+              "label": "6"
+            },
+            {
+              "value": 7,
+              "label": "7"
+            }
+          ],
+          "visibility": [
+            {
+              "type": "capability",
+              "field": "tesla_preap",
+              "equals": true
+            }
+          ]
+        },
+        {
+          "key": "tesla_preap_active_mode",
+          "widget": "info",
+          "blocked": true,
+          "title": "Active Engagement Mode",
+          "description": "Read-only active boot snapshot. Onroad mode writes stage the next drive.",
+          "visibility": [
+            {
+              "type": "capability",
+              "field": "tesla_preap",
+              "equals": true
+            }
+          ]
+        },
+        {
+          "key": "tesla_preap_longitudinal_path",
+          "widget": "info",
+          "blocked": true,
+          "title": "Longitudinal Path",
+          "description": "Read-only physical longitudinal path from the active CP snapshot.",
+          "visibility": [
+            {
+              "type": "capability",
+              "field": "tesla_preap",
+              "equals": true
+            }
+          ]
+        },
+        {
+          "key": "tesla_preap_pedal_health",
+          "widget": "info",
+          "blocked": true,
+          "title": "Pedal Health",
+          "description": "Read-only pedal interceptor health from the active snapshot.",
+          "visibility": [
+            {
+              "type": "capability",
+              "field": "tesla_preap",
+              "equals": true
+            }
+          ]
+        },
+        {
+          "key": "tesla_preap_radar_health",
+          "widget": "info",
+          "blocked": true,
+          "title": "Radar Health",
+          "description": "Read-only Bosch radar health from the active snapshot.",
+          "visibility": [
+            {
+              "type": "capability",
+              "field": "tesla_preap",
+              "equals": true
+            }
+          ]
+        },
+        {
+          "key": "NAPPedalEnabled",
+          "widget": "toggle",
+          "needs_onroad_cycle": true,
+          "blocked": true,
+          "title": "Pedal Interceptor",
+          "description": "Enable Comma Pedal hardware. Local and offroad only.",
+          "visibility": [
+            {
+              "type": "capability",
+              "field": "tesla_preap",
+              "equals": true
+            }
+          ],
+          "enablement": [
+            {
+              "type": "offroad_only"
+            }
+          ]
+        },
+        {
+          "key": "NAPPedalCanBus",
+          "widget": "multiple_button",
+          "needs_onroad_cycle": true,
+          "blocked": true,
+          "title": "Pedal CAN Bus",
+          "description": "CAN bus for the Comma Pedal. Local and offroad only.",
+          "options": [
+            {
+              "value": 0,
+              "label": "Bus 0"
+            },
+            {
+              "value": 2,
+              "label": "Bus 2"
+            }
+          ],
+          "visibility": [
+            {
+              "type": "capability",
+              "field": "tesla_preap_pedal",
+              "equals": true
+            }
+          ],
+          "enablement": [
+            {
+              "type": "offroad_only"
+            }
+          ]
+        },
+        {
+          "key": "NAPRadarEnabled",
+          "widget": "toggle",
+          "needs_onroad_cycle": true,
+          "blocked": true,
+          "title": "Bosch Radar",
+          "description": "Enable stock Bosch radar. Local and offroad only.",
+          "visibility": [
+            {
+              "type": "capability",
+              "field": "tesla_preap",
+              "equals": true
+            }
+          ],
+          "enablement": [
+            {
+              "type": "offroad_only"
+            }
+          ]
+        },
+        {
+          "key": "NAPRadarBehindNosecone",
+          "widget": "toggle",
+          "needs_onroad_cycle": true,
+          "blocked": true,
+          "title": "Radar Behind Nosecone",
+          "description": "Attenuate radar mounted behind the nosecone. Local and offroad only.",
+          "visibility": [
+            {
+              "type": "capability",
+              "field": "tesla_preap_radar",
               "equals": true
             }
           ],

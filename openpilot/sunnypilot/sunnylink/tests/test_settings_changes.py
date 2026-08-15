@@ -217,3 +217,117 @@ class TestNotEngagedReplacement:
     rule_types = _flatten_rule_types(item.get("enablement"))
     assert "offroad_only" not in rule_types, f"{key} still uses offroad_only"
     assert "not_engaged" in rule_types, f"{key} missing not_engaged"
+
+
+class TestTeslaPreAPSettings:
+  def test_preap_vehicle_keys_present(self, schema):
+    vs = schema["vehicle_settings"]["tesla"]
+    keys = {item["key"] for item in vs.get("items", [])}
+    assert "NAPLateralEngagementMode" in keys
+    assert "NAPFollowDistance" in keys
+    assert "NAPPedalEnabled" in keys
+    assert "NAPPedalCanBus" in keys
+    assert "NAPRadarEnabled" in keys
+    assert "NAPRadarBehindNosecone" in keys
+    assert "tesla_preap_active_mode" in keys
+    assert "tesla_preap_longitudinal_path" in keys
+    assert "tesla_preap_pedal_health" in keys
+    assert "tesla_preap_radar_health" in keys
+    assert "MadsSteeringMode" not in keys
+    assert "NAPRadarOffset" not in keys
+    assert "NAPAdaptiveAccel" not in keys
+    assert "NAPForcePreAP" not in keys
+    assert "NAPPedalProfile" not in keys
+    assert "NAPBrakeFactor" not in keys
+    assert "calibrate_pedal" not in keys
+    assert "flash_epas" not in keys
+    assert "diagnose_radar" not in keys
+
+  def test_follow_is_live_hardware_needs_cycle(self, schema):
+    follow = _find_item(schema, "NAPFollowDistance")
+    assert follow is not None
+    assert not follow.get("needs_onroad_cycle")
+    for key in ("NAPPedalEnabled", "NAPPedalCanBus", "NAPRadarEnabled", "NAPRadarBehindNosecone"):
+      item = _find_item(schema, key)
+      assert item is not None, key
+      assert item.get("needs_onroad_cycle") is True
+      assert "offroad_only" in _flatten_rule_types(item.get("enablement"))
+    assert _find_item(schema, "NAPRadarOffset") is None
+
+  def test_tools_are_not_schema_keys(self, schema):
+    from openpilot.sunnypilot.sunnylink.tools.generate_settings_schema import collect_all_keys
+    keys = collect_all_keys(schema)
+    for tool in ("calibrate_pedal", "calibrate_radar", "diagnose_radar", "test_radar",
+                 "flash_epas", "extract_epas", "restore_epas", "run_script"):
+      assert tool not in keys
+
+  def test_coop_and_mads_screen_hidden_on_preap(self, schema):
+    vs = schema["vehicle_settings"]["tesla"]
+    coop = next(item for item in vs.get("items", []) if item["key"] == "TeslaCoopSteering")
+    vis = str(coop.get("visibility"))
+    assert "tesla_preap" in vis
+    assert "not" in vis
+    screen = next(item for item in vs.get("items", []) if item["key"] == "TeslaMadsScreenButton")
+    screen_vis = str(screen.get("visibility"))
+    assert "tesla_preap" in screen_vis
+    assert "not" in screen_vis
+
+  def test_mads_parent_visible_but_blocked_on_preap(self, schema):
+    item = _find_item(schema, "Mads")
+    assert item is not None
+    vis = item.get("visibility") or []
+    assert vis == [] or "not_tesla_preap" not in json.dumps(vis)
+    enablement = json.dumps(item.get("enablement") or [])
+    assert "tesla_preap" not in enablement
+    assert "offroad_only" in _flatten_rule_types(item.get("enablement"))
+
+  def test_mads_steering_mode_only_in_steering(self, schema):
+    vs_keys = {item["key"] for item in schema["vehicle_settings"]["tesla"].get("items", [])}
+    assert "MadsSteeringMode" not in vs_keys
+    item = _find_item(schema, "MadsSteeringMode")
+    assert item is not None
+    vis = json.dumps(item.get("visibility"))
+    assert "tesla_preap_independent_brake" in vis
+    assert "tesla_preap" in vis
+    assert "not" in vis
+    assert '"type": "any"' in vis or "'type': 'any'" in vis or '"any"' in vis
+    assert item.get("needs_onroad_cycle") is True
+    assert "offroad_only" not in _flatten_rule_types(item.get("enablement"))
+
+  def test_mads_settings_reachable_when_preap(self, schema):
+    section = _find_section(schema, "steering", "mads")
+    assert section is not None
+    sp = next(s for s in section["sub_panels"] if s["id"] == "mads_settings")
+    cond = json.dumps(sp.get("trigger_condition"))
+    assert "tesla_preap" in cond
+    assert "Mads" in cond
+
+  def test_engagement_mode_is_next_drive(self, schema):
+    item = _find_item(schema, "NAPLateralEngagementMode")
+    assert item is not None
+    assert item.get("needs_onroad_cycle") is True
+    assert "offroad_only" not in _flatten_rule_types(item.get("enablement"))
+
+  def test_mads_full_platforms_excludes_preap_key(self):
+    import yaml
+    from pathlib import Path
+    macros = yaml.safe_load((Path(__file__).resolve().parents[1] / "settings_ui_src" / "_macros.yaml").read_text())["macros"]
+    full = json.dumps(macros["mads_full_platforms"])
+    limited = json.dumps(macros["mads_limited_platforms"])
+    assert "tesla_has_vehicle_bus" in full
+    assert "tesla_preap" not in full
+    assert "tesla_has_vehicle_bus" in limited
+    assert "tesla_preap" not in limited
+
+
+
+  def test_preap_readonly_status_info_widgets(self, schema):
+    vs = schema["vehicle_settings"]["tesla"]
+    items = {item["key"]: item for item in vs.get("items", [])}
+    for key in ("tesla_preap_active_mode", "tesla_preap_longitudinal_path",
+                "tesla_preap_pedal_health", "tesla_preap_radar_health"):
+      item = items[key]
+      assert item["widget"] == "info"
+      assert item.get("blocked") is True
+      vis = json.dumps(item.get("visibility"))
+      assert "tesla_preap" in vis

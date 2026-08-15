@@ -54,6 +54,8 @@ sections:
   - key: TeslaCoopSteering
     widget: toggle
     title: Cooperative Steering (Beta)
+    visibility:
+    - $ref: '#/macros/not_tesla_preap'
     enablement:
     - $ref: '#/macros/offroad'
   - key: TeslaMadsScreenButton
@@ -76,6 +78,115 @@ sections:
     - type: capability
       field: tesla_has_vehicle_bus
       equals: true
+    - $ref: '#/macros/not_tesla_preap'
+    enablement:
+    - $ref: '#/macros/offroad'
+  - key: NAPLateralEngagementMode
+    widget: multiple_button
+    needs_onroad_cycle: true
+    title: Lateral Engagement Mode
+    description: Pre-AP stalk engagement. Onroad writes apply on the next drive.
+    options:
+    - value: 0
+      label: Independent
+    - value: 1
+      label: Cruise Coupled
+    - value: 2
+      label: Longitudinal Only
+    visibility:
+    - $ref: '#/macros/tesla_preap'
+  - key: NAPFollowDistance
+    widget: multiple_button
+    title: Follow Distance
+    description: Follow distance (1=closest, 7=farthest). Writes apply live.
+    options:
+    - value: 1
+      label: '1'
+    - value: 2
+      label: '2'
+    - value: 3
+      label: '3'
+    - value: 4
+      label: '4'
+    - value: 5
+      label: '5'
+    - value: 6
+      label: '6'
+    - value: 7
+      label: '7'
+    visibility:
+    - $ref: '#/macros/tesla_preap'
+  - key: tesla_preap_active_mode
+    widget: info
+    blocked: true
+    title: Active Engagement Mode
+    description: Read-only active boot snapshot. Onroad mode writes stage the next drive.
+    visibility:
+    - $ref: '#/macros/tesla_preap'
+  - key: tesla_preap_longitudinal_path
+    widget: info
+    blocked: true
+    title: Longitudinal Path
+    description: Read-only physical longitudinal path from the active CP snapshot.
+    visibility:
+    - $ref: '#/macros/tesla_preap'
+  - key: tesla_preap_pedal_health
+    widget: info
+    blocked: true
+    title: Pedal Health
+    description: Read-only pedal interceptor health from the active snapshot.
+    visibility:
+    - $ref: '#/macros/tesla_preap'
+  - key: tesla_preap_radar_health
+    widget: info
+    blocked: true
+    title: Radar Health
+    description: Read-only Bosch radar health from the active snapshot.
+    visibility:
+    - $ref: '#/macros/tesla_preap'
+  - key: NAPPedalEnabled
+    widget: toggle
+    blocked: true
+    needs_onroad_cycle: true
+    title: Pedal Interceptor
+    description: Enable Comma Pedal hardware. Local and offroad only.
+    visibility:
+    - $ref: '#/macros/tesla_preap'
+    enablement:
+    - $ref: '#/macros/offroad'
+  - key: NAPPedalCanBus
+    widget: multiple_button
+    blocked: true
+    needs_onroad_cycle: true
+    title: Pedal CAN Bus
+    description: CAN bus for the Comma Pedal. Local and offroad only.
+    options:
+    - value: 0
+      label: Bus 0
+    - value: 2
+      label: Bus 2
+    visibility:
+    - $ref: '#/macros/tesla_preap_pedal'
+    enablement:
+    - $ref: '#/macros/offroad'
+  - key: NAPRadarEnabled
+    widget: toggle
+    blocked: true
+    needs_onroad_cycle: true
+    title: Bosch Radar
+    description: Enable stock Bosch radar. Local and offroad only.
+    visibility:
+    - $ref: '#/macros/tesla_preap'
+    enablement:
+    - $ref: '#/macros/offroad'
+  - key: NAPRadarBehindNosecone
+    widget: toggle
+    blocked: true
+    needs_onroad_cycle: true
+    title: Radar Behind Nosecone
+    description: Attenuate radar mounted behind the nosecone. Local and offroad only.
+    visibility:
+    - $ref: '#/macros/tesla_preap_radar'
     enablement:
     - $ref: '#/macros/offroad'
 - id: toyota

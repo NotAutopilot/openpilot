@@ -12,6 +12,12 @@ from opendbc.car.chrysler.values import RAM_DT
 from openpilot.selfdrive.selfdrived.events import Events
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 from openpilot.sunnypilot.selfdrive.car.preap_intent import PreAPIntentConsumer
+from openpilot.sunnypilot.selfdrive.selfdrived.preap_alerts import (
+  PedalAuthorityLossMapper,
+  preap_alert_inputs_from_snapshot,
+  preap_radar_fault,
+  select_preap_alerts,
+)
 
 EventName = log.OnroadEvent.EventName
 EventNameSP = custom.OnroadEventSP.EventName
@@ -25,16 +31,35 @@ class CarSpecificEventsSP:
 
     self.low_speed_alert = False
     self.preap_intent = PreAPIntentConsumer() if CP.carFingerprint == "TESLA_MODEL_S_PREAP" else None
+    self._pedal_authority_loss = PedalAuthorityLossMapper()
 
-  def update(self, CS: structs.CarState, events: Events, CS_SP=None):
+  def update(self, CS: structs.CarState, events: Events, CS_SP=None, radar_fault: bool = False):
     events_sp = EventsSP()
 
     # Consume each new Pre-AP intent record before the standard state transition.
-    if self.preap_intent is not None and CS_SP is not None:
-      self.preap_intent.update(
-        CS_SP, events, events_sp,
-        apply_longitudinal=bool(self.CP.openpilotLongitudinalControl),
+    if self.preap_intent is not None:
+      if CS_SP is not None:
+        self.preap_intent.update(
+          CS_SP, events, events_sp,
+          apply_longitudinal=bool(self.CP.openpilotLongitudinalControl),
+        )
+      lost = False
+      if CS_SP is not None:
+        lost = self._pedal_authority_loss.update(int(getattr(CS_SP, "pedalAuthorityState", 0) or 0))
+      else:
+        self._pedal_authority_loss.reset()
+      inputs = preap_alert_inputs_from_snapshot(
+        self.CP, self.CP_SP, CS_SP, radar_fault=radar_fault, established_authority_lost=lost,
       )
+      if not inputs.pedal_present:
+        self._pedal_authority_loss.reset()
+        inputs = preap_alert_inputs_from_snapshot(
+          self.CP, self.CP_SP, CS_SP, radar_fault=radar_fault, established_authority_lost=False,
+        )
+      for name in select_preap_alerts(inputs):
+        events_sp.add(name)
+      if preap_radar_fault(inputs):
+        events.add(EventName.radarFault)
 
     if self.CP.brand == 'chrysler':
       if self.CP.carFingerprint in RAM_DT:

@@ -7,9 +7,11 @@ See the LICENSE.md file in the root directory for more details.
 from collections.abc import Callable
 import pyray as rl
 
+from opendbc.car.tesla.preap.boot import PREAP_PLATFORM
 from opendbc.sunnypilot.car.tesla.values import MadsScreenButtonType, TeslaFlagsSP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.sunnypilot.mads.helpers import MadsSteeringModeOnBrake
+from openpilot.sunnypilot.selfdrive.car.preap_boot import is_preap_ui_platform
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.network import NavButton
@@ -85,17 +87,25 @@ class MadsSettingsLayout(Widget):
 
   @staticmethod
   def _mads_limited_settings() -> bool:
+    # PREAP_PLATFORM is full MADS. Tesla !HAS_VEHICLE_BUS is AP-no-bus only.
+    bundle = ui_state.params.get("CarPlatformBundle")
+    bundle_platform = bundle.get("platform", "") if isinstance(bundle, dict) else ""
+    if bundle_platform == PREAP_PLATFORM or is_preap_ui_platform(bundle_platform, ui_state.CP):
+      return False
+    if ui_state.CP_SP is not None and bool(getattr(ui_state.CP_SP, "madsRequired", False)):
+      return False
+
     brand = ""
-    if ui_state.is_offroad():
-      bundle = ui_state.params.get("CarPlatformBundle")
-      if bundle:
-        brand = bundle.get("brand", "")
+    if ui_state.is_offroad() and isinstance(bundle, dict):
+      brand = bundle.get("brand", "") or ""
     if not brand:
       brand = ui_state.CP.brand if ui_state.CP is not None else ""
 
     if brand == "rivian":
       return True
     elif brand == "tesla":
+      if bundle_platform == PREAP_PLATFORM or is_preap_ui_platform(bundle_platform, ui_state.CP):
+        return False
       if ui_state.CP_SP is None or not ui_state.CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
         return True
       screen_button = int(ui_state.params.get("TeslaMadsScreenButton", return_default=True))
@@ -103,7 +113,10 @@ class MadsSettingsLayout(Widget):
     return False
 
   def _update_steering_mode_description(self, button_index: int):
-    base_desc = tr("Choose how Automatic Lane Centering (ALC) behaves after the brake pedal is manually pressed in sunnypilot.")
+    base_desc = tr(
+      "Choose how Automatic Lane Centering (ALC) behaves after the brake pedal is manually pressed in sunnypilot. "
+      + "Onroad writes apply on the next drive."
+    )
     result = base_desc + "<br><br>"
     for opt in MADS_STEERING_MODE_OPTIONS:
       desc = "<b>" + opt[1] + "</b>" if button_index == MADS_STEERING_MODE_OPTIONS.index(opt) else opt[1]
@@ -138,3 +151,20 @@ class MadsSettingsLayout(Widget):
 
       self._steering_mode.action_item.set_enabled(True)
       self._steering_mode.action_item.set_enabled_buttons(None)
+
+    bundle = ui_state.params.get("CarPlatformBundle")
+    bundle_platform = bundle.get("platform", "") if isinstance(bundle, dict) else ""
+    is_preap = is_preap_ui_platform(bundle_platform, ui_state.CP)
+    if ui_state.CP_SP is not None:
+      try:
+        mode = int(ui_state.CP_SP.preapLateralEngagementMode)
+      except Exception:
+        mode = 0
+    else:
+      mode = 0
+    self._main_cruise_toggle.set_visible(not is_preap)
+    self._unified_engagement_toggle.set_visible(not is_preap)
+    self._steering_mode.set_visible((not is_preap) or mode == 0)
+    if is_preap:
+      self._main_cruise_toggle.action_item.set_enabled(False)
+      self._unified_engagement_toggle.action_item.set_enabled(False)

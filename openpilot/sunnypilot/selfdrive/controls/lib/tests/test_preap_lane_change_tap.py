@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from typing import Any, cast
 
 from openpilot.cereal import log
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
@@ -25,9 +26,9 @@ def _car_state(*, left=True, right=False, lever=0):
 
 def _helper():
   helper = DesireHelper()
-  helper.alc.update_params = lambda: None
+  cast(Any, helper.alc).update_params = lambda: None
   helper.alc.lane_change_set_timer = AutoLaneChangeMode.NUDGE
-  helper.lane_turn_controller.update_params = lambda: None
+  cast(Any, helper.lane_turn_controller).update_params = lambda: None
   return helper
 
 

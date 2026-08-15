@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+from typing import Any, cast
 import numpy as np
 
 import openpilot.cereal.messaging as messaging
@@ -16,6 +17,9 @@ from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.sunnypilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlannerSP
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import get_T_FOLLOW
+from opendbc.car.tesla.preap.boot import pedal_pipeline_enabled
+from opendbc.car.tesla.preap.constants import PREAP_FOLLOW_DISTANCE_RANGE, PREAP_T_FOLLOW
 
 A_CRUISE_MAX_VALS = [1.6, 1.2, 0.8, 0.6]
 A_CRUISE_MAX_BP = [0., 10.0, 25., 40.]
@@ -47,14 +51,52 @@ def limit_accel_in_turns(v_ego, angle_steers, a_target, CP):
   return [a_target[0], min(a_target[1], a_x_allowed)]
 
 
+
+def _preap_t_follow(personality, follow_dist):
+  if follow_dist in PREAP_FOLLOW_DISTANCE_RANGE:
+    return PREAP_T_FOLLOW[follow_dist - 1]
+  return get_T_FOLLOW(personality)
+
+
+def _mpc_update_with_t_follow(mpc, radarstate, v_cruise, personality, t_follow=None):
+  if t_follow is None:
+    mpc.update(radarstate, v_cruise, personality=personality)
+    return
+  import openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc as long_mpc_module
+  long_mpc_mod = cast(Any, long_mpc_module)
+  original = long_mpc_mod.get_T_FOLLOW
+  long_mpc_mod.get_T_FOLLOW = lambda personality=None: t_follow
+  try:
+    mpc.update(radarstate, v_cruise, personality=personality)
+  finally:
+    long_mpc_mod.get_T_FOLLOW = original
+
+
 class LongitudinalPlanner(LongitudinalPlannerSP):
-  def __init__(self, CP, CP_SP, init_v=0.0, init_a=0.0, dt=DT_MDL):
+  def __init__(self, CP, CP_SP, init_v=0.0, init_a=0.0, dt=DT_MDL, params=None):
     self.CP = CP
+    self.CP_SP = CP_SP
     self.mpc = LongitudinalMpc(dt=dt)
     LongitudinalPlannerSP.__init__(self, self.CP, CP_SP, self.mpc)
     self.fcw = False
     self.dt = dt
     self.allow_throttle = True
+    self._pedal_preap = pedal_pipeline_enabled(CP, CP_SP)
+    self._params = None
+    self.nap_follow_dist = None
+    self.active_nap_follow_dist = None
+    self.t_follow = get_T_FOLLOW()
+    self._frame = 0
+    if self._pedal_preap:
+      from openpilot.common.params import Params
+      self._params = params if params is not None else Params()
+      follow = self._params.get("NAPFollowDistance", return_default=True)
+      try:
+        self.nap_follow_dist = int(follow)
+      except (TypeError, ValueError):
+        self.nap_follow_dist = None
+      self.active_nap_follow_dist = self.nap_follow_dist if self.nap_follow_dist in PREAP_FOLLOW_DISTANCE_RANGE else None
+      self.t_follow = _preap_t_follow(None, self.active_nap_follow_dist) if self.active_nap_follow_dist else get_T_FOLLOW()
 
     self.a_desired = init_a
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
@@ -68,6 +110,14 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
 
   def update(self, sm):
     LongitudinalPlannerSP.update(self, sm)
+    self._frame += 1
+    if self._pedal_preap and self._params is not None and self._frame % 20 == 0:
+      follow = self._params.get("NAPFollowDistance", return_default=True)
+      try:
+        self.nap_follow_dist = int(follow)
+      except (TypeError, ValueError):
+        self.nap_follow_dist = None
+
 
     if len(sm['carControl'].orientationNED) == 3:
       accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])
@@ -103,8 +153,9 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.v_desired_filter.x = max(0.0, self.v_desired_filter.update(v_ego))
     throttle_probs = sm['modelV2'].meta.disengagePredictions.gasPressProbs
     throttle_prob = throttle_probs[1] if len(throttle_probs) > 1 else 1.0
-    # Don't clip at low speeds since throttle_prob doesn't account for creep
-    self.allow_throttle = throttle_prob > ALLOW_THROTTLE_THRESHOLD or v_ego <= MIN_ALLOW_THROTTLE_SPEED
+    # Don't clip at low speeds since throttle_prob doesn't account for creep.
+    # Pedal-equipped Pre-AP keeps allow_throttle so VDAS sees literal accel targets.
+    self.allow_throttle = self._pedal_preap or throttle_prob > ALLOW_THROTTLE_THRESHOLD or v_ego <= MIN_ALLOW_THROTTLE_SPEED
 
     if not self.allow_throttle:
       clipped_accel_coast = max(accel_coast, accel_clip[0])
@@ -117,9 +168,18 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     if force_slow_decel:
       v_cruise = 0.0
 
-    self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
+    personality = sm['selfdriveState'].personality
+    if self._pedal_preap:
+      self.active_nap_follow_dist = self.nap_follow_dist if self.nap_follow_dist in PREAP_FOLLOW_DISTANCE_RANGE else None
+      self.t_follow = _preap_t_follow(personality, self.active_nap_follow_dist)
+    else:
+      self.active_nap_follow_dist = None
+      self.t_follow = get_T_FOLLOW(personality)
+
+    self.mpc.set_weights(prev_accel_constraint, personality=personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
-    self.mpc.update(sm['radarState'], v_cruise, personality=sm['selfdriveState'].personality)
+    _mpc_update_with_t_follow(self.mpc, sm['radarState'], v_cruise, personality,
+                              t_follow=self.t_follow if self._pedal_preap else None)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)

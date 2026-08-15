@@ -32,6 +32,9 @@ from openpilot.sunnypilot.selfdrive.car.cruise_helpers import CruiseHelper
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
 from openpilot.sunnypilot.selfdrive.selfdrived.button_state_tracker import ButtonStateTracker
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+from openpilot.selfdrive.selfdrived.preap_regen import RegenDemandCheck, register_preap_regen_alerts
+from openpilot.sunnypilot.selfdrive.selfdrived.preap_alerts import radar_state_has_fault
+from opendbc.car.tesla.preap.boot import pedal_pipeline_enabled, preap_radar_present
 
 REPLAY = "REPLAY" in os.environ
 SIMULATION = "SIMULATION" in os.environ
@@ -175,8 +178,13 @@ class SelfdriveD(CruiseHelper):
     elif self.CP.passive:
       self.events.add(EventName.dashcamMode, static=True)
 
+    register_preap_regen_alerts()
     self.events_sp = EventsSP()
     self.events_sp_prev = []
+    self._pedal_preap = pedal_pipeline_enabled(self.CP, self.CP_SP)
+    self._preap_radar_present = preap_radar_present(self.CP, self.CP_SP)
+    self.preap_regen_demand = RegenDemandCheck()
+    self.prev_pedal_long_active = False
 
     self.mads = ModularAssistiveDrivingSystem(self)
     self.icbm = IntelligentCruiseButtonManagement(self.CP, self.CP_SP)
@@ -260,7 +268,12 @@ class SelfdriveD(CruiseHelper):
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
       self.events.add_from_msg(car_events)
 
-      car_events_sp = self.car_events_sp.update(CS, self.events, self.CS_SP if self.cs_sp_fresh else None).to_msg()
+      radar_fault = False
+      if self.sm.valid.get('radarState', False) if hasattr(self.sm, 'valid') else self.sm.seen.get('radarState', False):
+        radar_fault = radar_state_has_fault(self.sm['radarState'])
+      car_events_sp = self.car_events_sp.update(
+        CS, self.events, self.CS_SP if self.cs_sp_fresh else None, radar_fault=radar_fault,
+      ).to_msg()
       self.events_sp.add_from_msg(car_events_sp)
 
       if self.CP.notCar:
@@ -274,6 +287,29 @@ class SelfdriveD(CruiseHelper):
         (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or \
         (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
         self.events.add(EventName.pedalPressed)
+
+      if self._pedal_preap:
+        EventNameSP = custom.OnroadEventSP.EventName
+        pedal_long_active = self.prev_pedal_long_active
+        if self.cs_sp_fresh:
+          pedal_long_active = bool(getattr(self.CS_SP, "pedalLongActive", False))
+          if pedal_long_active and not self.prev_pedal_long_active:
+            self.events_sp.add(EventNameSP.pedalCruiseEnabled)
+          elif self.prev_pedal_long_active and not pedal_long_active:
+            self.events_sp.add(EventNameSP.pedalCruiseDisabled)
+          self.prev_pedal_long_active = pedal_long_active
+        regen_demand_overflow = self.preap_regen_demand.update(
+          plan_valid=self.sm.valid['longitudinalPlan'],
+          pedal_long_active=pedal_long_active,
+          brake_pressed=CS.brakePressed,
+          a_target=float(self.sm['longitudinalPlan'].aTarget),
+          v_ego=CS.vEgo,
+        )
+        if (self.cs_sp_fresh and bool(getattr(self.CS_SP, "pedalMaxRegen", False))) or regen_demand_overflow:
+          self.events_sp.add(EventNameSP.pedalMaxRegen)
+        # Authority-loss and calibration/radar health are owned by CarSpecificEventsSP.
+      else:
+        self.prev_pedal_long_active = False
 
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:
@@ -395,7 +431,7 @@ class SelfdriveD(CruiseHelper):
           self.events.add(EventName.cameraFrameRate)
     if not REPLAY and self.rk.lagging:
       self.events.add(EventName.selfdrivedLagging)
-    if self.CP.openpilotLongitudinalControl:
+    if self.CP.openpilotLongitudinalControl or self._preap_radar_present:
       if self.sm['radarState'].radarErrors.canError:
         self.events.add(EventName.canError)
       elif self.sm['radarState'].radarErrors.radarUnavailableTemporary:

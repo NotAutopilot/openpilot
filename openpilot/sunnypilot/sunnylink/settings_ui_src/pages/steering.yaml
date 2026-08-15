@@ -22,14 +22,21 @@ sections:
     label: MADS Settings
     trigger_key: Mads
     trigger_condition:
-      type: param
-      key: Mads
-      equals: true
+      type: any
+      conditions:
+      - type: param
+        key: Mads
+        equals: true
+      - type: capability
+        field: tesla_preap
+        equals: true
     items:
     - key: MadsMainCruiseAllowed
       widget: toggle
       title: Toggle with Main Cruise
       description: 'Note: For vehicles without LFA/LKAS button, disabling this will prevent lateral control engagement.'
+      visibility:
+      - $ref: '#/macros/not_tesla_preap'
       enablement:
       - $ref: '#/macros/offroad'
       - $ref: '#/macros/mads_full_platforms'
@@ -38,26 +45,38 @@ sections:
       title: Unified Engagement Mode (UEM)
       description: 'Engage lateral and longitudinal control with cruise control engagement. Note: Once lateral control is
         engaged via UEM, it will remain engaged until it is manually disabled via the MADS button or car shut off.'
+      visibility:
+      - $ref: '#/macros/not_tesla_preap'
       enablement:
       - $ref: '#/macros/offroad'
       - $ref: '#/macros/mads_full_platforms'
     - key: MadsSteeringMode
       widget: multiple_button
+      needs_onroad_cycle: true
       title: Steering Mode on Brake Pedal
-      description: Choose how Automatic Lane Centering (ALC) behaves after the brake pedal is manually pressed in sunnypilot.
+      visibility:
+      - type: any
+        conditions:
+        - $ref: '#/macros/not_tesla_preap'
+        - {type: capability, field: tesla_preap_independent_brake, equals: true}
+      description: Choose how Automatic Lane Centering (ALC) behaves after the brake pedal is manually pressed in sunnypilot. Onroad writes apply on the next drive.
       options:
       - value: 0
         label: Remain Active
         enablement:
-        - $ref: '#/macros/mads_full_platforms'
+        - type: any
+          conditions:
+          - $ref: '#/macros/mads_full_platforms'
+          - $ref: '#/macros/tesla_preap'
       - value: 1
         label: Pause
         enablement:
-        - $ref: '#/macros/mads_full_platforms'
+        - type: any
+          conditions:
+          - $ref: '#/macros/mads_full_platforms'
+          - $ref: '#/macros/tesla_preap'
       - value: 2
         label: Disengage
-      enablement:
-      - $ref: '#/macros/offroad'
 - id: blinker
   title: Blinker Control
   description: Lateral pause behavior during turn signals

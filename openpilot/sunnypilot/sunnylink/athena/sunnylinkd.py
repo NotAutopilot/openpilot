@@ -34,6 +34,7 @@ from openpilot.sunnypilot.sunnylink.api import SunnylinkApi
 from openpilot.sunnypilot.mads.helpers import is_mads_required
 from openpilot.sunnypilot.sunnylink.utils import sunnylink_need_register, sunnylink_ready, get_param_as_byte, save_param_from_base64_encoded_string
 from openpilot.sunnypilot.sunnylink.capabilities import generate_capabilities, CAPABILITY_LABELS
+from openpilot.sunnypilot.sunnylink.write_policy import DEVICE_OWNED_IDENTITY_KEYS, evaluate_ordered_writes
 from openpilot.sunnypilot.sunnylink.tools.generate_settings_schema import generate_schema
 
 SUNNYLINK_ATHENA_HOST = os.getenv('SUNNYLINK_ATHENA_HOST', 'wss://athena.sunnylink.ai')
@@ -56,7 +57,7 @@ BLOCKED_PARAMS = {
   "HasAcceptedTermsSP",
   "OnroadCycleRequested",      # Prevent remote cycle trigger
   "ParamsVersion",         # Device-managed version counter
-}
+} | set(DEVICE_OWNED_IDENTITY_KEYS)
 
 
 def handle_long_poll(ws: WebSocket, exit_event: threading.Event | None) -> None:
@@ -235,9 +236,22 @@ def _mads_required() -> bool:
   return is_mads_required(params=params)
 
 
+def _decoded_save_value(key: str, value: str, compression: bool):
+  try:
+    from openpilot.sunnypilot.sunnylink.utils import _convert_param_to_type
+    raw = base64.b64decode(value)
+    if compression:
+      raw = gzip.decompress(raw)
+    return _convert_param_to_type(raw, params.get_type(key))
+  except Exception:
+    return value
+
+
 @dispatcher.add_method
 def saveParams(params_to_update: dict[str, str], compression: bool = False) -> None:
   mads_required = _mads_required()
+  caps = generate_capabilities(params)
+  decoded_items = []
   for key, value in params_to_update.items():
     if key == "Mads" and mads_required:
       cloudlog.warning("sunnylinkd.saveParams.blocked: MADS is required for this platform")
@@ -247,9 +261,23 @@ def saveParams(params_to_update: dict[str, str], compression: bool = False) -> N
     if key in BLOCKED_PARAMS:
       cloudlog.warning(f"sunnylinkd.saveParams.blocked: Attempted to modify blocked parameter '{key}'")
       continue
+    decoded_items.append((key, _decoded_save_value(key, value, compression), value))
 
+  decisions = evaluate_ordered_writes(
+    [(key, decoded) for key, decoded, _encoded in decoded_items],
+    caps,
+    mads_required=mads_required,
+    staged_mode=None,
+  )
+  encoded_by_key = {key: encoded for key, _decoded, encoded in decoded_items}
+  for key, _decoded, decision in decisions:
+    if not decision.allow:
+      cloudlog.warning(f"sunnylinkd.saveParams.blocked: {key} rejected ({decision.reason})")
+      if key == "Mads" and mads_required:
+        params.put_bool("Mads", True, block=True)
+      continue
     try:
-      save_param_from_base64_encoded_string(key, value, compression)
+      save_param_from_base64_encoded_string(key, encoded_by_key[key], compression)
     except Exception as e:
       cloudlog.error(f"sunnylinkd.saveParams.exception {e}")
 

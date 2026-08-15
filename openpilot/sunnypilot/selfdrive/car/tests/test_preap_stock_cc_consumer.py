@@ -437,7 +437,7 @@ class TestProducedNopedalCoupledDirectAdjustment(unittest.TestCase):
         self.assertTrue(CP.pcmCruise)
         self.assertTrue(CI.CS.stock_cc.active)
         frozen = [0]
-        CI.CS._clock_ns = lambda: frozen[0]
+        CI.CS._clock_ns = lambda frozen=frozen: frozen[0]
         _prime_drive(CI, ts=1_000_000)
         CI.apply(structs.CarControl(), structs.CarControlSP(), now_nanos=0)
         self.assertFalse(CI.CS.intent.long_active)

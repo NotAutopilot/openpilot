@@ -18,7 +18,7 @@ def uint32_delta(candidate: int, current: int) -> int:
 
 
 def sequence_is_newer(candidate: int, current: int) -> bool | None:
-  """Newer within an epoch iff 0 < uint32(candidate - current) < 2^31.
+  """Newer within an epoch if and only if 0 < uint32(candidate - current) < 2^31.
 
   Equal is not newer. The 2^31 delta is undefined and fail-closed.
   """
