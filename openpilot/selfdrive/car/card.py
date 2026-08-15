@@ -200,6 +200,12 @@ class Car:
       CS_SP.preapLateralIntent = structs.CarStateSP.PreapLateralIntent.none
       CS_SP.preapLongitudinalIntent = structs.CarStateSP.PreapLongitudinalIntent.none
       CS_SP.preapIntentSequence = 0
+      # Neutralize the first epoch record's StockCC projection only. Live
+      # producer state is retained so sequence 1 can expose the initial-batch edge.
+      CS_SP.preapStockCcState = structs.CarStateSP.PreapStockCcTransactionState.idle
+      CS_SP.preapStockCcEnablePending = False
+      CS_SP.preapStockCcHostDiConfirmed = False
+      CS_SP.preapStockCcBoundCounter = 0
       self.preap_intent_seed_pending = False
     CS_SP.preapIntentEpoch = self.preap_intent_epoch
 
@@ -211,13 +217,31 @@ class Car:
 
     # Update carState from CAN
     CS, CS_SP = self.CI.update(can_list)
-    self.stamp_preap_intent_epoch(CS_SP)
-    CS_SP = convert_to_capnp(CS_SP)
 
     # Update radar tracks from CAN
     RD: structs.RadarDataT | None = self.RI.update(can_list)
 
     self.sm.update(0)
+    if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP" and hasattr(self.CI, "CS"):
+      # pandaStates is 10 Hz. A healthy cached payload remains usable between
+      # 100 Hz Card cycles; dead or invalid service data is missing.
+      panda = None
+      if self.sm.all_alive(['pandaStates']) and self.sm.all_valid(['pandaStates']):
+        pandas = self.sm["pandaStates"]
+        panda = pandas[0] if len(pandas) else None
+      if hasattr(self.CI.CS, "update_stock_cc_panda"):
+        self.CI.CS.update_stock_cc_panda(panda)
+      if self.preap_intent_epoch:
+        CS_SP.preapIntentEpoch = self.preap_intent_epoch
+      if hasattr(self.CI.CS, "stock_cc"):
+        self.CI.CS.stock_cc.bind_epoch(CS_SP.preapIntentEpoch, CS_SP.preapIntentSequence)
+        self.CI.CS.stock_cc.publish(CS_SP)
+    # First epoch record is built after every producer, then the seed projection
+    # is neutralized without erasing live internal producer state.
+    self.stamp_preap_intent_epoch(CS_SP)
+    if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP" and hasattr(self.CI, "CS") and hasattr(self.CI.CS, "stock_cc"):
+      self.CI.CS.stock_cc.acknowledge_publication(CS_SP)
+    CS_SP = convert_to_capnp(CS_SP)
 
     can_rcv_valid = len(can_strs) > 0
 

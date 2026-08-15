@@ -479,6 +479,10 @@ struct CarStateSP @0xb86e6369214c01c8 {
   preapLongitudinalIntent @2 :PreapLongitudinalIntent;
   preapIntentSequence @3 :UInt32;
   preapIntentEpoch @4 :UInt64;
+  preapStockCcState @5 :PreapStockCcTransactionState;
+  preapStockCcBoundCounter @6 :UInt8;
+  preapStockCcHostDiConfirmed @7 :Bool;
+  preapStockCcEnablePending @8 :Bool;
 
   enum PreapLateralIntent {
     none @0;
@@ -490,6 +494,17 @@ struct CarStateSP @0xb86e6369214c01c8 {
     none @0;
     enable @1;
     disable @2;
+  }
+
+  enum PreapStockCcTransactionState {
+    idle @0;
+    cancelRequested @1;
+    awaitingCancelConfirmation @2;
+    awaitingSecondPull @3;
+    reengageRequested @4;
+    awaitingDiConfirmation @5;
+    confirmed @6;
+    cancelledOrFailed @7;
   }
 }
 

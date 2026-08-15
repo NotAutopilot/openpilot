@@ -31,6 +31,18 @@ class TestPreAPSchemaContract(unittest.TestCase):
     self.assertEqual(int(custom.CarStateSP.PreapLongitudinalIntent.none), 0)
     self.assertEqual(int(custom.CarStateSP.PreapLongitudinalIntent.enable), 1)
     self.assertEqual(int(custom.CarStateSP.PreapLongitudinalIntent.disable), 2)
+    self.assertEqual(int(custom.CarStateSP.PreapStockCcTransactionState.idle), 0)
+    self.assertEqual(int(custom.CarStateSP.PreapStockCcTransactionState.cancelRequested), 1)
+    self.assertEqual(int(custom.CarStateSP.PreapStockCcTransactionState.awaitingCancelConfirmation), 2)
+    self.assertEqual(int(custom.CarStateSP.PreapStockCcTransactionState.awaitingSecondPull), 3)
+    self.assertEqual(int(custom.CarStateSP.PreapStockCcTransactionState.reengageRequested), 4)
+    self.assertEqual(int(custom.CarStateSP.PreapStockCcTransactionState.awaitingDiConfirmation), 5)
+    self.assertEqual(int(custom.CarStateSP.PreapStockCcTransactionState.confirmed), 6)
+    self.assertEqual(int(custom.CarStateSP.PreapStockCcTransactionState.cancelledOrFailed), 7)
+    enum = custom.CarStateSP.PreapStockCcTransactionState
+    self.assertEqual([int(enum.idle), int(enum.cancelRequested), int(enum.awaitingCancelConfirmation),
+                      int(enum.awaitingSecondPull), int(enum.reengageRequested), int(enum.awaitingDiConfirmation),
+                      int(enum.confirmed), int(enum.cancelledOrFailed)], list(range(8)))
 
   def test_field_ordinal_pins(self):
     cp = _ordinals(custom.CarParamsSP.schema)
@@ -58,6 +70,10 @@ class TestPreAPSchemaContract(unittest.TestCase):
     self.assertEqual(cs["preapLongitudinalIntent"], 2)
     self.assertEqual(cs["preapIntentSequence"], 3)
     self.assertEqual(cs["preapIntentEpoch"], 4)
+    self.assertEqual(cs["preapStockCcState"], 5)
+    self.assertEqual(cs["preapStockCcBoundCounter"], 6)
+    self.assertEqual(cs["preapStockCcHostDiConfirmed"], 7)
+    self.assertEqual(cs["preapStockCcEnablePending"], 8)
 
     car_state = _ordinals(structs.CarState.schema)
     self.assertEqual(car_state["turnSignalStalkState"], 61)
@@ -123,6 +139,8 @@ class TestPreAPSchemaContract(unittest.TestCase):
       self.assertEqual(msg.preapLongitudinalIntent, custom.CarStateSP.PreapLongitudinalIntent.disable)
       self.assertEqual(msg.preapIntentSequence, 9)
       self.assertEqual(msg.preapIntentEpoch, 99)
+      self.assertEqual(msg.preapStockCcState, custom.CarStateSP.PreapStockCcTransactionState.idle)
+      self.assertFalse(msg.preapStockCcEnablePending)
 
     with old.CarStateSP.from_bytes(raw_cs) as old_cs:
       self.assertAlmostEqual(old_cs.speedLimit, 11.0, places=4)
