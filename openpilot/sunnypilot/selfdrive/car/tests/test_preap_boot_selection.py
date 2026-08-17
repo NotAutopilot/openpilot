@@ -1,3 +1,4 @@
+import json
 import os
 import unittest
 from unittest.mock import MagicMock, patch
@@ -7,11 +8,13 @@ from opendbc.car import structs
 from opendbc.car.car_helpers import get_car
 from opendbc.car.tesla.preap.boot import PREAP_PLATFORM
 from openpilot.sunnypilot.selfdrive.car.preap_boot import (
+  is_preap_ui_platform,
   migrate_preap_engagement_mode,
   seed_preap_installer,
   resolve_card_boot,
   snapshot_param_list,
 )
+from openpilot.sunnypilot.selfdrive.car.sync_sunnylink_params import CAR_LIST_JSON_OUT, build_platform_bundle
 
 
 class FakeParams:
@@ -117,6 +120,25 @@ class TestPreAPBootSelection(unittest.TestCase):
     self.assertIsNone(params.get("NAPForcePreAP"))
     self.assertEqual(sel.candidate, "TESLA_MODEL_3")
     self.assertFalse(sel.lock_preap)
+
+  def test_vehicle_selector_preap_bundle_routes_boot_and_ui(self):
+    with open(CAR_LIST_JSON_OUT) as car_list_file:
+      car_list = json.load(car_list_file)
+
+    bundle = build_platform_bundle(car_list, "Tesla Model S (Pre-AP) 2012-14")
+    assert bundle is not None
+    self.assertEqual(bundle["name"], "Tesla Model S (Pre-AP) 2012-14")
+    self.assertEqual(bundle["brand"], "tesla")
+    params = FakeParams({"CarPlatformBundle": bundle})
+    selection, fingerprint = resolve_card_boot(params, environ={})
+
+    self.assertEqual(bundle["platform"], PREAP_PLATFORM)
+    self.assertEqual(selection.candidate, PREAP_PLATFORM)
+    self.assertEqual(fingerprint, PREAP_PLATFORM)
+    self.assertTrue(selection.lock_preap)
+    self.assertTrue(selection.skip_fw_query)
+    self.assertTrue(params.get("NAPForcePreAP"))
+    self.assertTrue(is_preap_ui_platform(bundle["platform"], None))
 
   def test_migrate_main_uem_once(self):
     params = FakeParams({"MadsMainCruiseAllowed": True, "MadsUnifiedEngagementMode": False})

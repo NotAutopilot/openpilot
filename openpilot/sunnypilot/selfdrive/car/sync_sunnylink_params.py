@@ -15,6 +15,11 @@ from openpilot.common.swaglog import cloudlog
 CAR_LIST_JSON_OUT = os.path.join(BASEDIR, "openpilot", "sunnypilot", "selfdrive", "car", "car_list.json")
 
 
+def build_platform_bundle(platforms: dict, platform_name: str) -> dict | None:
+  data = platforms.get(platform_name)
+  return {**data, "name": platform_name} if data else None
+
+
 def update_car_list_param():
   with open(CAR_LIST_JSON_OUT) as f:
     current_car_list = json.load(f)

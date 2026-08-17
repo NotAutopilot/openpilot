@@ -5,12 +5,11 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 import json
-import os
 import pyray as rl
 from collections.abc import Callable
 from functools import partial
 
-from openpilot.common.basedir import BASEDIR
+from openpilot.sunnypilot.selfdrive.car.sync_sunnylink_params import CAR_LIST_JSON_OUT, build_platform_bundle
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.widgets import DialogResult, Widget
@@ -20,8 +19,6 @@ from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.sunnypilot.lib.styles import style
 from openpilot.system.ui.sunnypilot.widgets.tree_dialog import TreeOptionDialog, TreeNode, TreeFolder
 from openpilot.selfdrive.ui.ui_state import ui_state
-
-CAR_LIST_JSON_OUT = os.path.join(BASEDIR, "openpilot", "sunnypilot", "selfdrive", "car", "car_list.json")
 
 
 class LegendWidget(Widget):
@@ -84,8 +81,8 @@ class PlatformSelector(Button):
       self._show_platform_dialog()
 
   def _set_platform(self, platform_name):
-    if data := self._platforms.get(platform_name):
-      ui_state.params.put("CarPlatformBundle", {**data, "name": platform_name})
+    if bundle := build_platform_bundle(self._platforms, platform_name):
+      ui_state.params.put("CarPlatformBundle", bundle)
       self.refresh()
       if self._on_platform_change:
         self._on_platform_change()
