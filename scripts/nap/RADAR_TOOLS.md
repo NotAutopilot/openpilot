@@ -104,6 +104,27 @@ that flag existed: reboot so openpilot reflashes it.
 State machine and protocol handling live in
 `opendbc/car/tesla/preap/radar_vin.py` (unit tested, no hardware needed).
 
+### Probing a radar that won't answer
+
+```bash
+python3 scripts/nap/vin_learn_radar.py --probe
+```
+
+Read-only — it sends nothing but TesterPresent and writes nothing. Use it when
+the learn reports that requests went out and nothing came back. It separates
+three failures that otherwise look identical:
+
+1. **Nothing on bus 1** — either the radar is unpowered (on the common Pre-AP
+   install radar power is tapped off the EPAS fuse, so the car must be awake) or
+   bus 1 RX isn't reaching the tool, which would be a tool bug.
+2. **Track frames but no diagnostic reply** — the radar is powered and running
+   but ignores diagnostics. Not a wiring problem.
+3. **A reply at an unexpected address** — the learn is targeting the wrong one.
+
+It probes 0x641 (what the DBC and Tinkla's tooling use) and 0x671, and reports
+any frame that appears on the radar bus after the request which wasn't part of
+the steady-state background — so a response at a third address still shows up.
+
 ---
 
 ## radar_replay.py
@@ -146,24 +167,3 @@ The replay uses a simplified lead selection (closest in-lane track) without the 
 - `zstandard` — for .zst decompression
 - `pycapnp` — for capnp message parsing (fallback when cereal is unavailable)
 - Works both on-device (with cereal) and locally (with pycapnp + log.capnp schema)
-
-### Probing a radar that won't answer
-
-```bash
-python3 scripts/nap/vin_learn_radar.py --probe
-```
-
-Read-only — it sends nothing but TesterPresent and writes nothing. Use it when
-the learn reports that requests went out and nothing came back. It separates
-three failures that otherwise look identical:
-
-1. **Nothing on bus 1** — either the radar is unpowered (on the common Pre-AP
-   install radar power is tapped off the EPAS fuse, so the car must be awake) or
-   bus 1 RX isn't reaching the tool, which would be a tool bug.
-2. **Track frames but no diagnostic reply** — the radar is powered and running
-   but ignores diagnostics. Not a wiring problem.
-3. **A reply at an unexpected address** — the learn is targeting the wrong one.
-
-It probes 0x641 (what the DBC and Tinkla's tooling use) and 0x671, and reports
-any frame that appears on the radar bus after the request which wasn't part of
-the steady-state background — so a response at a third address still shows up.
