@@ -214,6 +214,62 @@ def test_probe_survives_unreadable_health(capsys):
   assert "TesterPresent probe" in out
 
 
+def alert_payload(*bits):
+  dat = bytearray(8)
+  for bit in bits:
+    dat[bit // 8] |= 1 << (bit % 8)
+  return bytes(dat)
+
+
+def test_alert_matrix_decodes_the_three_config_mismatches():
+  from scripts.nap.vin_learn_radar import decode_alert_matrix
+  names = dict(decode_alert_matrix(alert_payload(36, 60, 61)))
+  assert names == {36: "vinValidity", 60: "radPositionMismatch", 61: "strRackMismatch"}
+
+
+def test_alert_matrix_decodes_nothing_when_clean():
+  from scripts.nap.vin_learn_radar import decode_alert_matrix
+  assert decode_alert_matrix(bytes(8)) == []
+
+
+def test_alert_report_calls_out_each_config_mismatch(capsys):
+  from scripts.nap.vin_learn_radar import report_alert_matrix
+  report_alert_matrix(alert_payload(36, 60, 61))
+  out = capsys.readouterr().out
+  assert "CONFIG MISMATCH" in out
+  assert "not the one this radar was programmed with" in out
+  assert "donor car's model" in out
+  assert "donor car's steering rack" in out
+
+
+def test_alert_report_separates_unrelated_alerts(capsys):
+  from scripts.nap.vin_learn_radar import report_alert_matrix
+  report_alert_matrix(alert_payload(6, 36))   # sensorBlinded + vinValidity
+  out = capsys.readouterr().out
+  assert "CONFIG MISMATCH" in out
+  assert "Other alerts set (1)" in out
+  assert "sensorBlinded" in out
+
+
+def test_alert_report_says_so_when_radar_is_happy(capsys):
+  from scripts.nap.vin_learn_radar import report_alert_matrix
+  report_alert_matrix(bytes(8))
+  assert "No alerts set" in capsys.readouterr().out
+
+
+def test_alert_report_handles_never_seeing_the_message(capsys):
+  from scripts.nap.vin_learn_radar import report_alert_matrix
+  report_alert_matrix(None)
+  assert "cannot read the" in capsys.readouterr().out
+
+
+def test_probe_surfaces_the_alert_matrix(capsys):
+  alert = [(0x501, alert_payload(36), RADAR_BUS)]
+  panda = ScriptedPanda(background=BACKGROUND + alert)
+  probe_radar(panda, listen=0.01, reply_window=0.01)
+  assert "vinValidity" in capsys.readouterr().out
+
+
 def test_wait_for_pandad_returns_as_soon_as_it_is_gone(monkeypatch):
   import scripts.nap.vin_learn_radar as tool
   calls = []

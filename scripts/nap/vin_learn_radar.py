@@ -41,6 +41,33 @@ RADAR_POINT_RANGE = range(0x310, 0x37E)   # track frames, background noise for p
 # 0x641 is what the DBC and Tinkla's tooling use. 0x671 appears in a Tinkla
 # source comment as an alternate RADC diagnostic address; probe both.
 PROBE_TX_ADDRESSES = (0x641, 0x671)
+
+# TeslaRadarAlertMatrix. The radar broadcasts this unsolicited, so it can be read
+# with no diagnostic session at all — it is the radar telling us exactly what it
+# is unhappy about. Bit numbers are little-endian from tesla_radar_bosch.py.
+RADAR_ALERT_ADDR = 0x501
+RADAR_ALERTS = {
+  0: "ecuInternalPerf", 1: "flashPerformance", 2: "vBatHigh", 3: "adjustmentNotDone",
+  4: "adjustmentReq", 5: "adjustmentNotOk", 6: "sensorBlinded", 7: "plantModeActive",
+  8: "configMismatch", 9: "canBusOff", 10: "bdyMIA", 11: "espMIA", 12: "gtwMIA",
+  13: "sccmMIA", 14: "adasMIA", 15: "bdyInvalidCount", 16: "adasInvalidCount",
+  17: "espInvalidCount", 18: "sccmInvalidCount", 19: "bdyInvalidChkSm",
+  20: "espInvalidChkSm", 21: "sccmInvalidChkSm", 22: "sccmInvalidChkSm2",
+  23: "absValidity", 24: "ambTValidity", 25: "brakeValidity", 26: "CntryCdValidity",
+  27: "espValidity", 28: "longAccOffValidity", 29: "longAccValidity", 30: "odoValidity",
+  31: "gearValidity", 32: "steerAngValidity", 33: "steerAngSpdValidity",
+  34: "indctrValidity", 35: "vehStandStillValidity", 36: "vinValidity",
+  37: "whlRotValidity", 38: "whlSpdValidity", 39: "whlStandStillValidity",
+  40: "wiperValidity", 41: "xwdValidity", 42: "yawOffValidity", 43: "yawValidity",
+  44: "bsdSanity", 45: "rctaSanity", 46: "lcwSanity", 47: "steerAngOffSanity",
+  48: "tireSizeSanity", 49: "velocitySanity", 50: "yawSanity", 51: "radomeHtrInop",
+  52: "espmodValidity", 53: "gtwmodValidity", 54: "stwmodValidity", 55: "bcmodValidity",
+  56: "dimodValidity", 57: "opmodValidity", 58: "drmiInvalidChkSm",
+  59: "drmiInvalidCount", 60: "radPositionMismatch", 61: "strRackMismatch",
+}
+# The three that mean "what you are sending does not match what I was programmed
+# with" — VIN, donor-car radar position, donor-car EPAS type.
+RADAR_CONFIG_ALERTS = (36, 60, 61)
 VIN_SNIFF_TIMEOUT = 20.0    # 0x405 is a ~5 Hz three-part multiplex
 LEARN_TIMEOUT = 60.0        # backstop; the learner has its own 30s budget
 POLL_INTERVAL = 0.005
@@ -105,6 +132,48 @@ def recv(panda):
 
     packets.append(CanData(addr, bytes(dat), src))
   return packets, rejected
+
+
+def decode_alert_matrix(dat):
+  """Set alert bits in a TeslaRadarAlertMatrix payload, as (bit, name) pairs."""
+  alerts = []
+  for bit in range(len(dat) * 8):
+    if dat[bit // 8] & (1 << (bit % 8)):
+      alerts.append((bit, RADAR_ALERTS.get(bit, f"unknown_bit{bit}")))
+  return alerts
+
+
+def report_alert_matrix(dat):
+  """Print what the radar is complaining about, config mismatches first."""
+  if dat is None:
+    p(f"  No 0x{RADAR_ALERT_ADDR:03X} (alert matrix) seen — cannot read the")
+    p("  radar's own complaints. It broadcasts this unprompted when running.")
+    return
+
+  alerts = decode_alert_matrix(dat)
+  p(f"  Alert matrix 0x{RADAR_ALERT_ADDR:03X}: {dat.hex()}")
+  if not alerts:
+    p("  No alerts set — the radar is happy with what it is being sent.")
+    return
+
+  config = [(bit, name) for bit, name in alerts if bit in RADAR_CONFIG_ALERTS]
+  other = [(bit, name) for bit, name in alerts if bit not in RADAR_CONFIG_ALERTS]
+
+  if config:
+    p("\n  CONFIG MISMATCH — the radar rejects what we are sending it:")
+    for bit, name in config:
+      p(f"    a{bit + 1:03d} {name}")
+    if any(bit == 36 for bit, _ in config):
+      p("    → the VIN on the bus is not the one this radar was programmed with")
+    if any(bit == 60 for bit, _ in config):
+      p("    → radar position is wrong (donor car's model, not where you mounted it)")
+    if any(bit == 61 for bit, _ in config):
+      p("    → EPAS type is wrong (donor car's steering rack, 0-4)")
+
+  if other:
+    p(f"\n  Other alerts set ({len(other)}):")
+    for bit, name in other:
+      p(f"    a{bit + 1:03d} {name}")
 
 
 def pandad_running():
@@ -232,12 +301,16 @@ def probe_radar(panda, listen=3.0, reply_window=1.5):
 
   p(f"\n[1/4] Listening on bus {RADAR_BUS} for {listen:.0f}s...")
   baseline = {}
+  alert_matrix = None
   deadline = time.monotonic() + listen
   while time.monotonic() < deadline:
     packets, _ = recv(panda)
     for packet in packets:
-      if packet.src == RADAR_BUS:
-        baseline[packet.address] = baseline.get(packet.address, 0) + 1
+      if packet.src != RADAR_BUS:
+        continue
+      baseline[packet.address] = baseline.get(packet.address, 0) + 1
+      if packet.address == RADAR_ALERT_ADDR:
+        alert_matrix = packet.dat
     time.sleep(POLL_INTERVAL)
 
   total = sum(baseline.values())
@@ -258,10 +331,11 @@ def probe_radar(panda, listen=3.0, reply_window=1.5):
   else:
     p("    (none)")
 
-  p(f"\n[2/4] Radar is transmitting: {'yes' if tracks else 'NO TRACK FRAMES'}")
+  p(f"\n[2/4] Radar status — transmitting: {'yes' if tracks else 'NO TRACK FRAMES'}")
   if not tracks:
     p("  The radar is not sending tracks. It may be unpowered — on this install")
     p("  radar power comes off the EPAS fuse, so the car has to be awake.")
+  report_alert_matrix(alert_matrix)
 
   p("\n[3/4] TesterPresent probe")
   health_before_send = bus_health(panda, RADAR_BUS)
