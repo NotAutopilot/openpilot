@@ -8,7 +8,7 @@ import pytest
 
 from opendbc.car.can_definitions import CanData
 from opendbc.car.tesla.preap.radar_vin import RADAR_BUS, RADAR_RX_ADDRESS, RADAR_TX_ADDRESS
-from scripts.nap.vin_learn_radar import check_safety_mode, recv
+from scripts.nap.vin_learn_radar import check_safety_mode, probe_radar, recv
 
 TESLA_PREAP = 37
 UDS_REQUEST = b"\x02\x10\x03\x00\x00\x00\x00\x00"
@@ -74,6 +74,53 @@ def test_recv_skips_unknown_tuple_shapes():
 # The panda drops to SAFETY_SILENT once its heartbeat times out. That blocks
 # every send and stops GTW emulation, which is indistinguishable from an
 # unwired radar unless we look at health.
+
+class ScriptedPanda(FakePanda):
+  """Background traffic always; reply frames only after something is sent."""
+
+  def __init__(self, background=(), reply=()):
+    super().__init__()
+    self._background = list(background)
+    self._reply = list(reply)
+    self.sent = []
+
+  def can_send(self, addr, dat, bus):
+    self.sent.append((addr, dat, bus))
+
+  def can_recv(self):
+    return self._background + (self._reply if self.sent else [])
+
+
+# One radar track frame, i.e. a live radar minding its own business.
+BACKGROUND = [(0x310, b"\x00" * 8, RADAR_BUS)]
+
+
+def test_probe_reports_failure_when_bus_is_silent():
+  panda = ScriptedPanda()
+  assert probe_radar(panda, listen=0.01, reply_window=0.01) is False
+
+
+def test_probe_reports_failure_when_radar_ignores_tester_present():
+  panda = ScriptedPanda(background=BACKGROUND)
+  assert probe_radar(panda, listen=0.01, reply_window=0.01) is False
+  # Probed every candidate address, and only ever sent TesterPresent.
+  assert [addr for addr, _, _ in panda.sent] == [0x641, 0x671]
+  assert {dat[:3] for _, dat, _ in panda.sent} == {b"\x02\x3e\x00"}
+  assert {bus for _, _, bus in panda.sent} == {RADAR_BUS}
+
+
+def test_probe_detects_a_responding_radar():
+  reply = [(RADAR_RX_ADDRESS, b"\x02\x7e\x00\x00\x00\x00\x00\x00", RADAR_BUS)]
+  panda = ScriptedPanda(background=BACKGROUND, reply=reply)
+  assert probe_radar(panda, listen=0.01, reply_window=0.01) is True
+
+
+def test_probe_ignores_track_frames_as_replies():
+  # Track frames are background noise, never a diagnostic response.
+  reply = [(0x340, b"\xff" * 8, RADAR_BUS)]
+  panda = ScriptedPanda(background=BACKGROUND, reply=reply)
+  assert probe_radar(panda, listen=0.01, reply_window=0.01) is False
+
 
 def test_check_safety_mode_accepts_expected_mode():
   panda = FakePanda(health={"safety_mode": TESLA_PREAP, "heartbeat_lost": False})

@@ -36,6 +36,10 @@ import time
 # Constants
 # ============================================
 VIN_SOURCE_ADDR = 0x405     # VIN_VIP_405HS on the chassis bus
+RADAR_POINT_RANGE = range(0x310, 0x37E)   # track frames, background noise for probing
+# 0x641 is what the DBC and Tinkla's tooling use. 0x671 appears in a Tinkla
+# source comment as an alternate RADC diagnostic address; probe both.
+PROBE_TX_ADDRESSES = (0x641, 0x671)
 VIN_SNIFF_TIMEOUT = 20.0    # 0x405 is a ~5 Hz three-part multiplex
 LEARN_TIMEOUT = 60.0        # backstop; the learner has its own 30s budget
 POLL_INTERVAL = 0.005
@@ -97,6 +101,105 @@ def recv(panda):
 
     packets.append(CanData(addr, bytes(dat), src))
   return packets, rejected
+
+
+def probe_radar(panda, listen=3.0, reply_window=1.5):
+  """Read-only reachability check. Sends nothing but TesterPresent.
+
+  Answers three questions in order, so a failure lands on a specific one:
+    1. can this tool hear bus 1 at all?  (proves the RX path, not just TX)
+    2. is the radar transmitting?        (proves it is powered and running)
+    3. does it answer a diagnostic request, and at what address?
+  """
+  from opendbc.car.tesla.preap.radar_vin import RADAR_BUS, RADAR_TX_ADDRESS
+
+  p("\n" + "=" * 40)
+  p("PROBE: radar diagnostic reachability")
+  p("=" * 40)
+
+  p(f"\n[1/3] Listening on bus {RADAR_BUS} for {listen:.0f}s...")
+  baseline = {}
+  deadline = time.monotonic() + listen
+  while time.monotonic() < deadline:
+    packets, _ = recv(panda)
+    for packet in packets:
+      if packet.src == RADAR_BUS:
+        baseline[packet.address] = baseline.get(packet.address, 0) + 1
+    time.sleep(POLL_INTERVAL)
+
+  total = sum(baseline.values())
+  if total == 0:
+    p("  NOTHING on bus 1.")
+    p("  Either the radar is not powered/transmitting, or bus 1 RX is not")
+    p("  reaching this tool. Since the radar works in normal driving, suspect")
+    p("  the latter — that would be a tool bug, so report this result.")
+    return False
+
+  tracks = sum(count for addr, count in baseline.items() if addr in RADAR_POINT_RANGE)
+  p(f"  {total} frames from {len(baseline)} addresses ({tracks} radar track frames)")
+  p("  Non-track addresses seen:")
+  others = [a for a in sorted(baseline) if a not in RADAR_POINT_RANGE]
+  if others:
+    for addr in others:
+      p(f"    0x{addr:03X}  x{baseline[addr]}")
+  else:
+    p("    (none)")
+
+  p(f"\n[2/3] Radar is transmitting: {'yes' if tracks else 'NO TRACK FRAMES'}")
+  if not tracks:
+    p("  The radar is not sending tracks. It may be unpowered — on this install")
+    p("  radar power comes off the EPAS fuse, so the car has to be awake.")
+
+  p("\n[3/3] TesterPresent probe")
+  answered = []
+  for tx_addr in PROBE_TX_ADDRESSES:
+    p(f"\n  → 0x{tx_addr:03X}  02 3E 00")
+    panda.can_send(tx_addr, b"\x02\x3e\x00\x00\x00\x00\x00\x00", RADAR_BUS)
+
+    replies = {}
+    blocked = False
+    deadline = time.monotonic() + reply_window
+    while time.monotonic() < deadline:
+      packets, rejected = recv(panda)
+      blocked = blocked or rejected
+      for packet in packets:
+        # Anything on the radar bus that wasn't part of the steady-state
+        # background is a candidate response, whatever address it uses.
+        if packet.src != RADAR_BUS or packet.address in RADAR_POINT_RANGE:
+          continue
+        if packet.address not in baseline:
+          replies.setdefault(packet.address, packet.dat)
+      time.sleep(POLL_INTERVAL)
+
+    if blocked:
+      p("    panda REFUSED the send — firmware is missing PREAP_FLAG_RADAR_VIN_LEARN")
+    elif replies:
+      for addr, dat in sorted(replies.items()):
+        note = ""
+        if len(dat) >= 3 and dat[1] == 0x7F:
+          note = f"  (negative response, NRC 0x{dat[3]:02X})" if len(dat) >= 4 else "  (negative response)"
+        elif len(dat) >= 2 and dat[1] == 0x7E:
+          note = "  (TesterPresent OK)"
+        p(f"    ← 0x{addr:03X}: {dat.hex()}{note}")
+      answered.append(tx_addr)
+    else:
+      p("    no reply")
+
+  p("\n" + "=" * 60)
+  if answered:
+    p("RADAR ANSWERS DIAGNOSTICS")
+    p("=" * 60)
+    p(f"Responding to: {', '.join(f'0x{a:03X}' for a in answered)}")
+    if RADAR_TX_ADDRESS not in answered:
+      p(f"But NOT to 0x{RADAR_TX_ADDRESS:03X}, which is what the learn uses.")
+      p("That is the bug — the learn needs to target the address above.")
+  else:
+    p("RADAR DOES NOT ANSWER DIAGNOSTICS")
+    p("=" * 60)
+    p("It is on the bus and transmitting, but ignores TesterPresent at every")
+    p("address tried. That points at the radar's diagnostic layer, not wiring:")
+    p("some firmware builds only accept diagnostics in a particular state.")
+  return bool(answered)
 
 
 def check_safety_mode(panda, expected_mode):
@@ -185,6 +288,8 @@ def parse_args(cli_args=None):
   parser = argparse.ArgumentParser(
     description="Teach a used Tesla Bosch radar this car's VIN",
   )
+  parser.add_argument("--probe", action="store_true",
+                      help="Read-only reachability check; sends only TesterPresent, learns nothing")
   parser.add_argument("--vin", type=str, default=None,
                       help="Override the target VIN instead of reading it from bus 0")
   parser.add_argument("--sniff-timeout", type=float, default=VIN_SNIFF_TIMEOUT,
@@ -213,6 +318,10 @@ def main(cli_args=None):
   p("Key fob inside; pressing the brake brings the car up and keeps it there.")
   p("The car may chime or show warnings while this runs — that is normal.")
   p("=" * 60)
+
+  if args.probe:
+    p("")
+    p("PROBE MODE — read-only. Nothing is written to the radar.")
 
   if not nap_conf.radar_enabled:
     p("\nERROR: Radar is not enabled.")
@@ -261,6 +370,9 @@ def main(cli_args=None):
     panda.can_clear(0xFFFF)
     time.sleep(0.1)
     panda.can_recv()
+
+    if args.probe:
+      return 0 if probe_radar(panda) else 1
 
     # Step 1: this car's VIN
     p("\n" + "=" * 40)
