@@ -20,6 +20,7 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   FLASH_EPAS_INSTRUCTIONS, PEDAL_CAN_BUS_VALUES,
   RADAR_OFFSET_MAX, RADAR_OFFSET_MIN,
   RESTORE_EPAS_INSTRUCTIONS, TEST_RADAR_INSTRUCTIONS,
+  VIN_LEARN_RADAR_INSTRUCTIONS,
   acknowledgments_html, find_preset_index,
 )
 from opendbc.car.tesla.preap.nap_params import NAPParamKeys, DEFAULTS
@@ -204,6 +205,18 @@ class NAPLayout(Widget):
     )
     self._test_radar_btn.action_item.set_enabled(ui_state.is_offroad)
     self._all_items.append(self._test_radar_btn)
+
+    self._vin_learn_radar_btn = button_item(
+      "Radar VIN Learn",
+      "Start",
+      description=(
+        "Teach a used radar this car's VIN. A radar pulled from another Tesla stops updating "
+        + "tracks five seconds after power-up until it learns the VIN it is installed under."
+      ),
+      callback=self._on_vin_learn_radar,
+    )
+    self._vin_learn_radar_btn.action_item.set_enabled(ui_state.is_offroad)
+    self._all_items.append(self._vin_learn_radar_btn)
 
     # ── Section 4: iBooster / Braking (not yet implemented — grayed out) ──
     self._all_items.append(section_header_item("iBooster / Braking"))
@@ -398,6 +411,13 @@ class NAPLayout(Widget):
       title="Radar Test",
       instructions=TEST_RADAR_INSTRUCTIONS,
       script_module="scripts.nap.test_radar",
+    )
+
+  def _on_vin_learn_radar(self):
+    self._show_script_runner(
+      title="Radar VIN Learn",
+      instructions=VIN_LEARN_RADAR_INSTRUCTIONS,
+      script_module="scripts.nap.vin_learn_radar",
     )
 
   def _on_flash_epas(self):

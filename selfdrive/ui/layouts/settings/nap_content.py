@@ -59,6 +59,29 @@ The calibration display will show:
 Press START when ready to begin."""
 
 
+VIN_LEARN_RADAR_INSTRUCTIONS = """\
+NAP Radar VIN Learn
+
+A Bosch radar taken from another Tesla keeps that car's VIN in its own
+memory. It sends tracks for about five seconds after power-up no matter
+what, then stops updating them because the VIN on the bus does not match
+what it was programmed with. This tool teaches it the VIN of this car.
+
+You do not enter a VIN — it is read from the car's own CAN bus.
+
+PRECONDITIONS:
+  1. Radar installed, wired, and 'Radar Enabled' turned on
+  2. 'Radar Behind Nosecone' set correctly for your mount
+  3. Car ON and in PARK (brake + power button to wake it)
+  4. Keep your foot on the brake for the whole process
+
+The car may chime or show warnings while this runs. That is normal.
+
+When it finishes, let the car go to 'CAR OFF' and reboot the device.
+
+Press START when ready to begin."""
+
+
 TEST_RADAR_INSTRUCTIONS = """\
 NAP Radar Test
 

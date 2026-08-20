@@ -22,6 +22,7 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   RADAR_OFFSET_MIN,
   RESTORE_EPAS_INSTRUCTIONS,
   TEST_RADAR_INSTRUCTIONS,
+  VIN_LEARN_RADAR_INSTRUCTIONS,
 )
 from openpilot.selfdrive.ui.ui_state import ui_state
 from opendbc.car.tesla.preap.nap_params import NAPParamKeys
@@ -130,6 +131,13 @@ class NAPLayoutMici(NavScroller):
                             ))
     test_radar_btn.set_enabled(ui_state.is_offroad)
 
+    vin_learn_radar_btn = BigButton("radar vin learn", "start")
+    vin_learn_radar_btn.set_click_callback(
+      lambda: launch_script("Radar VIN Learn", VIN_LEARN_RADAR_INSTRUCTIONS,
+                            "scripts.nap.vin_learn_radar",
+                            ))
+    vin_learn_radar_btn.set_enabled(ui_state.is_offroad)
+
     # ── iBooster (locked off) ────────────────────────
     ibooster_enabled = BigParamControl("ibooster enabled", NAPParamKeys.IBOOSTER_ENABLED)
     ibooster_enabled.set_enabled(False)
@@ -173,6 +181,7 @@ class NAPLayoutMici(NavScroller):
       radar_offset_btn,
       calibrate_radar_btn,
       test_radar_btn,
+      vin_learn_radar_btn,
       ibooster_enabled,
       force_pre_ap,
       backup_epas_btn,
