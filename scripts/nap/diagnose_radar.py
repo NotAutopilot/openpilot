@@ -50,19 +50,22 @@ GTW_MESSAGES = {
 # because CAN TX doesn't loopback to RX (we can't see our own GTW TX on bus 1).
 GTW_SOURCE_MAP = {
     # src_addr: (dest_addr, name, expected_hz)
+    # Mirrors tesla_preap_gtw_emulation() in opendbc/safety/modes/tesla_preap.h.
+    # Keep this table in sync with the firmware — a wrong source address here
+    # reports a message as missing when it is really being forwarded fine.
     0x108: (0x109, "DI_torque1", 100),
     0x118: (0x119, "DI_torque2", 100),    # also source for 0x169 wheel speed synthesis
     0x115: (0x129, "ESP_115h", 50),       # re-addressed; also source for 0x1A9 synthesis
     0x145: (0x149, "ESP_145h", 50),
-    0x158: (0x159, "ESP_C (Brake)", 50),
+    0x20A: (0x159, "BrakeMessage → ESP_C", 50),
     # 0x169 is SYNTHESIZED from 0x118 — no direct source
     0x0E:  (0x199, "STW_ANGLHP_STAT", 100),
     # 0x1A9 is SYNTHESIZED from 0x115 — no direct source
-    0x20A: (0x209, "GTW_odo", 10),
-    0x308: (0x219, "STW_ACTN_RQ", 10),    # re-addressed 0x308 → 0x219
-    0x2A8: (0x2A9, "GTW_carConfig", 1),
-    0x405: (0x2B9, "VIP_405HS", 2),       # re-addressed 0x405 → 0x2B9
-    0x398: (0x2D9, "BC_status", 10),      # re-addressed 0x398 → 0x2D9
+    0x308: (0x209, "GTW_odo", 50),
+    0x45:  (0x219, "STW_ACTN_RQ", 10),
+    0x398: (0x2A9, "GTW_carConfig", 1),   # bitfield-patched (country/radar/position/epas)
+    0x405: (0x2B9, "VIN_VIP_405HS", 5),
+    0x30A: (0x2D9, "BC_status", 10),
 }
 
 # Critical messages for radar tracking (without these the radar can't compute Doppler)

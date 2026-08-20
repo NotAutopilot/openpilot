@@ -38,6 +38,8 @@ Quick one-shot check (does NOT change safety mode):
 
 ### GTW Source-to-Destination Map
 
+Source of truth: `tesla_preap_gtw_emulation()` in `opendbc/safety/modes/tesla_preap.h`.
+
 | Source (bus 0) | Dest (bus 1) | Name | Expected Rate |
 |---|---|---|---|
 | 0x108 | 0x109 | DI_torque1 | 100 Hz |
@@ -45,17 +47,60 @@ Quick one-shot check (does NOT change safety mode):
 | 0x0E | 0x199 | STW_ANGLHP_STAT | 100 Hz |
 | 0x115 | 0x129 | ESP_115h | 50 Hz |
 | 0x145 | 0x149 | ESP_145h | 50 Hz |
-| 0x20A | 0x209 | GTW_odo | 50 Hz |
-| 0x308 | 0x219 | STW_ACTN_RQ | 10 Hz |
-| 0x405 | 0x2B9 | VIP_405HS | 5 Hz |
-| 0x398 | 0x2D9 | BC_status | 1 Hz |
+| 0x20A | 0x159 | BrakeMessage → ESP_C | 50 Hz |
+| 0x308 | 0x209 | GTW_odo | 50 Hz |
+| 0x45 | 0x219 | STW_ACTN_RQ | 10 Hz |
+| 0x398 | 0x2A9 | GTW_carConfig | 1 Hz |
+| 0x405 | 0x2B9 | VIN_VIP_405HS | 5 Hz |
+| 0x30A | 0x2D9 | BC_status | 10 Hz |
 
 Synthesized (no direct source on bus 0):
 - 0x169 (ESP_wheelSpeeds) — built from 0x118 data, sent at 100 Hz
 - 0x1A9 (DI_espControl) — built from 0x115 data, sent at 50 Hz
 
-Messages not present on Pre-AP (expected missing):
-- 0x158 (ESP_C/Brake), 0x2A8 (GTW_carConfig — event-triggered only)
+0x398 (GTW_carConfig) is not a straight re-address: the firmware patches the
+country, radar type, radar position and EPAS type bitfields on the way through.
+Those are the fields the radar checks against what it was programmed with, so a
+missing or wrong 0x2A9 looks exactly like a VIN mismatch — tracks for five
+seconds, then frozen.
+
+---
+
+## vin_learn_radar.py
+
+Teaches a used Bosch radar the VIN of the car it is now installed in. Run from
+**Settings → NAP → Radar → Radar VIN Learn**, or on-device directly.
+
+A radar pulled from another Tesla keeps that car's VIN in its own memory. It
+sends tracks for ~5 seconds after power-up regardless, then stops updating them
+once it sees a VIN, radar position or EPAS type on the bus that doesn't match
+what it was programmed with.
+
+```bash
+python3 scripts/nap/vin_learn_radar.py
+```
+
+There is no VIN to type in — the car's VIN is read off 0x405 on bus 0 and the
+radar learns it from the live bus. What the tool does:
+
+1. reads this car's VIN from the chassis bus
+2. reads the VIN stored in the radar (DID 0xF190); if it already matches, stops
+   without writing anything
+3. extended diagnostic session + Tesla SecurityAccess level 1
+4. `routineControl` start / stop / requestResults on routine 0x0A03
+5. reads the stored VIN back to confirm it changed
+
+Requires the car ON and in PARK with the brake held. The car may chime during
+the routine. Reboot the device afterwards.
+
+The panda is put in `teslaPreap` safety mode with `PREAP_FLAG_RADAR_VIN_LEARN`
+(8) — GTW emulation has to keep feeding the radar this car's VIN and position
+while it learns, and the flag is what opens 0x641 on the radar bus in the TX
+whitelist. If the panda rejects the sends, it is running firmware from before
+that flag existed: reboot so openpilot reflashes it.
+
+State machine and protocol handling live in
+`opendbc/car/tesla/preap/radar_vin.py` (unit tested, no hardware needed).
 
 ---
 
