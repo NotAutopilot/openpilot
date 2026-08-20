@@ -99,6 +99,26 @@ def recv(panda):
   return packets, rejected
 
 
+def check_safety_mode(panda, expected_mode):
+  """Confirm the panda is in the mode we asked for, and say so plainly if not.
+
+  A panda that has fallen back to SAFETY_SILENT blocks every send and stops GTW
+  emulation, which looks exactly like a radar that isn't wired up. Catch it here
+  instead of blaming the harness later.
+  """
+  health = panda.health()
+  if health["safety_mode"] == expected_mode:
+    return True
+
+  p(f"\nERROR: Panda is in safety mode {health['safety_mode']}, expected {expected_mode}.")
+  if health["heartbeat_lost"]:
+    p("The panda dropped to SILENT after losing the openpilot heartbeat.")
+    p("This is a bug in this tool, not your wiring — please report it.")
+  else:
+    p("Something else changed the safety mode. Is pandad still running?")
+  return False
+
+
 def sniff_car_vin(panda, timeout=VIN_SNIFF_TIMEOUT):
   """Read this car's VIN from the chassis bus. Returns the VIN or None."""
   from opendbc.car.tesla.preap.radar_vin import RadarVinAssembler
@@ -217,8 +237,24 @@ def main(cli_args=None):
     panda = connect_panda()
     p("  Connected")
 
+    # The panda drops to SAFETY_SILENT and enables power save after 5s without a
+    # USB heartbeat while the ignition is on (main.c: HEARTBEAT_IGNITION_CNT_ON).
+    # Only pandad sends heartbeats and the ScriptRunner has stopped it, so the
+    # checks have to go off or every UDS frame — and GTW emulation with it — dies
+    # a few seconds in.
+    #
+    # Order matters: the firmware ignores this request while a car safety mode is
+    # active (is_car_safety_mode), and teslaPreap is one. Disable first, then set
+    # the mode. Starting pandad again re-enables the checks on its first heartbeat.
+    panda.set_heartbeat_disabled()
+    panda.set_power_save(False)
+    p("  Heartbeat checks disabled for this session")
+
     panda.set_safety_mode(SafetyModel.teslaPreap, param=int(flags))
     p(f"  Safety mode: teslaPreap (flags={int(flags)}, GTW emulation + VIN learn)")
+
+    if not check_safety_mode(panda, int(SafetyModel.teslaPreap)):
+      return 1
 
     p("  Flushing CAN buffers...")
     panda.can_clear(0xFFFF)
@@ -249,6 +285,7 @@ def main(cli_args=None):
     p("  Keep your foot on the brake until this finishes.")
     p("")
 
+    tx_blocked_before = panda.health()["safety_tx_blocked"]
     result, failure = run_learn(panda, target_vin, args.timeout)
 
     p("")
@@ -277,8 +314,23 @@ def main(cli_args=None):
     p("")
     if failure is not None:
       p(f"Reason: {failure.name}")
-    p("Nothing was written to the radar. Check that the radar is powered and")
-    p("wired to the radar port, then try again with the car on and in park.")
+    p("Nothing was written to the radar.")
+    p("")
+
+    # Distinguish "the radar never answered" from "we never got to ask it".
+    health = panda.health()
+    tx_blocked = health["safety_tx_blocked"] - tx_blocked_before
+    if health["safety_mode"] != int(SafetyModel.teslaPreap):
+      p(f"The panda left teslaPreap mid-session (now {health['safety_mode']}), so")
+      p("the requests never reached the bus. This is a tool bug, not your wiring.")
+    elif tx_blocked > 0:
+      p(f"The panda blocked {tx_blocked} of our sends. The firmware is missing")
+      p("PREAP_FLAG_RADAR_VIN_LEARN — reboot so openpilot reflashes the panda.")
+    else:
+      p("The requests went out on bus 1 but the radar never answered. Check that")
+      p("the radar has 12V and that its CAN pair reaches the radar port on the")
+      p("adapter — the car does not carry this traffic, the panda talks to the")
+      p("radar directly. Then try again with the car on and in park.")
     return 1
 
   except KeyboardInterrupt:
