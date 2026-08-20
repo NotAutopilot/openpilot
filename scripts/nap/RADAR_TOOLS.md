@@ -106,9 +106,15 @@ State machine and protocol handling live in
 
 ### Probing a radar that won't answer
 
+**Settings → NAP → Radar → Probe Radar**, or:
+
 ```bash
 python3 scripts/nap/vin_learn_radar.py --probe
 ```
+
+The settings button runs `scripts/nap/probe_radar.py`, a thin wrapper that calls
+the same code with `--probe` — the ScriptRunner launches modules with
+`python -m` and cannot pass arguments, so the probe needs its own entry point.
 
 Read-only — it sends nothing but TesterPresent and writes nothing. Use it when
 the learn reports that requests went out and nothing came back. It separates

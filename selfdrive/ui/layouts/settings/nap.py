@@ -19,6 +19,7 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   CALIBRATE_PEDAL_INSTRUCTIONS, CALIBRATE_RADAR_INSTRUCTIONS,
   FLASH_EPAS_INSTRUCTIONS, PEDAL_CAN_BUS_VALUES,
   RADAR_OFFSET_MAX, RADAR_OFFSET_MIN,
+  PROBE_RADAR_INSTRUCTIONS,
   RESTORE_EPAS_INSTRUCTIONS, TEST_RADAR_INSTRUCTIONS,
   VIN_LEARN_RADAR_INSTRUCTIONS,
   acknowledgments_html, find_preset_index,
@@ -217,6 +218,18 @@ class NAPLayout(Widget):
     )
     self._vin_learn_radar_btn.action_item.set_enabled(ui_state.is_offroad)
     self._all_items.append(self._vin_learn_radar_btn)
+
+    self._probe_radar_btn = button_item(
+      "Probe Radar",
+      "Probe",
+      description=(
+        "Read-only check of whether the radar answers on the diagnostic channel. "
+        + "Run this if Radar VIN Learn says requests were sent but nothing came back."
+      ),
+      callback=self._on_probe_radar,
+    )
+    self._probe_radar_btn.action_item.set_enabled(ui_state.is_offroad)
+    self._all_items.append(self._probe_radar_btn)
 
     # ── Section 4: iBooster / Braking (not yet implemented — grayed out) ──
     self._all_items.append(section_header_item("iBooster / Braking"))
@@ -418,6 +431,13 @@ class NAPLayout(Widget):
       title="Radar VIN Learn",
       instructions=VIN_LEARN_RADAR_INSTRUCTIONS,
       script_module="scripts.nap.vin_learn_radar",
+    )
+
+  def _on_probe_radar(self):
+    self._show_script_runner(
+      title="Radar Probe",
+      instructions=PROBE_RADAR_INSTRUCTIONS,
+      script_module="scripts.nap.probe_radar",
     )
 
   def _on_flash_epas(self):

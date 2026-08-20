@@ -4,11 +4,17 @@
 Not under pyproject's `testpaths`, so run it explicitly:
     pytest scripts/nap/tests/test_vin_learn_radar.py
 """
+import importlib.util
+import os
+
 import pytest
 
+from openpilot.common.basedir import BASEDIR
 from opendbc.car.can_definitions import CanData
 from opendbc.car.tesla.preap.radar_vin import RADAR_BUS, RADAR_RX_ADDRESS, RADAR_TX_ADDRESS
-from scripts.nap.vin_learn_radar import check_safety_mode, probe_radar, recv
+from scripts.nap.vin_learn_radar import check_safety_mode, parse_args, probe_radar, recv
+
+PROBE_MODULE = "scripts.nap.probe_radar"
 
 TESLA_PREAP = 37
 UDS_REQUEST = b"\x02\x10\x03\x00\x00\x00\x00\x00"
@@ -120,6 +126,21 @@ def test_probe_ignores_track_frames_as_replies():
   reply = [(0x340, b"\xff" * 8, RADAR_BUS)]
   panda = ScriptedPanda(background=BACKGROUND, reply=reply)
   assert probe_radar(panda, listen=0.01, reply_window=0.01) is False
+
+
+def test_probe_flag_parses():
+  # probe_radar.py hands main() exactly this; if the flag is renamed the GUI
+  # button silently runs a full VIN learn instead of a read-only probe.
+  assert parse_args(["--probe"]).probe is True
+  assert parse_args([]).probe is False
+
+
+def test_probe_entry_point_exists_and_is_wired_to_both_layouts():
+  assert importlib.util.find_spec(PROBE_MODULE) is not None
+  for layout in ("selfdrive/ui/layouts/settings/nap.py",
+                 "selfdrive/ui/mici/layouts/settings/nap.py"):
+    with open(os.path.join(BASEDIR, layout)) as f:
+      assert PROBE_MODULE in f.read(), f"{layout} does not launch {PROBE_MODULE}"
 
 
 def test_check_safety_mode_accepts_expected_mode():

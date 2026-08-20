@@ -18,6 +18,7 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   CALIBRATE_RADAR_INSTRUCTIONS,
   FLASH_EPAS_INSTRUCTIONS,
   PEDAL_CAN_BUS_VALUES,
+  PROBE_RADAR_INSTRUCTIONS,
   RADAR_OFFSET_MAX,
   RADAR_OFFSET_MIN,
   RESTORE_EPAS_INSTRUCTIONS,
@@ -138,6 +139,13 @@ class NAPLayoutMici(NavScroller):
                             ))
     vin_learn_radar_btn.set_enabled(ui_state.is_offroad)
 
+    probe_radar_btn = BigButton("probe radar", "probe")
+    probe_radar_btn.set_click_callback(
+      lambda: launch_script("Radar Probe", PROBE_RADAR_INSTRUCTIONS,
+                            "scripts.nap.probe_radar",
+                            ))
+    probe_radar_btn.set_enabled(ui_state.is_offroad)
+
     # ── iBooster (locked off) ────────────────────────
     ibooster_enabled = BigParamControl("ibooster enabled", NAPParamKeys.IBOOSTER_ENABLED)
     ibooster_enabled.set_enabled(False)
@@ -182,6 +190,7 @@ class NAPLayoutMici(NavScroller):
       calibrate_radar_btn,
       test_radar_btn,
       vin_learn_radar_btn,
+      probe_radar_btn,
       ibooster_enabled,
       force_pre_ap,
       backup_epas_btn,

@@ -82,6 +82,32 @@ When it finishes, let the car go to 'CAR OFF' and reboot the device.
 Press START when ready to begin."""
 
 
+PROBE_RADAR_INSTRUCTIONS = """\
+NAP Radar Probe
+
+Troubleshooting step for when Radar VIN Learn reports that requests were
+sent but nothing came back. This is read-only — it asks the radar if it
+is there and writes nothing.
+
+It answers three questions and tells you which one failed:
+  1. Can the device hear the radar bus at all?
+  2. Is the radar powered and sending tracks?
+  3. Does the radar answer diagnostic requests, and at what address?
+
+PRECONDITIONS:
+  1. Radar installed, wired, and 'Radar Enabled' turned on
+  2. Car awake and in PARK — key fob inside, press the brake pedal
+  3. Keep the car awake for the whole check
+
+On many installs the radar is powered from the EPAS fuse, so it is only
+live while the car is awake. If the car goes back to sleep mid-check the
+radar goes quiet and the result will be misleading.
+
+Takes about ten seconds. Copy the output if you need to report it.
+
+Press START when ready to begin."""
+
+
 TEST_RADAR_INSTRUCTIONS = """\
 NAP Radar Test
 
