@@ -12,7 +12,9 @@ import pytest
 from openpilot.common.basedir import BASEDIR
 from opendbc.car.can_definitions import CanData
 from opendbc.car.tesla.preap.radar_vin import RADAR_BUS, RADAR_RX_ADDRESS, RADAR_TX_ADDRESS
-from scripts.nap.vin_learn_radar import check_safety_mode, parse_args, probe_radar, recv
+from scripts.nap.vin_learn_radar import (
+  check_safety_mode, parse_args, probe_radar, recv, report_tx_health,
+)
 
 PROBE_MODULE = "scripts.nap.probe_radar"
 
@@ -126,6 +128,49 @@ def test_probe_ignores_track_frames_as_replies():
   reply = [(0x340, b"\xff" * 8, RADAR_BUS)]
   panda = ScriptedPanda(background=BACKGROUND, reply=reply)
   assert probe_radar(panda, listen=0.01, reply_window=0.01) is False
+
+
+def can_health(tx=0, errors=0, lost=0, last_error="No error", bus_off=False):
+  return {"total_tx_cnt": tx, "total_error_cnt": errors, "total_tx_lost_cnt": lost,
+          "last_error": last_error, "bus_off": bus_off, "error_passive": False,
+          "can_speed": 500}
+
+
+class HealthPanda(FakePanda):
+  def __init__(self, healths):
+    super().__init__()
+    self._healths = list(healths)
+
+  def can_health(self, bus):
+    return self._healths.pop(0) if len(self._healths) > 1 else self._healths[0]
+
+
+def test_tx_health_flags_a_bus_nothing_is_leaving(capsys):
+  # GTW emulation should be pouring frames onto this bus; a flat counter means
+  # nothing is being transmitted at all.
+  panda = HealthPanda([can_health(tx=1000)])
+  report_tx_health(panda, 1, can_health(tx=1000), can_health(tx=1000))
+  assert "Nothing is leaving the panda on this bus" in capsys.readouterr().out
+
+
+def test_tx_health_flags_unacknowledged_frames(capsys):
+  panda = HealthPanda([can_health(tx=1002, errors=2, last_error="AckError")])
+  report_tx_health(panda, 1, can_health(tx=0), can_health(tx=1000))
+  assert "not acknowledged" in capsys.readouterr().out
+
+
+def test_tx_health_reports_clean_transmit(capsys):
+  panda = HealthPanda([can_health(tx=1002)])
+  report_tx_health(panda, 1, can_health(tx=0), can_health(tx=1000))
+  out = capsys.readouterr().out
+  assert "transmitted cleanly" in out
+  assert "frames sent during probe:    2" in out
+
+
+def test_tx_health_skips_when_panda_reports_nothing(capsys):
+  panda = FakePanda()  # no can_health at all
+  report_tx_health(panda, 1, None, None)
+  assert "did not report per-bus CAN health" in capsys.readouterr().out
 
 
 def test_probe_flag_parses():

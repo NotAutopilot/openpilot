@@ -103,6 +103,54 @@ def recv(panda):
   return packets, rejected
 
 
+def bus_health(panda, bus):
+  """Per-bus CAN controller counters, or None if the panda won't report them."""
+  try:
+    return panda.can_health(bus)
+  except Exception:
+    return None
+
+
+def report_tx_health(panda, bus, at_start, before_send):
+  """Did our frames physically make it onto the wire?
+
+  safety_tx_blocked only counts frames the safety layer refused. A frame that
+  passes safety still has to be transmitted by the CAN peripheral — if nothing
+  acknowledges it the controller retries, racks up errors and eventually goes
+  bus-off, and none of that shows up as a blocked TX. This separates "the panda
+  never sent it" from "the radar ignored it".
+  """
+  p(f"\n[4/4] Bus {bus} transmit health")
+  after = bus_health(panda, bus)
+  if after is None or before_send is None or at_start is None:
+    p("  panda did not report per-bus CAN health; skipping")
+    return
+
+  idle_tx = before_send["total_tx_cnt"] - at_start["total_tx_cnt"]
+  send_tx = after["total_tx_cnt"] - before_send["total_tx_cnt"]
+  errors = after["total_error_cnt"] - before_send["total_error_cnt"]
+  lost = after["total_tx_lost_cnt"] - before_send["total_tx_lost_cnt"]
+
+  p(f"  frames sent while idle:      {idle_tx}  (GTW emulation)")
+  p(f"  frames sent during probe:    {send_tx}")
+  p(f"  new TX errors during probe:  {errors}")
+  p(f"  TX frames lost during probe: {lost}")
+  p(f"  last error: {after['last_error']}   bus_off: {after['bus_off']}   "
+    + f"error_passive: {after['error_passive']}")
+  p(f"  speed: {after['can_speed']} kbps")
+
+  if idle_tx == 0:
+    p("\n  Nothing is leaving the panda on this bus, not even GTW emulation.")
+    p("  Look at the panda and the bus wiring, not the radar.")
+  elif after["bus_off"] or after["last_error"] == "AckError":
+    p("\n  Frames are being transmitted but not acknowledged. Nothing on this")
+    p("  bus is receiving them — an ACK needs at least one other live node.")
+  elif errors == 0 and lost == 0:
+    p("\n  Our requests transmitted cleanly and were acknowledged. The radar")
+    p("  received them and chose not to reply — this is not a wiring or panda")
+    p("  problem, it is the radar's diagnostic layer.")
+
+
 def probe_radar(panda, listen=3.0, reply_window=1.5):
   """Read-only reachability check. Sends nothing but TesterPresent.
 
@@ -117,7 +165,9 @@ def probe_radar(panda, listen=3.0, reply_window=1.5):
   p("PROBE: radar diagnostic reachability")
   p("=" * 40)
 
-  p(f"\n[1/3] Listening on bus {RADAR_BUS} for {listen:.0f}s...")
+  health_start = bus_health(panda, RADAR_BUS)
+
+  p(f"\n[1/4] Listening on bus {RADAR_BUS} for {listen:.0f}s...")
   baseline = {}
   deadline = time.monotonic() + listen
   while time.monotonic() < deadline:
@@ -145,12 +195,13 @@ def probe_radar(panda, listen=3.0, reply_window=1.5):
   else:
     p("    (none)")
 
-  p(f"\n[2/3] Radar is transmitting: {'yes' if tracks else 'NO TRACK FRAMES'}")
+  p(f"\n[2/4] Radar is transmitting: {'yes' if tracks else 'NO TRACK FRAMES'}")
   if not tracks:
     p("  The radar is not sending tracks. It may be unpowered — on this install")
     p("  radar power comes off the EPAS fuse, so the car has to be awake.")
 
-  p("\n[3/3] TesterPresent probe")
+  p("\n[3/4] TesterPresent probe")
+  health_before_send = bus_health(panda, RADAR_BUS)
   answered = []
   for tx_addr in PROBE_TX_ADDRESSES:
     p(f"\n  → 0x{tx_addr:03X}  02 3E 00")
@@ -184,6 +235,8 @@ def probe_radar(panda, listen=3.0, reply_window=1.5):
       answered.append(tx_addr)
     else:
       p("    no reply")
+
+  report_tx_health(panda, RADAR_BUS, health_start, health_before_send)
 
   p("\n" + "=" * 60)
   if answered:
