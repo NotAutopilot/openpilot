@@ -209,7 +209,8 @@ def main(cli_args=None):
   p("Teaches a used Bosch radar the VIN of this car, so it keeps")
   p("tracking instead of freezing five seconds after power-up.")
   p("")
-  p("The car must be ON and in PARK with your foot on the brake.")
+  p("The car must be awake and in PARK, with your foot on the brake.")
+  p("Key fob inside; pressing the brake brings the car up and keeps it there.")
   p("The car may chime or show warnings while this runs — that is normal.")
   p("=" * 60)
 
@@ -274,7 +275,7 @@ def main(cli_args=None):
       target_vin = sniff_car_vin(panda, args.sniff_timeout)
       if target_vin is None:
         p("\nERROR: Could not read this car's VIN.")
-        p("Make sure the car is on (brake + power button) and try again.")
+        p("Make sure the car is awake: key fob inside, press the brake pedal.")
         return 1
       p(f"  Car VIN: {target_vin}")
 
@@ -330,7 +331,7 @@ def main(cli_args=None):
       p("The requests went out on bus 1 but the radar never answered. Check that")
       p("the radar has 12V and that its CAN pair reaches the radar port on the")
       p("adapter — the car does not carry this traffic, the panda talks to the")
-      p("radar directly. Then try again with the car on and in park.")
+      p("radar directly. Then try again with the car awake and in park.")
     return 1
 
   except KeyboardInterrupt:

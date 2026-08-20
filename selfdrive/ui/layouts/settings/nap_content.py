@@ -72,7 +72,7 @@ You do not enter a VIN — it is read from the car's own CAN bus.
 PRECONDITIONS:
   1. Radar installed, wired, and 'Radar Enabled' turned on
   2. 'Radar Behind Nosecone' set correctly for your mount
-  3. Car ON and in PARK (brake + power button to wake it)
+  3. Car awake and in PARK — key fob inside, press the brake pedal
   4. Keep your foot on the brake for the whole process
 
 The car may chime or show warnings while this runs. That is normal.

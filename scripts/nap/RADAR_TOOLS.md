@@ -90,8 +90,10 @@ radar learns it from the live bus. What the tool does:
 4. `routineControl` start / stop / requestResults on routine 0x0A03
 5. reads the stored VIN back to confirm it changed
 
-Requires the car ON and in PARK with the brake held. The car may chime during
-the routine. Reboot the device afterwards.
+Requires the car awake and in PARK with the brake held — key fob inside, press
+the brake pedal to bring the car up (a Pre-AP Model S has no start button; the
+brake is what wakes it and holding it is what keeps it awake). The car may chime
+during the routine. Reboot the device afterwards.
 
 The panda is put in `teslaPreap` safety mode with `PREAP_FLAG_RADAR_VIN_LEARN`
 (8) — GTW emulation has to keep feeding the radar this car's VIN and position
