@@ -173,6 +173,72 @@ def test_tx_health_skips_when_panda_reports_nothing(capsys):
   assert "did not report per-bus CAN health" in capsys.readouterr().out
 
 
+class NackingPanda(FakePanda):
+  """A panda whose control-transfer reads always fail, as SPI NACKs do."""
+
+  def __init__(self):
+    super().__init__()
+    self.health_calls = 0
+
+  def health(self):
+    self.health_calls += 1
+    raise RuntimeError("PandaSpiNackResponse")
+
+  def can_health(self, bus):
+    raise RuntimeError("PandaSpiNackResponse")
+
+
+def test_health_reads_retry_then_give_up_instead_of_raising():
+  from scripts.nap.vin_learn_radar import CONTROL_READ_RETRIES, bus_health, panda_health
+  panda = NackingPanda()
+  assert panda_health(panda) is None
+  assert panda.health_calls == CONTROL_READ_RETRIES
+  assert bus_health(panda, 1) is None
+
+
+def test_safety_mode_check_does_not_block_when_health_is_unreadable(capsys):
+  # A courtesy check must not gate the run just because a diagnostic read failed.
+  assert check_safety_mode(NackingPanda(), TESLA_PREAP) is True
+  assert "could not read panda health" in capsys.readouterr().out
+
+
+def test_probe_survives_unreadable_health(capsys):
+  # The probe's real job is listening and sending; health is a bonus.
+  class ProbePanda(ScriptedPanda, NackingPanda):
+    pass
+
+  panda = ProbePanda(background=BACKGROUND)
+  assert probe_radar(panda, listen=0.01, reply_window=0.01) is False
+  out = capsys.readouterr().out
+  assert "did not report per-bus CAN health" in out
+  assert "TesterPresent probe" in out
+
+
+def test_wait_for_pandad_returns_as_soon_as_it_is_gone(monkeypatch):
+  import scripts.nap.vin_learn_radar as tool
+  calls = []
+
+  def fake_running():
+    calls.append(1)
+    return len(calls) < 3
+
+  monkeypatch.setattr(tool, "pandad_running", fake_running)
+  assert tool.wait_for_pandad_to_stop(timeout=5.0) is True
+
+
+def test_wait_for_pandad_gives_up_and_reports_it(monkeypatch):
+  import scripts.nap.vin_learn_radar as tool
+  monkeypatch.setattr(tool, "pandad_running", lambda: True)
+  assert tool.wait_for_pandad_to_stop(timeout=0.01) is False
+
+
+def test_pandad_detection_never_raises():
+  # Runs on dev machines with no procfs and on-device mid-teardown, where pids
+  # vanish between listing and reading. Must degrade, not blow up the run.
+  from scripts.nap.vin_learn_radar import pandad_running
+  assert pandad_running() in (True, False)
+
+
 def test_probe_flag_parses():
   # probe_radar.py hands main() exactly this; if the flag is renamed the GUI
   # button silently runs a full VIN learn instead of a read-only probe.

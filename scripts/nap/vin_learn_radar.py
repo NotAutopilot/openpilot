@@ -29,6 +29,7 @@ Uses direct Panda access (stops pandad via ScriptRunner).
 """
 
 import argparse
+import os
 import sys
 import time
 
@@ -47,6 +48,9 @@ POLL_INTERVAL = 0.005
 PANDA_CONNECT_RETRIES = 5
 PANDA_CONNECT_DELAY = 2.0
 PANDAD_RELEASE_DELAY = 2.0
+PANDAD_STOP_TIMEOUT = 15.0
+CONTROL_READ_RETRIES = 3
+CONTROL_READ_RETRY_DELAY = 0.2
 
 # Bus numbers above these are panda TX metadata, not received traffic
 BUS_ECHO = 128
@@ -103,12 +107,71 @@ def recv(panda):
   return packets, rejected
 
 
+def pandad_running():
+  """True if openpilot's pandad still holds the panda.
+
+  manager.py stops pandad when NAPScriptRunning is set, but that takes a manager
+  loop plus process teardown. If it is still up when we start, it re-sends
+  heartbeats (re-enabling the checks we just disabled) and resets the safety mode
+  out from under us — and on a C3X both processes are driving the same SPI bus.
+
+  pandad is a PythonProcess, so /proc/<pid>/comm is the interpreter; match on the
+  command line instead.
+  """
+  try:
+    pids = [d for d in os.listdir("/proc") if d.isdigit()]
+  except OSError:
+    return False   # not Linux / no procfs — can't tell, don't cry wolf
+
+  for pid in pids:
+    try:
+      with open(f"/proc/{pid}/cmdline", "rb") as f:
+        cmdline = f.read().replace(b"\x00", b" ").decode(errors="ignore")
+    except OSError:
+      continue     # process exited between listing and reading
+    if "selfdrive.pandad.pandad" in cmdline:
+      return True
+  return False
+
+
+def wait_for_pandad_to_stop(timeout=PANDAD_STOP_TIMEOUT):
+  """Wait for pandad to exit. Returns True if it is gone."""
+  deadline = time.monotonic() + timeout
+  while time.monotonic() < deadline:
+    if not pandad_running():
+      return True
+    time.sleep(0.5)
+  return not pandad_running()
+
+
+def _control_read(panda, method, *args):
+  """Run a panda control-transfer read, returning None instead of raising.
+
+  On a C3X the panda is on SPI, and control transfers there can come back NACKed
+  at the header-ACK stage — transient, and unrelated to whether CAN itself works
+  (the bulk CAN endpoints use a different path, which is why the other NAP tools
+  never hit this). These reads are diagnostics: losing one must degrade the
+  report, never take down the run.
+  """
+  for attempt in range(CONTROL_READ_RETRIES):
+    try:
+      # Resolve the attribute inside the guard: a panda build without this
+      # method should degrade the report like any other failed read.
+      return getattr(panda, method)(*args)
+    except Exception:
+      if attempt < CONTROL_READ_RETRIES - 1:
+        time.sleep(CONTROL_READ_RETRY_DELAY)
+  return None
+
+
 def bus_health(panda, bus):
   """Per-bus CAN controller counters, or None if the panda won't report them."""
-  try:
-    return panda.can_health(bus)
-  except Exception:
-    return None
+  return _control_read(panda, "can_health", bus)
+
+
+def panda_health(panda):
+  """Overall panda health, or None if the read didn't come back."""
+  return _control_read(panda, "health")
 
 
 def report_tx_health(panda, bus, at_start, before_send):
@@ -262,7 +325,12 @@ def check_safety_mode(panda, expected_mode):
   emulation, which looks exactly like a radar that isn't wired up. Catch it here
   instead of blaming the harness later.
   """
-  health = panda.health()
+  health = panda_health(panda)
+  if health is None:
+    # Can't read it, so can't rule it out — but this check is a courtesy, not a
+    # gate. Carry on; a wrong mode will still surface as blocked or ignored TX.
+    p("  (could not read panda health to confirm the mode; continuing)")
+    return True
   if health["safety_mode"] == expected_mode:
     return True
 
@@ -393,7 +461,15 @@ def main(cli_args=None):
 
   panda = None
   try:
-    p("\nWaiting for pandad to release Panda USB...")
+    p("\nWaiting for pandad to release the panda...")
+    if wait_for_pandad_to_stop():
+      p("  pandad stopped")
+    else:
+      p("  WARNING: pandad is STILL RUNNING after "
+        + f"{PANDAD_STOP_TIMEOUT:.0f}s.")
+      p("  It will fight this tool for the panda — on a C3X both drive the same")
+      p("  SPI bus — and its heartbeats re-enable the checks disabled below.")
+      p("  Expect SPI errors and no radar replies. Results are not trustworthy.")
     time.sleep(PANDAD_RELEASE_DELAY)
 
     p("Connecting to Panda...")
@@ -451,7 +527,7 @@ def main(cli_args=None):
     p("  Keep your foot on the brake until this finishes.")
     p("")
 
-    tx_blocked_before = panda.health()["safety_tx_blocked"]
+    health_before = panda_health(panda)
     result, failure = run_learn(panda, target_vin, args.timeout)
 
     p("")
@@ -484,8 +560,13 @@ def main(cli_args=None):
     p("")
 
     # Distinguish "the radar never answered" from "we never got to ask it".
-    health = panda.health()
-    tx_blocked = health["safety_tx_blocked"] - tx_blocked_before
+    health = panda_health(panda)
+    if health is None or health_before is None:
+      p("Could not read panda health, so this could not be narrowed down.")
+      p("Run Probe Radar for a fuller picture of what the bus is doing.")
+      return 1
+
+    tx_blocked = health["safety_tx_blocked"] - health_before["safety_tx_blocked"]
     if health["safety_mode"] != int(SafetyModel.teslaPreap):
       p(f"The panda left teslaPreap mid-session (now {health['safety_mode']}), so")
       p("the requests never reached the bus. This is a tool bug, not your wiring.")
@@ -503,9 +584,21 @@ def main(cli_args=None):
     p("\n\nCancelled — no changes were written to the radar.")
     return 1
   except Exception as e:
-    p(f"\nERROR: {e}")
     import traceback
-    traceback.print_exc()
+    # Through p() rather than print_exc() so it shares the flushed stdout stream
+    # and can't interleave, and so the summary below is genuinely last: the
+    # ScriptRunner has no scrollback, so whatever prints last is what is read.
+    p("\n" + traceback.format_exc())
+    p("=" * 60)
+    p("STOPPED BY AN UNEXPECTED ERROR")
+    p("=" * 60)
+    p(f"{type(e).__name__}: {e}")
+    p("")
+    p("Nothing was written to the radar.")
+    if "PandaSpi" in type(e).__name__:
+      p("This is a panda SPI transfer failure, not a radar fault. It usually")
+      p("means something else is talking to the panda — make sure openpilot is")
+      p("not running, then try again.")
     return 1
   finally:
     if panda is not None:
