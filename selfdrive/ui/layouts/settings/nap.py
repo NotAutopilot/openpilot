@@ -188,6 +188,40 @@ class NAPLayout(Widget):
     )
     self._all_items.append(self._radar_offset_btn)
 
+    self._radar_vin_keyboard = Keyboard(max_text_size=17)
+    self._radar_vin_btn = button_item(
+      "Donor Radar VIN",
+      self._get_radar_vin_text,
+      description=(
+        "VIN already programmed in a salvage radar. Leave empty to send this car. "
+        + "A 17-character VIN makes panda impersonate the donor (Tinkla 0.6.6)."
+      ),
+      callback=self._on_radar_vin_click,
+    )
+    self._all_items.append(self._radar_vin_btn)
+
+    radar_position = int(self._params.get(NAPParamKeys.RADAR_POSITION, return_default=True) or 0)
+    self._radar_position_buttons = multiple_button_item(
+      "Donor Radar Position",
+      "Must match the donor car: 0 pre-facelift S, 1 post-facelift S, 2 Model X.",
+      buttons=["0", "1", "2"],
+      button_width=130,
+      selected_index=max(0, min(2, radar_position)),
+      callback=self._on_radar_position,
+    )
+    self._all_items.append(self._radar_position_buttons)
+
+    radar_epas = int(self._params.get(NAPParamKeys.RADAR_EPAS_TYPE, return_default=True) or 0)
+    self._radar_epas_buttons = multiple_button_item(
+      "Donor EPAS Type",
+      "Must match the donor car rack: 0 Bosch L538, 1 L405, 2 Mando FGR64, 3 VGR66, 4 VGR66 Gen3.",
+      buttons=["0", "1", "2", "3", "4"],
+      button_width=100,
+      selected_index=max(0, min(4, radar_epas)),
+      callback=self._on_radar_epas,
+    )
+    self._all_items.append(self._radar_epas_buttons)
+
     self._calibrate_radar_btn = button_item(
       "Calibrate Radar",
       "Start",
@@ -334,6 +368,42 @@ class NAPLayout(Widget):
 
   def _get_radar_offset_text(self) -> str:
     return f"{self._get_radar_offset():+.2f}m"
+
+  def _get_radar_vin_text(self) -> str:
+    raw = self._params.get(NAPParamKeys.RADAR_DONOR_VIN, return_default=True) or ""
+    if isinstance(raw, bytes):
+      raw = raw.decode("ascii", errors="ignore")
+    vin = "".join(ch for ch in str(raw).upper() if ch.isalnum())
+    return vin if len(vin) == 17 else "Not set"
+
+  def _on_radar_vin_click(self):
+    current = self._get_radar_vin_text()
+    self._radar_vin_keyboard.reset(min_text_size=0)
+    self._radar_vin_keyboard.set_title("Donor Radar VIN")
+    self._radar_vin_keyboard.set_text("" if current == "Not set" else current)
+    self._radar_vin_keyboard.set_callback(self._on_radar_vin_submit)
+    gui_app.push_widget(self._radar_vin_keyboard)
+
+  def _on_radar_vin_submit(self, result: DialogResult):
+    if result != DialogResult.CONFIRM:
+      return
+    text = "".join(ch for ch in (self._radar_vin_keyboard.text or "").upper() if ch.isalnum())
+    try:
+      self._params.put(NAPParamKeys.RADAR_DONOR_VIN, text if len(text) == 17 else "")
+    except Exception:
+      pass
+
+  def _on_radar_position(self, index: int):
+    try:
+      self._params.put(NAPParamKeys.RADAR_POSITION, int(index))
+    except Exception:
+      pass
+
+  def _on_radar_epas(self, index: int):
+    try:
+      self._params.put(NAPParamKeys.RADAR_EPAS_TYPE, int(index))
+    except Exception:
+      pass
 
   def _on_radar_offset_click(self):
     self._radar_offset_keyboard.reset(min_text_size=1)
