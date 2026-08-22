@@ -109,7 +109,11 @@ msgid "Are you sure you want to uninstall?"
 msgstr "确定要卸载吗？"
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Attenuate a radar mounted behind the nosecone. Hardware changes are local and offroad only."
+msgid "Attenuate a radar mounted behind the nosecone."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "BACKUP"
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/onboarding.py
@@ -143,7 +147,11 @@ msgid "Bus 2"
 msgstr ""
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "CAN bus for the Comma Pedal. Hardware changes are local and offroad only."
+msgid "CALIBRATE"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "CAN bus for the Comma Pedal."
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
@@ -229,6 +237,10 @@ msgstr ""
 #: openpilot/selfdrive/ui/layouts/settings/software.py
 msgid "Current Version"
 msgstr "当前版本"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "DIAGNOSE"
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/software.py
 msgid "DOWNLOAD"
@@ -394,11 +406,11 @@ msgid "Enable sunnypilot"
 msgstr ""
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Enable the Comma Pedal interceptor. Hardware changes are local and offroad only."
+msgid "Enable the Comma Pedal interceptor."
 msgstr ""
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Enable the stock Bosch radar. Hardware changes are local and offroad only."
+msgid "Enable the stock Bosch radar."
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
@@ -444,6 +456,10 @@ msgstr "实验模式"
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Experimental mode is currently unavailable on this car since the car's stock ACC is used for longitudinal control."
 msgstr "此车型当前无法使用实验模式，因为纵向控制使用的是原厂 ACC。"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "FLASH"
+msgstr ""
 
 #: openpilot/system/ui/widgets/network.py
 msgid "FORGETTING..."
@@ -502,7 +518,7 @@ msgid "Hidden Network"
 msgstr "隐藏网络"
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "How far Pre-AP follows a detected lead. 1 is closest, 7 is farthest. Changes apply while driving."
+msgid "How far Pre-AP follows a detected lead. 1 is closest, 7 is farthest."
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/software.py
@@ -553,10 +569,6 @@ msgstr ""
 msgid "Lateral Maneuver Mode"
 msgstr ""
 
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Lateral offset in meters added to radar yRel. Negative shifts leads left of the current radar reading; positive shifts right. Hardware changes are local and offroad only."
-msgstr ""
-
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "Longitudinal Maneuver Mode"
 msgstr "纵向操作模式"
@@ -584,6 +596,10 @@ msgstr "最大"
 #: openpilot/selfdrive/ui/widgets/setup.py
 msgid "Maximize your training data uploads to improve openpilot's driving models."
 msgstr "最大化上传训练数据，以改进 openpilot 的驾驶模型。"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Meters added to radar yRel. Negative shifts leads left; positive shifts right."
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "N/A"
@@ -758,6 +774,10 @@ msgstr "移除"
 msgid "RESET"
 msgstr "重置"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "RESTORE"
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "REVIEW"
 msgstr "查看"
@@ -798,10 +818,6 @@ msgstr ""
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
 msgid "Radar Lateral Offset"
-msgstr ""
-
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Radar Lateral Offset (m)"
 msgstr ""
 
 #: openpilot/sunnypilot/selfdrive/car/tesla/preap/tools/instructions.py
@@ -930,10 +946,6 @@ msgid "Select a language"
 msgstr "选择语言"
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Selected follow distance: {follow}."
-msgstr ""
-
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
 msgid "Selecting a higher finger count may reduce accidental activations."
 msgstr ""
 
@@ -984,6 +996,10 @@ msgstr "请立即接管控制"
 #: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "TEMP"
 msgstr "温度"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "TEST"
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/software.py
 msgid "Target Branch"

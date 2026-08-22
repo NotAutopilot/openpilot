@@ -14,11 +14,10 @@ from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.safety import ToolSafe
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.sunnypilot.widgets.list_view import (
-  button_item_sp, multiple_button_item_sp, toggle_item_sp,
+  button_item_sp, multiple_button_item_sp, option_item_sp, text_item_sp, toggle_item_sp,
 )
 from openpilot.system.ui.widgets import DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog, alert_dialog
-from openpilot.system.ui.widgets.keyboard import Keyboard
 
 COOP_STEERING_MIN_KMH = 23
 OEM_STEERING_MIN_KMH = 48
@@ -26,8 +25,9 @@ KM_TO_MILE = 0.621371
 
 FOLLOW_DISTANCE_MIN = 1
 FOLLOW_DISTANCE_MAX = 7
-RADAR_OFFSET_MIN = -2.0
-RADAR_OFFSET_MAX = 2.0
+RADAR_OFFSET_MIN_CM = -200
+RADAR_OFFSET_MAX_CM = 200
+RADAR_OFFSET_STEP_CM = 5
 
 
 def _path_label(path: str) -> str:
@@ -57,7 +57,7 @@ def is_tesla_preap_ui() -> bool:
 
 def parse_configured_pedal_bus(value) -> int:
   """Preserve configured bus 0. Absent or empty defaults to 2."""
-  if value is None or value == "" or value == b"":
+  if value in (None, "", b""):
     return 2
   return int(value)
 
@@ -78,62 +78,65 @@ class TeslaSettings(BrandSettings):
       param="TeslaMadsScreenButton",
       inline=False,
     )
-    self.follow_distance = multiple_button_item_sp(
+    self.follow_distance = option_item_sp(
       title=lambda: tr("Follow Distance"),
-      description="",
-      buttons=[str(i) for i in range(FOLLOW_DISTANCE_MIN, FOLLOW_DISTANCE_MAX + 1)],
+      param="NAPFollowDistance",
+      min_value=FOLLOW_DISTANCE_MIN,
+      max_value=FOLLOW_DISTANCE_MAX,
+      description=lambda: tr("How far Pre-AP follows a detected lead. 1 is closest, 7 is farthest."),
+      label_callback=str,
       inline=True,
-      button_width=90,
-      callback=self._on_follow_selected,
     )
     self.pedal_enabled = toggle_item_sp(
       tr("Pedal Interceptor"),
-      tr("Enable the Comma Pedal interceptor. Hardware changes are local and offroad only."),
+      tr("Enable the Comma Pedal interceptor."),
       param="NAPPedalEnabled",
     )
     self.pedal_bus = multiple_button_item_sp(
       title=lambda: tr("Pedal CAN Bus"),
-      description=lambda: tr("CAN bus for the Comma Pedal. Hardware changes are local and offroad only."),
+      description=lambda: tr("CAN bus for the Comma Pedal."),
       buttons=[lambda: tr("Bus 0"), lambda: tr("Bus 2")],
       inline=True,
       callback=self._on_pedal_bus_selected,
     )
     self.radar_enabled = toggle_item_sp(
       tr("Bosch Radar"),
-      tr("Enable the stock Bosch radar. Hardware changes are local and offroad only."),
+      tr("Enable the stock Bosch radar."),
       param="NAPRadarEnabled",
     )
     self.radar_nosecone = toggle_item_sp(
       tr("Radar Behind Nosecone"),
-      tr("Attenuate a radar mounted behind the nosecone. Hardware changes are local and offroad only."),
+      tr("Attenuate a radar mounted behind the nosecone."),
       param="NAPRadarBehindNosecone",
     )
-    self._radar_offset_keyboard = Keyboard(max_text_size=10)
-    self.radar_offset = button_item_sp(
-      lambda: tr("Radar Lateral Offset"),
-      self._get_radar_offset_text,
-      description=lambda: tr(
-        "Lateral offset in meters added to radar yRel. Negative shifts leads left of the current radar reading; positive shifts right. Hardware changes are local and offroad only."
-      ),
-      callback=self._on_radar_offset_click,
+    self.radar_offset = option_item_sp(
+      title=lambda: tr("Radar Lateral Offset"),
+      param="NAPRadarOffset",
+      min_value=RADAR_OFFSET_MIN_CM,
+      max_value=RADAR_OFFSET_MAX_CM,
+      value_change_step=RADAR_OFFSET_STEP_CM,
+      use_float_scaling=True,
+      description=lambda: tr("Meters added to radar yRel. Negative shifts leads left; positive shifts right."),
+      label_callback=lambda value: f"{value / 100.0:+.2f} m",
+      inline=True,
     )
-    self.status_path = button_item_sp(lambda: tr("Longitudinal Path"), "", enabled=False)
-    self.status_pedal = button_item_sp(lambda: tr("Pedal Health"), "", enabled=False)
-    self.status_radar = button_item_sp(lambda: tr("Radar Health"), "", enabled=False)
+    self.status_path = text_item_sp(lambda: tr("Longitudinal Path"), lambda: tr("Stock DI"))
+    self.status_pedal = text_item_sp(lambda: tr("Pedal Health"), lambda: tr("None"))
+    self.status_radar = text_item_sp(lambda: tr("Radar Health"), lambda: tr("None"))
 
-    self.tool_calibrate_pedal = button_item_sp(lambda: tr("Calibrate Pedal"), lambda: tr("Start"),
+    self.tool_calibrate_pedal = button_item_sp(lambda: tr("Calibrate Pedal"), lambda: tr("CALIBRATE"),
                                                callback=lambda: self._confirm_tool("calibrate_pedal"))
-    self.tool_calibrate_radar = button_item_sp(lambda: tr("Calibrate Radar"), lambda: tr("Start"),
+    self.tool_calibrate_radar = button_item_sp(lambda: tr("Calibrate Radar"), lambda: tr("CALIBRATE"),
                                                callback=lambda: self._confirm_tool("calibrate_radar"))
-    self.tool_diagnose_radar = button_item_sp(lambda: tr("Diagnose Radar"), lambda: tr("Start"),
+    self.tool_diagnose_radar = button_item_sp(lambda: tr("Diagnose Radar"), lambda: tr("DIAGNOSE"),
                                               callback=lambda: self._confirm_tool("diagnose_radar"))
-    self.tool_test_radar = button_item_sp(lambda: tr("Test Radar"), lambda: tr("Start"),
+    self.tool_test_radar = button_item_sp(lambda: tr("Test Radar"), lambda: tr("TEST"),
                                           callback=lambda: self._confirm_tool("test_radar"))
-    self.tool_extract_epas = button_item_sp(lambda: tr("Backup EPAS"), lambda: tr("Start"),
+    self.tool_extract_epas = button_item_sp(lambda: tr("Backup EPAS"), lambda: tr("BACKUP"),
                                             callback=lambda: self._confirm_tool("extract_epas"))
-    self.tool_flash_epas = button_item_sp(lambda: tr("Flash EPAS"), lambda: tr("Start"),
+    self.tool_flash_epas = button_item_sp(lambda: tr("Flash EPAS"), lambda: tr("FLASH"),
                                           callback=lambda: self._confirm_tool("flash_epas"))
-    self.tool_restore_epas = button_item_sp(lambda: tr("Restore EPAS"), lambda: tr("Start"),
+    self.tool_restore_epas = button_item_sp(lambda: tr("Restore EPAS"), lambda: tr("RESTORE"),
                                             callback=lambda: self._confirm_tool("restore_epas"))
 
     self._preap_items = [
@@ -166,46 +169,25 @@ class TeslaSettings(BrandSettings):
     }
 
   @staticmethod
-  def _on_follow_selected(index):
-    ui_state.params.put("NAPFollowDistance", index + FOLLOW_DISTANCE_MIN)
-
-  @staticmethod
   def _on_pedal_bus_selected(index):
     ui_state.params.put("NAPPedalCanBus", 0 if index == 0 else 2)
 
-  def _get_radar_offset(self) -> float:
+  def _sync_follow_distance(self):
+    try:
+      follow = int(ui_state.params.get("NAPFollowDistance") or FOLLOW_DISTANCE_MIN + 3)
+    except (TypeError, ValueError):
+      follow = 4
+    follow = max(FOLLOW_DISTANCE_MIN, min(FOLLOW_DISTANCE_MAX, follow))
+    self.follow_distance.action_item.current_value = follow
+
+  def _sync_radar_offset(self):
     raw = ui_state.params.get("NAPRadarOffset")
     try:
-      return float(raw)
+      cm = int(round(float(raw) * 100.0))
     except (TypeError, ValueError):
-      return 0.0
-
-  def _get_radar_offset_text(self) -> str:
-    return f"{self._get_radar_offset():+.2f} m"
-
-  def _on_radar_offset_click(self):
-    if not ui_state.is_offroad():
-      gui_app.push_widget(alert_dialog(tr("Hardware settings are only available offroad.")))
-      return
-    self._radar_offset_keyboard.reset(min_text_size=1)
-    self._radar_offset_keyboard.set_title(tr("Radar Lateral Offset (m)"))
-    self._radar_offset_keyboard.set_text(f"{self._get_radar_offset():.2f}")
-    self._radar_offset_keyboard.set_callback(self._on_radar_offset_submit)
-    gui_app.push_widget(self._radar_offset_keyboard)
-
-  def _on_radar_offset_submit(self, result: DialogResult):
-    if result != DialogResult.CONFIRM:
-      return
-    try:
-      text = (self._radar_offset_keyboard.text or "").strip()
-      value = float(text)
-    except (TypeError, ValueError, AttributeError):
-      return
-    value = max(RADAR_OFFSET_MIN, min(RADAR_OFFSET_MAX, value))
-    try:
-      ui_state.params.put("NAPRadarOffset", value)
-    except Exception:
-      pass
+      cm = 0
+    cm = max(RADAR_OFFSET_MIN_CM, min(RADAR_OFFSET_MAX_CM, cm))
+    self.radar_offset.action_item.current_value = cm
 
   def _confirm_tool(self, tool: str):
     if not ui_state.is_offroad():
@@ -223,11 +205,6 @@ class TeslaSettings(BrandSettings):
     text = tr(self._tool_instructions[tool]).replace("\n", "<br>")
     gui_app.push_widget(ConfirmDialog(text, tr("Start"), rich=True, callback=callback))
 
-  def _update_follow_description(self, follow: int):
-    base = tr("How far Pre-AP follows a detected lead. 1 is closest, 7 is farthest. Changes apply while driving.")
-    self.follow_distance.set_description(f"{base}<br><br><b>" + tr("Selected follow distance: {follow}.").format(follow=follow) + "</b>")
-    self.follow_distance.show_description(True)
-
   def _update_preap_status(self, is_preap: bool):
     flags = int(getattr(ui_state.CP_SP, "flags", 0) or 0) if ui_state.CP_SP is not None else 0
     pedal_present = bool(flags & TeslaFlagsSP.PREAP_PEDAL_PRESENT)
@@ -238,7 +215,7 @@ class TeslaSettings(BrandSettings):
       path = "pedal"
     else:
       path = "stock_di"
-    self.status_path.action_item.set_value(_path_label(path))
+    self.status_path.action_item.set_text(_path_label(path))
 
     if not pedal_present:
       pedal_health = "none"
@@ -246,7 +223,7 @@ class TeslaSettings(BrandSettings):
       pedal_health = "uncalibrated"
     else:
       pedal_health = "ok"
-    self.status_pedal.action_item.set_value(_health_label(pedal_health))
+    self.status_pedal.action_item.set_text(_health_label(pedal_health))
 
     if not radar_present:
       radar_health = "none"
@@ -254,13 +231,10 @@ class TeslaSettings(BrandSettings):
       radar_health = "unconfigured"
     else:
       radar_health = "ok"
-    self.status_radar.action_item.set_value(_health_label(radar_health))
+    self.status_radar.action_item.set_text(_health_label(radar_health))
 
-    follow = int(ui_state.params.get("NAPFollowDistance") or 4)
-    follow = max(FOLLOW_DISTANCE_MIN, min(FOLLOW_DISTANCE_MAX, follow))
-    self.follow_distance.action_item.set_selected_button(follow - FOLLOW_DISTANCE_MIN)
-    self._update_follow_description(follow)
-
+    self._sync_follow_distance()
+    self._sync_radar_offset()
     self.pedal_bus.action_item.set_selected_button(
       pedal_bus_selector_index(ui_state.params.get("NAPPedalCanBus")))
 
@@ -269,6 +243,8 @@ class TeslaSettings(BrandSettings):
     self.radar_offset.set_visible(is_preap and radar_present)
     self.tool_calibrate_pedal.set_visible(is_preap and pedal_present)
     self.tool_calibrate_radar.set_visible(is_preap and radar_present)
+    self.tool_diagnose_radar.set_visible(is_preap and radar_present)
+    self.tool_test_radar.set_visible(is_preap and radar_present)
 
   def update_settings(self):
     is_metric = ui_state.is_metric
@@ -314,6 +290,29 @@ class TeslaSettings(BrandSettings):
 
     if is_preap:
       self._update_preap_status(is_preap)
+      hardware_offroad_msg = tr("Hardware settings are only available offroad.")
+      if not offroad:
+        self.pedal_enabled.set_description(f"<b>{hardware_offroad_msg}</b>")
+        self.pedal_bus.set_description(f"<b>{hardware_offroad_msg}</b>")
+        self.radar_enabled.set_description(f"<b>{hardware_offroad_msg}</b>")
+        self.radar_nosecone.set_description(f"<b>{hardware_offroad_msg}</b>")
+        self.radar_offset.set_description(f"<b>{hardware_offroad_msg}</b>")
+        self.pedal_enabled.show_description(True)
+        self.pedal_bus.show_description(True)
+        self.radar_enabled.show_description(True)
+        self.radar_nosecone.show_description(True)
+        self.radar_offset.show_description(True)
+      else:
+        self.pedal_enabled.set_description(tr("Enable the Comma Pedal interceptor."))
+        self.pedal_bus.set_description(tr("CAN bus for the Comma Pedal."))
+        self.radar_enabled.set_description(tr("Enable the stock Bosch radar."))
+        self.radar_nosecone.set_description(tr("Attenuate a radar mounted behind the nosecone."))
+        self.radar_offset.set_description(tr("Meters added to radar yRel. Negative shifts leads left; positive shifts right."))
+        self.pedal_enabled.show_description(False)
+        self.pedal_bus.show_description(False)
+        self.radar_enabled.show_description(False)
+        self.radar_nosecone.show_description(False)
+        self.radar_offset.show_description(False)
       self.pedal_enabled.action_item.set_enabled(offroad)
       self.pedal_bus.action_item.set_enabled(offroad)
       self.radar_enabled.action_item.set_enabled(offroad)

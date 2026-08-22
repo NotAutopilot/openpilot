@@ -225,8 +225,9 @@ def test_approved_tools_include_diagnose_radar():
 def test_native_panel_keyboard_and_diagnose():
   src = Path(__file__).resolve().parents[7] / "selfdrive" / "ui" / "sunnypilot" / "layouts" / "settings" / "vehicle" / "brands" / "tesla.py"
   text = src.read_text()
-  assert "Keyboard" in text
-  assert "option_item_sp" not in text
+  assert "Keyboard" not in text
+  assert "option_item_sp" in text
+  assert "text_item_sp" in text
   assert "Diagnose Radar" in text
   assert "NAPBrakeFactor" not in text
   assert "Emergency Disable" not in text
@@ -300,7 +301,12 @@ PREAP_TRANSLATION_MSGIDS = (
   "Lateral Engagement Mode",
   "Independent",
   "Radar Lateral Offset",
-  "Radar Lateral Offset (m)",
+  "CALIBRATE",
+  "DIAGNOSE",
+  "TEST",
+  "BACKUP",
+  "FLASH",
+  "RESTORE",
   "Calibrate Pedal",
   "Calibrate Radar",
   "Diagnose Radar",

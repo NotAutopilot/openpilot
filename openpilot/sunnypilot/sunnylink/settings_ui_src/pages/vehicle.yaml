@@ -128,7 +128,7 @@ sections:
     blocked: true
     needs_onroad_cycle: true
     title: Pedal Interceptor
-    description: Enable Comma Pedal hardware. Local and offroad only.
+    description: Enable the Comma Pedal interceptor.
     visibility:
     - $ref: '#/macros/tesla_preap'
     enablement:
@@ -138,7 +138,7 @@ sections:
     blocked: true
     needs_onroad_cycle: true
     title: Pedal CAN Bus
-    description: CAN bus for the Comma Pedal. Local and offroad only.
+    description: CAN bus for the Comma Pedal.
     options:
     - value: 0
       label: Bus 0
@@ -153,7 +153,7 @@ sections:
     blocked: true
     needs_onroad_cycle: true
     title: Bosch Radar
-    description: Enable stock Bosch radar. Local and offroad only.
+    description: Enable the stock Bosch radar.
     visibility:
     - $ref: '#/macros/tesla_preap'
     enablement:
@@ -163,7 +163,7 @@ sections:
     blocked: true
     needs_onroad_cycle: true
     title: Radar Behind Nosecone
-    description: Attenuate radar mounted behind the nosecone. Local and offroad only.
+    description: Attenuate a radar mounted behind the nosecone.
     visibility:
     - $ref: '#/macros/tesla_preap_radar'
     enablement:

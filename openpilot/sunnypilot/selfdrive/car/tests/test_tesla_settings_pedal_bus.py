@@ -59,6 +59,18 @@ class TestTeslaSettingsPedalBus(unittest.TestCase):
     self.assertNotIn("Lateral Engagement Mode", src)
     self.assertNotIn("Active Engagement Mode", src)
 
+  def test_preap_uses_native_status_and_steppers(self):
+    src = TESLA_PY.read_text()
+    self.assertIn("option_item_sp(", src)
+    self.assertIn("text_item_sp(", src)
+    self.assertIn('param="NAPFollowDistance"', src)
+    self.assertIn('param="NAPRadarOffset"', src)
+    self.assertNotIn("button_width=90", src)
+    self.assertNotIn("Keyboard(", src)
+    self.assertIn('lambda: tr("CALIBRATE")', src)
+    self.assertIn('lambda: tr("FLASH")', src)
+    self.assertNotIn("self.follow_distance.action_item.set_enabled(offroad)", src)
+
 
 if __name__ == "__main__":
   unittest.main()

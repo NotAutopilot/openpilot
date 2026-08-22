@@ -15,7 +15,7 @@ from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.button import Button, ButtonStyle
 from openpilot.system.ui.widgets.label import gui_label
 from openpilot.system.ui.widgets.list_view import ListItem, ToggleAction, ItemAction, MultipleButtonAction, ButtonAction, \
-                                                  _resolve_value, BUTTON_WIDTH, BUTTON_HEIGHT, TEXT_PADDING, DualButtonAction
+                                                  TextAction, _resolve_value, BUTTON_WIDTH, BUTTON_HEIGHT, TEXT_PADDING, DualButtonAction
 from openpilot.system.ui.widgets.scroller_tici import LineSeparator, LINE_COLOR, LINE_PADDING
 from openpilot.system.ui.sunnypilot.lib.styles import style
 from openpilot.system.ui.sunnypilot.widgets.option_control import OptionControlSP, LABEL_WIDTH
@@ -390,6 +390,12 @@ def button_item_sp(title: str | Callable[[], str], button_text: str | Callable[[
                    callback: Callable | None = None, enabled: bool | Callable[[], bool] = True) -> ListItemSP:
   action = ButtonActionSP(text=button_text, enabled=enabled)
   return ListItemSP(title=title, description=description, action_item=action, callback=callback)
+
+
+def text_item_sp(title: str | Callable[[], str], value: str | Callable[[], str],
+                 description: str | Callable[[], str] | None = None) -> ListItemSP:
+  action = TextAction(text=value, color=style.ITEM_TEXT_VALUE_COLOR)
+  return ListItemSP(title=title, description=description, action_item=action)
 
 
 def dual_button_item_sp(left_text: str | Callable[[], str], right_text: str | Callable[[], str], left_callback: Callable | None = None,

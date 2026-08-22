@@ -2499,7 +2499,7 @@
           "needs_onroad_cycle": true,
           "blocked": true,
           "title": "Pedal Interceptor",
-          "description": "Enable Comma Pedal hardware. Local and offroad only.",
+          "description": "Enable the Comma Pedal interceptor.",
           "visibility": [
             {
               "type": "capability",
@@ -2519,7 +2519,7 @@
           "needs_onroad_cycle": true,
           "blocked": true,
           "title": "Pedal CAN Bus",
-          "description": "CAN bus for the Comma Pedal. Local and offroad only.",
+          "description": "CAN bus for the Comma Pedal.",
           "options": [
             {
               "value": 0,
@@ -2549,7 +2549,7 @@
           "needs_onroad_cycle": true,
           "blocked": true,
           "title": "Bosch Radar",
-          "description": "Enable stock Bosch radar. Local and offroad only.",
+          "description": "Enable the stock Bosch radar.",
           "visibility": [
             {
               "type": "capability",
@@ -2569,7 +2569,7 @@
           "needs_onroad_cycle": true,
           "blocked": true,
           "title": "Radar Behind Nosecone",
-          "description": "Attenuate radar mounted behind the nosecone. Local and offroad only.",
+          "description": "Attenuate a radar mounted behind the nosecone.",
           "visibility": [
             {
               "type": "capability",
