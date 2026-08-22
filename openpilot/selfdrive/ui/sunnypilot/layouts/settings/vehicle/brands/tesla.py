@@ -13,6 +13,7 @@ from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.runner import start_to
 from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.safety import ToolSafetyError
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr
+from openpilot.system.ui.sunnypilot.lib.styles import style
 from openpilot.system.ui.sunnypilot.widgets.list_view import (
   button_item_sp, multiple_button_item_sp, option_item_sp, text_item_sp, toggle_item_sp,
 )
@@ -83,7 +84,7 @@ class TeslaSettings(BrandSettings):
       param="NAPFollowDistance",
       min_value=FOLLOW_DISTANCE_MIN,
       max_value=FOLLOW_DISTANCE_MAX,
-      description=lambda: tr("How far Pre-AP follows a detected lead. 1 is closest, 7 is farthest."),
+      description=lambda: tr("How far Pre-AP follows a detected lead. 1 is closest, 7 is farthest. Changes apply while driving."),
       label_callback=str,
       inline=True,
     )
@@ -96,6 +97,7 @@ class TeslaSettings(BrandSettings):
       title=lambda: tr("Pedal CAN Bus"),
       description=lambda: tr("CAN bus for the Comma Pedal."),
       buttons=[lambda: tr("Bus 0"), lambda: tr("Bus 2")],
+      button_width=364,
       inline=True,
       callback=self._on_pedal_bus_selected,
     )
@@ -116,9 +118,9 @@ class TeslaSettings(BrandSettings):
       max_value=RADAR_OFFSET_MAX_CM,
       value_change_step=RADAR_OFFSET_STEP_CM,
       use_float_scaling=True,
-      description=lambda: tr("Meters added to radar yRel. Negative shifts leads left; positive shifts right."),
+      label_width=style.BUTTON_ACTION_WIDTH,
+      description=lambda: tr("Shift detected leads left (-) or right (+)."),
       label_callback=lambda value: f"{value / 100.0:+.2f} m",
-      inline=True,
     )
     self.status_path = text_item_sp(lambda: tr("Longitudinal Path"), lambda: tr("Stock DI"))
     self.status_pedal = text_item_sp(lambda: tr("Pedal Health"), lambda: tr("None"))
@@ -141,14 +143,14 @@ class TeslaSettings(BrandSettings):
 
     self._preap_items = [
       self.follow_distance,
+      self.status_path,
+      self.status_pedal,
+      self.status_radar,
       self.pedal_enabled,
       self.pedal_bus,
       self.radar_enabled,
       self.radar_nosecone,
       self.radar_offset,
-      self.status_path,
-      self.status_pedal,
-      self.status_radar,
       self.tool_calibrate_pedal,
       self.tool_calibrate_radar,
       self.tool_diagnose_radar,
@@ -291,28 +293,22 @@ class TeslaSettings(BrandSettings):
     if is_preap:
       self._update_preap_status(is_preap)
       hardware_offroad_msg = tr("Hardware settings are only available offroad.")
+      pedal_desc = tr("Enable the Comma Pedal interceptor.")
+      pedal_bus_desc = tr("CAN bus for the Comma Pedal.")
+      radar_desc = tr("Enable the stock Bosch radar.")
+      nosecone_desc = tr("Attenuate a radar mounted behind the nosecone.")
+      offset_desc = tr("Shift detected leads left (-) or right (+).")
       if not offroad:
-        self.pedal_enabled.set_description(f"<b>{hardware_offroad_msg}</b>")
-        self.pedal_bus.set_description(f"<b>{hardware_offroad_msg}</b>")
-        self.radar_enabled.set_description(f"<b>{hardware_offroad_msg}</b>")
-        self.radar_nosecone.set_description(f"<b>{hardware_offroad_msg}</b>")
-        self.radar_offset.set_description(f"<b>{hardware_offroad_msg}</b>")
-        self.pedal_enabled.show_description(True)
-        self.pedal_bus.show_description(True)
-        self.radar_enabled.show_description(True)
-        self.radar_nosecone.show_description(True)
-        self.radar_offset.show_description(True)
-      else:
-        self.pedal_enabled.set_description(tr("Enable the Comma Pedal interceptor."))
-        self.pedal_bus.set_description(tr("CAN bus for the Comma Pedal."))
-        self.radar_enabled.set_description(tr("Enable the stock Bosch radar."))
-        self.radar_nosecone.set_description(tr("Attenuate a radar mounted behind the nosecone."))
-        self.radar_offset.set_description(tr("Meters added to radar yRel. Negative shifts leads left; positive shifts right."))
-        self.pedal_enabled.show_description(False)
-        self.pedal_bus.show_description(False)
-        self.radar_enabled.show_description(False)
-        self.radar_nosecone.show_description(False)
-        self.radar_offset.show_description(False)
+        pedal_desc = f"<b>{hardware_offroad_msg}</b><br><br>{pedal_desc}"
+        pedal_bus_desc = f"<b>{hardware_offroad_msg}</b><br><br>{pedal_bus_desc}"
+        radar_desc = f"<b>{hardware_offroad_msg}</b><br><br>{radar_desc}"
+        nosecone_desc = f"<b>{hardware_offroad_msg}</b><br><br>{nosecone_desc}"
+        offset_desc = f"<b>{hardware_offroad_msg}</b><br><br>{offset_desc}"
+      self.pedal_enabled.set_description(pedal_desc)
+      self.pedal_bus.set_description(pedal_bus_desc)
+      self.radar_enabled.set_description(radar_desc)
+      self.radar_nosecone.set_description(nosecone_desc)
+      self.radar_offset.set_description(offset_desc)
       self.pedal_enabled.action_item.set_enabled(offroad)
       self.pedal_bus.action_item.set_enabled(offroad)
       self.radar_enabled.action_item.set_enabled(offroad)
