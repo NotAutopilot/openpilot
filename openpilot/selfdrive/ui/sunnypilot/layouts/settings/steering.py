@@ -42,6 +42,7 @@ class SteeringLayout(Widget):
                               "Disable toggle to revert back to stock sunnypilot engagement/disengagement.")
     self._mads_limited_desc = tr("This platform supports limited MADS settings.")
     self._mads_full_desc = tr("This platform supports all MADS settings.")
+    self._mads_required_desc = tr("This platform requires MADS.")
     self._mads_check_compat_desc = tr("Start the vehicle to check vehicle compatibility.")
 
     self._mads_toggle = toggle_item_sp(
@@ -122,17 +123,22 @@ class SteeringLayout(Widget):
     super()._update_state()
 
     torque_allowed = ui_state.CP is not None and ui_state.CP.steerControlType != car.CarParams.SteerControlType.angle
+    bundle = ui_state.params.get("CarPlatformBundle")
+    bundle_platform = bundle.get("platform", "") if isinstance(bundle, dict) else ""
+    is_preap = is_preap_ui_platform(bundle_platform, ui_state.CP)
+    mads_required = ui_state.CP_SP is not None and bool(getattr(ui_state.CP_SP, "madsRequired", False))
     if ui_state.CP is not None:
-      mads_main_desc = self._mads_limited_desc if self._mads_settings_layout._mads_limited_settings() else self._mads_full_desc
+      if is_preap or mads_required:
+        mads_main_desc = self._mads_required_desc
+      elif self._mads_settings_layout._mads_limited_settings():
+        mads_main_desc = self._mads_limited_desc
+      else:
+        mads_main_desc = self._mads_full_desc
       self._mads_toggle.set_description(f"<b>{mads_main_desc}</b><br><br>{self._mads_base_desc}")
     else:
       self._mads_toggle.set_description(f"<b>{self._mads_check_compat_desc}</b><br><br>{self._mads_base_desc}")
 
     # Pre-AP forces and blocks the internal MADS master. Customize MADS stays reachable.
-    bundle = ui_state.params.get("CarPlatformBundle")
-    bundle_platform = bundle.get("platform", "") if isinstance(bundle, dict) else ""
-    is_preap = is_preap_ui_platform(bundle_platform, ui_state.CP)
-    mads_required = ui_state.CP_SP is not None and bool(getattr(ui_state.CP_SP, "madsRequired", False))
     if is_preap or mads_required:
       self._mads_toggle.action_item.set_state(True)
       self._mads_toggle.action_item.set_enabled(False)

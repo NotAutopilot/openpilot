@@ -53,6 +53,12 @@ class TestTeslaSettingsPedalBus(unittest.TestCase):
     self.assertTrue("pedal_bus_selector_index(ui_state.params.get(\"NAPPedalCanBus\"))" in src)
     self.assertTrue("ui_state.params.put(\"NAPPedalCanBus\", 0 if index == 0 else 2)" in src)
 
+  def test_tesla_menu_does_not_own_mads_engagement(self):
+    src = TESLA_PY.read_text()
+    self.assertNotIn("NAPLateralEngagementMode", src)
+    self.assertNotIn("Lateral Engagement Mode", src)
+    self.assertNotIn("Active Engagement Mode", src)
+
 
 if __name__ == "__main__":
   unittest.main()

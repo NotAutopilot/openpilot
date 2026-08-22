@@ -72,10 +72,6 @@ msgstr "APN 설정"
 msgid "Acknowledge Excessive Actuation"
 msgstr "과도한 작동을 확인"
 
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Active Engagement Mode"
-msgstr ""
-
 #: openpilot/system/ui/widgets/network.py
 msgid "Advanced"
 msgstr "고급"
@@ -113,10 +109,11 @@ msgid "Are you sure you want to uninstall?"
 msgstr "정말 제거하시겠습니까?"
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Attenuate radar mounted behind the nosecone. Local and offroad only."
+msgid "Attenuate a radar mounted behind the nosecone. Hardware changes are local and offroad only."
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/onboarding.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
 #: openpilot/system/ui/widgets/network.py
 msgid "Back"
 msgstr "뒤로"
@@ -146,7 +143,7 @@ msgid "Bus 2"
 msgstr ""
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "CAN bus for the Comma Pedal. Local and offroad only."
+msgid "CAN bus for the Comma Pedal. Hardware changes are local and offroad only."
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
@@ -197,6 +194,14 @@ msgstr "언어 변경"
 msgid "Changing this setting will restart sunnypilot if the car is powered on."
 msgstr ""
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Choose how Automatic Lane Centering (ALC) behaves after the brake pedal is manually pressed in sunnypilot. Onroad writes apply on the next drive."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Choose how Pre-AP stalk pulls request Automatic Lane Centering (ALC) and cruise in sunnypilot. Onroad writes apply on the next drive."
+msgstr ""
+
 #: openpilot/system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
 msgid "Choose your sponsorship tier and confirm your support"
 msgstr ""
@@ -213,8 +218,12 @@ msgstr "닫기"
 msgid "Cooperative Steering (Beta)"
 msgstr ""
 
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
 msgid "Cruise Coupled"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Cruise Coupled: The first stalk pull is ignored. The second pull requests ALC and cruise together. Cancel or brake disengages both."
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/software.py
@@ -245,6 +254,10 @@ msgstr "장치"
 msgid "Diagnose Radar"
 msgstr ""
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Disengage"
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Disengage on Accelerator Pedal"
 msgstr "가속 페달로 해제"
@@ -260,6 +273,10 @@ msgstr "해제 후 재시작"
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "Disengage to Reset Calibration"
 msgstr "해제 후 캘리브레이션 재설정"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Disengage: ALC will disengage when the brake pedal is pressed."
+msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Display speed in km/h instead of mph."
@@ -352,10 +369,6 @@ msgstr ""
 msgid "Enable ADB"
 msgstr "ADB 사용"
 
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Enable Comma Pedal hardware. Local and offroad only."
-msgstr ""
-
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Enable Lane Departure Warnings"
 msgstr "차선 이탈 경고 사용"
@@ -376,16 +389,24 @@ msgstr "테더링 사용"
 msgid "Enable driver monitoring even when sunnypilot is not engaged."
 msgstr ""
 
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Enable stock Bosch radar. Local and offroad only."
-msgstr ""
-
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Enable sunnypilot"
 msgstr ""
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Enable the Comma Pedal interceptor. Hardware changes are local and offroad only."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Enable the stock Bosch radar. Hardware changes are local and offroad only."
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Enable the sunnypilot longitudinal control (alpha) toggle to allow Experimental mode."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Engage lateral and longitudinal control with cruise control engagement."
 msgstr ""
 
 #: openpilot/system/ui/widgets/network.py
@@ -448,10 +469,6 @@ msgstr ""
 msgid "Follow Distance"
 msgstr ""
 
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Follow distance (1=closest, 7=farthest). Writes apply live."
-msgstr ""
-
 #: openpilot/system/ui/sunnypilot/widgets/sunnylink_pairing_dialog.py
 msgid "Follow the prompts to complete the pairing process"
 msgstr ""
@@ -484,6 +501,10 @@ msgstr ""
 msgid "Hidden Network"
 msgstr "숨겨진 네트워크"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "How far Pre-AP follows a detected lead. 1 is closest, 7 is farthest. Changes apply while driving."
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/settings/software.py
 msgid "INSTALL"
 msgstr "설치"
@@ -496,8 +517,12 @@ msgstr "IP 주소"
 msgid "If sponsorship status was not updated, please contact a moderator on the community forum at https://community.sunnypilot.ai"
 msgstr ""
 
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
 msgid "Independent"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Independent: The first stalk pull requests ALC. The second pull requests cruise. ALC can remain active if cruise exits."
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/software.py
@@ -520,7 +545,7 @@ msgstr "로딩 중"
 msgid "LTE"
 msgstr "LTE"
 
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
 msgid "Lateral Engagement Mode"
 msgstr ""
 
@@ -529,15 +554,19 @@ msgid "Lateral Maneuver Mode"
 msgstr ""
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Lateral offset in meters added to radar yRel. Negative shifts leads left of the current radar reading; positive shifts right. Local and offroad only."
+msgid "Lateral offset in meters added to radar yRel. Negative shifts leads left of the current radar reading; positive shifts right. Hardware changes are local and offroad only."
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/developer.py
 msgid "Longitudinal Maneuver Mode"
 msgstr "롱컨 기동 모드"
 
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
 msgid "Longitudinal Only"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Longitudinal Only: Stalk pulls request cruise only. ALC stays off."
 msgstr ""
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
@@ -578,6 +607,14 @@ msgstr "릴리스 노트가 없습니다."
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
 msgid "None"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Note: For vehicles without LFA/LKAS button, disabling this will prevent lateral control engagement."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Note: Once lateral control is engaged via UEM, it will remain engaged until it is manually disabled via the MADS button or car shut off."
 msgstr ""
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
@@ -643,6 +680,14 @@ msgstr "장치를 귀하의 comma 계정에 페어링하세요"
 msgid "Pair your device with comma connect (connect.comma.ai) and claim your comma prime offer."
 msgstr "장치를 comma connect(connect.comma.ai)와 페어링하고 comma 프라임 혜택을 받으세요."
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Pause"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Pause: ALC will pause when the brake pedal is pressed."
+msgstr ""
+
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
 msgid "Pedal"
 msgstr ""
@@ -684,10 +729,6 @@ msgstr "초기 페어링을 완료하려면 Wi‑Fi에 연결하세요"
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "Power Off"
 msgstr "전원 끄기"
-
-#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
-msgid "Pre-AP stalk engagement. Onroad writes apply on the next drive."
-msgstr ""
 
 #: openpilot/sunnypilot/selfdrive/selfdrived/preap_alerts.py
 msgid "Press Brake to Slow Down"
@@ -812,6 +853,14 @@ msgstr "규제 정보"
 msgid "Relaxed"
 msgstr "편안한"
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Remain Active"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Remain Active: ALC will remain active when the brake pedal is pressed."
+msgstr ""
+
 #: openpilot/selfdrive/ui/widgets/prime.py
 msgid "Remote access"
 msgstr "원격 액세스"
@@ -881,6 +930,10 @@ msgid "Select a language"
 msgstr "언어 선택"
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
+msgid "Selected follow distance: {follow}."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
 msgid "Selecting a higher finger count may reduce accidental activations."
 msgstr ""
 
@@ -902,6 +955,14 @@ msgstr "표준"
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
 msgid "Start"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Start the vehicle to check vehicle compatibility."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Steering Mode on Brake Pedal"
 msgstr ""
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
@@ -940,6 +1001,22 @@ msgstr "테더링 비밀번호"
 msgid "This allows the use of full MADS functionality when enabled."
 msgstr ""
 
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "This feature defaults to OFF, and does not allow selection due to vehicle limitations."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "This feature defaults to ON, and does not allow selection due to vehicle limitations."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "This platform only supports Disengage mode due to vehicle limitations."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Toggle with Main Cruise"
+msgstr ""
+
 #: openpilot/selfdrive/ui/layouts/settings/settings.py
 msgid "Toggles"
 msgstr "토글"
@@ -966,6 +1043,10 @@ msgstr ""
 
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py
 msgid "Unconfigured"
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py
+msgid "Unified Engagement Mode (UEM)"
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/software.py

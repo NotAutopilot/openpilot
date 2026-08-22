@@ -30,11 +30,6 @@ RADAR_OFFSET_MIN = -2.0
 RADAR_OFFSET_MAX = 2.0
 
 
-def _mode_label(mode: int) -> str:
-  labels = (tr("Independent"), tr("Cruise Coupled"), tr("Longitudinal Only"))
-  return labels[mode] if 0 <= mode < len(labels) else labels[0]
-
-
 def _path_label(path: str) -> str:
   return tr("Pedal") if path == "pedal" else tr("Stock DI")
 
@@ -83,47 +78,45 @@ class TeslaSettings(BrandSettings):
       param="TeslaMadsScreenButton",
       inline=False,
     )
-    self.engagement_mode = multiple_button_item_sp(
-      title=lambda: tr("Lateral Engagement Mode"),
-      description=lambda: tr("Pre-AP stalk engagement. Onroad writes apply on the next drive."),
-      buttons=[lambda: tr("Independent"), lambda: tr("Cruise Coupled"), lambda: tr("Longitudinal Only")],
-      param="NAPLateralEngagementMode",
-      inline=False,
-      button_width=280,
-    )
     self.follow_distance = multiple_button_item_sp(
       title=lambda: tr("Follow Distance"),
-      description=lambda: tr("Follow distance (1=closest, 7=farthest). Writes apply live."),
+      description="",
       buttons=[str(i) for i in range(FOLLOW_DISTANCE_MIN, FOLLOW_DISTANCE_MAX + 1)],
       inline=True,
       button_width=90,
       callback=self._on_follow_selected,
     )
-    self.pedal_enabled = toggle_item_sp(tr("Pedal Interceptor"), tr("Enable Comma Pedal hardware. Local and offroad only."),
-                                        param="NAPPedalEnabled")
+    self.pedal_enabled = toggle_item_sp(
+      tr("Pedal Interceptor"),
+      tr("Enable the Comma Pedal interceptor. Hardware changes are local and offroad only."),
+      param="NAPPedalEnabled",
+    )
     self.pedal_bus = multiple_button_item_sp(
       title=lambda: tr("Pedal CAN Bus"),
-      description=lambda: tr("CAN bus for the Comma Pedal. Local and offroad only."),
+      description=lambda: tr("CAN bus for the Comma Pedal. Hardware changes are local and offroad only."),
       buttons=[lambda: tr("Bus 0"), lambda: tr("Bus 2")],
       inline=True,
       callback=self._on_pedal_bus_selected,
     )
-    self.radar_enabled = toggle_item_sp(tr("Bosch Radar"), tr("Enable stock Bosch radar. Local and offroad only."),
-                                        param="NAPRadarEnabled")
-    self.radar_nosecone = toggle_item_sp(tr("Radar Behind Nosecone"),
-                                         tr("Attenuate radar mounted behind the nosecone. Local and offroad only."),
-                                         param="NAPRadarBehindNosecone")
+    self.radar_enabled = toggle_item_sp(
+      tr("Bosch Radar"),
+      tr("Enable the stock Bosch radar. Hardware changes are local and offroad only."),
+      param="NAPRadarEnabled",
+    )
+    self.radar_nosecone = toggle_item_sp(
+      tr("Radar Behind Nosecone"),
+      tr("Attenuate a radar mounted behind the nosecone. Hardware changes are local and offroad only."),
+      param="NAPRadarBehindNosecone",
+    )
     self._radar_offset_keyboard = Keyboard(max_text_size=10)
     self.radar_offset = button_item_sp(
       lambda: tr("Radar Lateral Offset"),
       self._get_radar_offset_text,
       description=lambda: tr(
-        "Lateral offset in meters added to radar yRel. Negative shifts leads left of the current radar reading; "
-        + "positive shifts right. Local and offroad only."
+        "Lateral offset in meters added to radar yRel. Negative shifts leads left of the current radar reading; positive shifts right. Hardware changes are local and offroad only."
       ),
       callback=self._on_radar_offset_click,
     )
-    self.status_mode = button_item_sp(lambda: tr("Active Engagement Mode"), "", enabled=False)
     self.status_path = button_item_sp(lambda: tr("Longitudinal Path"), "", enabled=False)
     self.status_pedal = button_item_sp(lambda: tr("Pedal Health"), "", enabled=False)
     self.status_radar = button_item_sp(lambda: tr("Radar Health"), "", enabled=False)
@@ -144,14 +137,12 @@ class TeslaSettings(BrandSettings):
                                             callback=lambda: self._confirm_tool("restore_epas"))
 
     self._preap_items = [
-      self.engagement_mode,
       self.follow_distance,
       self.pedal_enabled,
       self.pedal_bus,
       self.radar_enabled,
       self.radar_nosecone,
       self.radar_offset,
-      self.status_mode,
       self.status_path,
       self.status_pedal,
       self.status_radar,
@@ -232,20 +223,16 @@ class TeslaSettings(BrandSettings):
     text = tr(self._tool_instructions[tool]).replace("\n", "<br>")
     gui_app.push_widget(ConfirmDialog(text, tr("Start"), rich=True, callback=callback))
 
+  def _update_follow_description(self, follow: int):
+    base = tr("How far Pre-AP follows a detected lead. 1 is closest, 7 is farthest. Changes apply while driving.")
+    self.follow_distance.set_description(f"{base}<br><br><b>" + tr("Selected follow distance: {follow}.").format(follow=follow) + "</b>")
+    self.follow_distance.show_description(True)
+
   def _update_preap_status(self, is_preap: bool):
     flags = int(getattr(ui_state.CP_SP, "flags", 0) or 0) if ui_state.CP_SP is not None else 0
     pedal_present = bool(flags & TeslaFlagsSP.PREAP_PEDAL_PRESENT)
     pedal_calib = bool(flags & TeslaFlagsSP.PREAP_PEDAL_CALIB_AVAILABLE)
     radar_present = bool(flags & TeslaFlagsSP.PREAP_RADAR_PRESENT)
-
-    if ui_state.CP_SP is not None:
-      try:
-        mode = int(ui_state.CP_SP.preapLateralEngagementMode)
-      except Exception:
-        mode = int(ui_state.params.get("NAPLateralEngagementMode") or 0)
-    else:
-      mode = int(ui_state.params.get("NAPLateralEngagementMode") or 0)
-    self.status_mode.action_item.set_value(_mode_label(mode))
 
     if pedal_present and ui_state.CP is not None and bool(ui_state.CP.openpilotLongitudinalControl) and not bool(ui_state.CP.pcmCruise):
       path = "pedal"
@@ -272,6 +259,7 @@ class TeslaSettings(BrandSettings):
     follow = int(ui_state.params.get("NAPFollowDistance") or 4)
     follow = max(FOLLOW_DISTANCE_MIN, min(FOLLOW_DISTANCE_MAX, follow))
     self.follow_distance.action_item.set_selected_button(follow - FOLLOW_DISTANCE_MIN)
+    self._update_follow_description(follow)
 
     self.pedal_bus.action_item.set_selected_button(
       pedal_bus_selector_index(ui_state.params.get("NAPPedalCanBus")))

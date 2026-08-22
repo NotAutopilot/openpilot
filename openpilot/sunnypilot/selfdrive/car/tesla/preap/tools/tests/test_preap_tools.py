@@ -298,6 +298,7 @@ def test_flash_negative_response_fails_closed_before_write(monkeypatch):
 
 PREAP_TRANSLATION_MSGIDS = (
   "Lateral Engagement Mode",
+  "Independent",
   "Radar Lateral Offset",
   "Radar Lateral Offset (m)",
   "Calibrate Pedal",
@@ -313,7 +314,6 @@ PREAP_TRANSLATION_MSGIDS = (
   "Bosch Radar",
   "Radar Behind Nosecone",
   "Follow Distance",
-  "Active Engagement Mode",
   "Longitudinal Path",
   "Pedal Health",
   "Radar Health",
@@ -330,10 +330,12 @@ def test_preap_translation_msgids_in_pot():
   for msgid in PREAP_TRANSLATION_MSGIDS + ("Pedal Calibration",):
     assert msgid.split("\n", 1)[0] in pot, msgid
   assert "#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py" in pot
+  assert "#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py" in pot
   assert "#: openpilot/sunnypilot/selfdrive/selfdrived/preap_alerts.py" in pot
   assert "#: openpilot/sunnypilot/selfdrive/car/tesla/preap/tools/instructions.py" in pot
+  assert 'msgid "Active Engagement Mode"' not in pot
   for line in pot.splitlines():
-    if "preap_alerts.py" in line or "tesla/preap/tools/instructions.py" in line or "brands/tesla.py" in line:
+    if "preap_alerts.py" in line or "tesla/preap/tools/instructions.py" in line or "brands/tesla.py" in line or "mads_settings.py" in line:
       assert line.startswith("#: openpilot/")
       assert not re.search(r"\.py:\d+", line)
 

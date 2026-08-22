@@ -223,16 +223,16 @@ class TestTeslaPreAPSettings:
   def test_preap_vehicle_keys_present(self, schema):
     vs = schema["vehicle_settings"]["tesla"]
     keys = {item["key"] for item in vs.get("items", [])}
-    assert "NAPLateralEngagementMode" in keys
     assert "NAPFollowDistance" in keys
     assert "NAPPedalEnabled" in keys
     assert "NAPPedalCanBus" in keys
     assert "NAPRadarEnabled" in keys
     assert "NAPRadarBehindNosecone" in keys
-    assert "tesla_preap_active_mode" in keys
     assert "tesla_preap_longitudinal_path" in keys
     assert "tesla_preap_pedal_health" in keys
     assert "tesla_preap_radar_health" in keys
+    assert "NAPLateralEngagementMode" not in keys
+    assert "tesla_preap_active_mode" not in keys
     assert "MadsSteeringMode" not in keys
     assert "NAPRadarOffset" not in keys
     assert "NAPAdaptiveAccel" not in keys
@@ -308,6 +308,18 @@ class TestTeslaPreAPSettings:
     assert item.get("needs_onroad_cycle") is True
     assert "offroad_only" not in _flatten_rule_types(item.get("enablement"))
 
+  def test_engagement_mode_lives_in_native_mads_settings(self, schema):
+    vs_keys = {item["key"] for item in schema["vehicle_settings"]["tesla"].get("items", [])}
+    assert "NAPLateralEngagementMode" not in vs_keys
+    section = _find_section(schema, "steering", "mads")
+    assert section is not None
+    sp = next(s for s in section["sub_panels"] if s["id"] == "mads_settings")
+    keys = [item["key"] for item in sp["items"]]
+    assert "NAPLateralEngagementMode" in keys
+    assert keys[0] == "NAPLateralEngagementMode"
+    vis = json.dumps(_find_item(schema, "NAPLateralEngagementMode").get("visibility"))
+    assert "tesla_preap" in vis
+
   def test_mads_full_platforms_excludes_preap_key(self):
     import yaml
     from pathlib import Path
@@ -324,7 +336,7 @@ class TestTeslaPreAPSettings:
   def test_preap_readonly_status_info_widgets(self, schema):
     vs = schema["vehicle_settings"]["tesla"]
     items = {item["key"]: item for item in vs.get("items", [])}
-    for key in ("tesla_preap_active_mode", "tesla_preap_longitudinal_path",
+    for key in ("tesla_preap_longitudinal_path",
                 "tesla_preap_pedal_health", "tesla_preap_radar_health"):
       item = items[key]
       assert item["widget"] == "info"

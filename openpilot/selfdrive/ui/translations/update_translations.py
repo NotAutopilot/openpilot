@@ -18,9 +18,10 @@ def update_translations():
     for filename in filenames:
       if filename.endswith(".py"):
         files.append(os.path.relpath(os.path.join(root, filename), BASEDIR))
-  # Native Pre-AP Tesla UI and tool/alert strings live outside the default UI walk.
+  # Native Pre-AP Tesla UI, MADS settings, and tool/alert strings live outside the default UI walk.
   extra = [
     os.path.relpath(os.path.join(str(UI_DIR), "sunnypilot/layouts/settings/vehicle/brands/tesla.py"), BASEDIR),
+    os.path.relpath(os.path.join(str(UI_DIR), "sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py"), BASEDIR),
     os.path.relpath(os.path.join(BASEDIR, "openpilot/sunnypilot/selfdrive/car/tesla/preap/tools/instructions.py"), BASEDIR),
     os.path.relpath(os.path.join(BASEDIR, "openpilot/sunnypilot/selfdrive/selfdrived/preap_alerts.py"), BASEDIR),
   ]
