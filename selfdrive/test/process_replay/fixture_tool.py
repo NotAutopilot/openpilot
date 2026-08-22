@@ -1250,8 +1250,8 @@ def accept_six_process_outputs(
     raise FixtureError("case_params.NAPPedalEnabled must be a bool")
   if bool(case_params["NAPPedalEnabled"]) != (mode == "pedal"):
     raise FixtureError("case_params.NAPPedalEnabled does not match case mode")
-  if case_params.get("NAPRadarEnabled") is not True or case_params.get("NAPRadarBehindNosecone") is not True:
-    raise FixtureError("case_params must enable radar emulation and nosecone flags")
+  if case_params.get("NAPRadarEnabled") is not True:
+    raise FixtureError("case_params must enable radar emulation")
 
   missing = [name for name in SIX_PROCESS_OUTPUTS if name not in process_outputs]
   if missing:

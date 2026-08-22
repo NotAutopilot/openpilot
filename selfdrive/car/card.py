@@ -167,6 +167,7 @@ class Car:
 
       def store_donor_vin(vin: str) -> None:
         nap_conf.radar_donor_vin = vin
+        self.params.put("NAPRadarVinReadStatus", f"saved {vin}")
         cloudlog.info("preap radar donor vin stored")
 
       self._nap_conf = nap_conf
@@ -279,17 +280,26 @@ class Car:
         if self.sm.valid['pandaStates']:
           controls_allowed = any(ps.controlsAllowed for ps in self.sm['pandaStates'])
         force_read = self.params.get_bool("NAPRadarReadVin")
-        can_sends.extend(self.radar_donor_vin.update(
-          self._can_packets,
-          time.monotonic(),
-          radar_enabled=self._nap_conf.radar_enabled,
-          stored_vin=self._nap_conf.radar_donor_vin,
-          controls_allowed=controls_allowed,
-          enabled=bool(CC.enabled),
-          force_read=force_read,
-        ))
-        if force_read and self.radar_donor_vin.read_finished:
+        if force_read and not self._nap_conf.radar_enabled:
+          self.params.put("NAPRadarVinReadStatus", "enable radar first")
           self.params.put_bool("NAPRadarReadVin", False)
+        else:
+          can_sends.extend(self.radar_donor_vin.update(
+            self._can_packets,
+            time.monotonic(),
+            radar_enabled=self._nap_conf.radar_enabled,
+            stored_vin=self._nap_conf.radar_donor_vin,
+            controls_allowed=controls_allowed,
+            enabled=bool(CC.enabled),
+            force_read=force_read,
+          ))
+          if force_read and self.radar_donor_vin.read_finished:
+            if not self.radar_donor_vin.reader.vin and self.radar_donor_vin.reader.failure:
+              self.params.put(
+                "NAPRadarVinReadStatus",
+                self.radar_donor_vin.reader.failure.name.lower().replace("_", " "),
+              )
+            self.params.put_bool("NAPRadarReadVin", False)
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
       self.CC_prev = CC

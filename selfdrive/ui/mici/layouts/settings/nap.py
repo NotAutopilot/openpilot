@@ -59,12 +59,6 @@ class RadarSettingsLayoutMici(NavScroller):
                                     toggle_callback=_reboot_on_toggle)
     radar_enabled.set_enabled(ui_state.is_offroad)
 
-    radar_behind_nosecone = BigParamControl(
-      "radar behind nosecone", NAPParamKeys.RADAR_BEHIND_NOSECONE,
-      toggle_callback=_reboot_on_toggle,
-    )
-    radar_behind_nosecone.set_enabled(ui_state.is_offroad)
-
     radar_offset_btn = BigButton("radar lateral offset", self._radar_offset_label())
     radar_offset_btn.set_click_callback(lambda: self._open_radar_offset_input(radar_offset_btn))
 
@@ -106,7 +100,6 @@ class RadarSettingsLayoutMici(NavScroller):
 
     self._scroller.add_widgets([
       radar_enabled,
-      radar_behind_nosecone,
       radar_offset_btn,
       donor_vin_btn,
       read_vin_btn,

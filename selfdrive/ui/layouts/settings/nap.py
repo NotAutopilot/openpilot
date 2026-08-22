@@ -271,15 +271,6 @@ class NAPLayout(Widget):
       dest=self._radar_items,
     )
 
-    self._add_toggle(
-      NAPParamKeys.RADAR_BEHIND_NOSECONE,
-      "Radar Behind Nosecone",
-      "Apply signal attenuation adjustment for radar mounted behind the nosecone. Requires reboot.",
-      enabled=ui_state.is_offroad,
-      needs_reboot=True,
-      dest=self._radar_items,
-    )
-
     self._radar_offset_keyboard = Keyboard(max_text_size=10)
     self._radar_offset_btn = button_item(
       "Radar Lateral Offset",
@@ -318,7 +309,7 @@ class NAPLayout(Widget):
     radar_position = int(self._params.get(NAPParamKeys.RADAR_POSITION, return_default=True) or 0)
     self._radar_position_buttons = multiple_button_item(
       "Donor Radar Position",
-      "Must match the donor car: 0 pre-facelift S, 1 post-facelift S, 2 Model X.",
+      "Always sent when radar is on, including empty VIN. 0 pre-facelift S, 1 post-facelift S, 2 Model X.",
       buttons=["0", "1", "2"],
       button_width=130,
       selected_index=max(0, min(2, radar_position)),
@@ -408,7 +399,17 @@ class NAPLayout(Widget):
     return vin if len(vin) == 17 else "Not set"
 
   def _get_read_vin_text(self) -> str:
-    return "Reading..." if self._params.get_bool(NAPParamKeys.RADAR_READ_VIN) else "Read"
+    if self._params.get_bool(NAPParamKeys.RADAR_READ_VIN):
+      return "Reading..."
+    raw = self._params.get(NAPParamKeys.RADAR_VIN_READ_STATUS, return_default=True) or ""
+    if isinstance(raw, bytes):
+      raw = raw.decode("ascii", errors="ignore")
+    status = str(raw).strip()
+    if status.startswith("saved "):
+      return "Cycle car"
+    if status:
+      return status[:18]
+    return "Read"
 
   def _open_radar(self):
     self._page = "radar"
@@ -422,6 +423,14 @@ class NAPLayout(Widget):
     if ui_state.engaged:
       dlg = ConfirmDialog(
         "<h1>Disengage first</h1><br><p>VIN read is blocked while openpilot is engaged.</p>",
+        "OK", cancel_text="Close", rich=True,
+      )
+      gui_app.push_widget(dlg)
+      return
+
+    if not self._params.get_bool(NAPParamKeys.RADAR_ENABLED):
+      dlg = ConfirmDialog(
+        "<h1>Enable radar first</h1><br><p>Read VIN needs radar on. Toggle it and reboot, then try again.</p>",
         "OK", cancel_text="Close", rich=True,
       )
       gui_app.push_widget(dlg)
