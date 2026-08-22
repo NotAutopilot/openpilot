@@ -10,6 +10,7 @@ from openpilot.system.ui.widgets.list_view import (
   ITEM_PADDING,
 )
 from openpilot.system.ui.widgets.scroller_tici import Scroller
+from openpilot.system.ui.widgets.button import Button
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -89,16 +90,21 @@ class NAPLayout(Widget):
   def __init__(self):
     super().__init__()
     self._params = Params()
+    self._page = "main"
     self._build_items()
-    self._scroller = Scroller(self._all_items, line_separator=True, spacing=0)
+    self._scroller = Scroller(self._main_items, line_separator=True, spacing=0)
+    self._radar_scroller = Scroller(self._radar_items, line_separator=True, spacing=0)
+    self._radar_back_btn = Button("Back", click_callback=self._close_radar)
+    self._radar_back_btn.set_rect(rl.Rectangle(0, 0, 220, 90))
 
   def _build_items(self):
     """Build all list items organized into sections."""
-    self._all_items = []
+    self._main_items = []
+    self._radar_items = []
     self._toggle_map = {}  # param_key -> ListItem (for refresh)
 
     # ── Section 1: Longitudinal Control ──
-    self._all_items.append(section_header_item("Longitudinal Control"))
+    self._main_items.append(section_header_item("Longitudinal Control"))
 
     self._add_toggle(
       NAPParamKeys.PEDAL_ENABLED,
@@ -123,10 +129,10 @@ class NAPLayout(Widget):
       selected_index=max(0, min(6, follow_dist - 1)),
       callback=self._on_follow_distance,
     )
-    self._all_items.append(self._follow_buttons)
+    self._main_items.append(self._follow_buttons)
 
     # ── Section 2: Pedal Hardware ──
-    self._all_items.append(section_header_item("Pedal Hardware"))
+    self._main_items.append(section_header_item("Pedal Hardware"))
 
 
     pedal_bus = self._params.get(NAPParamKeys.PEDAL_CAN_BUS, return_default=True)
@@ -139,14 +145,14 @@ class NAPLayout(Widget):
       callback=self._on_pedal_can_bus,
     )
     self._pedal_bus_buttons.action_item.set_enabled(ui_state.is_offroad)
-    self._all_items.append(self._pedal_bus_buttons)
+    self._main_items.append(self._pedal_bus_buttons)
 
     self._pedal_calib_status = text_item(
       "Pedal Calibration",
       lambda: "Calibrated" if self._params.get_bool(NAPParamKeys.PEDAL_CALIB_DONE) else "Not Calibrated",
       description="Shows whether the pedal interceptor has been calibrated.",
     )
-    self._all_items.append(self._pedal_calib_status)
+    self._main_items.append(self._pedal_calib_status)
 
     self._calibrate_pedal_btn = button_item(
       "Calibrate Pedal",
@@ -155,93 +161,21 @@ class NAPLayout(Widget):
       callback=self._on_calibrate_pedal,
     )
     self._calibrate_pedal_btn.action_item.set_enabled(ui_state.is_offroad)
-    self._all_items.append(self._calibrate_pedal_btn)
+    self._main_items.append(self._calibrate_pedal_btn)
 
-    # ── Section 3: Radar ──
-    self._all_items.append(section_header_item("Radar"))
-
-    self._add_toggle(
-      NAPParamKeys.RADAR_ENABLED,
-      "Radar Enabled",
-      "Enable the stock Bosch radar for lead car detection. Requires reboot.",
-      enabled=ui_state.is_offroad,
-      needs_reboot=True,
+    # ── Section 3: Radar (submenu) ──
+    self._main_items.append(section_header_item("Radar"))
+    self._radar_settings_btn = button_item(
+      "Radar Settings",
+      "Open",
+      description="Donor VIN, position, offset, test, and calibration.",
+      callback=self._open_radar,
     )
-
-    self._add_toggle(
-      NAPParamKeys.RADAR_BEHIND_NOSECONE,
-      "Radar Behind Nosecone",
-      "Apply signal attenuation adjustment for radar mounted behind the nosecone. Requires reboot.",
-      enabled=ui_state.is_offroad,
-      needs_reboot=True,
-    )
-
-    self._radar_offset_keyboard = Keyboard(max_text_size=10)
-    self._radar_offset_btn = button_item(
-      "Radar Lateral Offset",
-      self._get_radar_offset_text,
-      description=(
-        "Lateral offset in meters added to radar yRel. Negative shifts leads toward the left of current radar "
-        + "reading; positive shifts right. Example: -0.27 for the 3D-printed factory-location mount."
-      ),
-      callback=self._on_radar_offset_click,
-    )
-    self._all_items.append(self._radar_offset_btn)
-
-    self._radar_vin_keyboard = Keyboard(max_text_size=17)
-    self._radar_vin_btn = button_item(
-      "Donor Radar VIN",
-      self._get_radar_vin_text,
-      description=(
-        "VIN already programmed in a salvage radar. Leave empty to send this car. "
-        + "A 17-character VIN makes panda impersonate the donor (Tinkla 0.6.6)."
-      ),
-      callback=self._on_radar_vin_click,
-    )
-    self._all_items.append(self._radar_vin_btn)
-
-    radar_position = int(self._params.get(NAPParamKeys.RADAR_POSITION, return_default=True) or 0)
-    self._radar_position_buttons = multiple_button_item(
-      "Donor Radar Position",
-      "Must match the donor car: 0 pre-facelift S, 1 post-facelift S, 2 Model X.",
-      buttons=["0", "1", "2"],
-      button_width=130,
-      selected_index=max(0, min(2, radar_position)),
-      callback=self._on_radar_position,
-    )
-    self._all_items.append(self._radar_position_buttons)
-
-    radar_epas = int(self._params.get(NAPParamKeys.RADAR_EPAS_TYPE, return_default=True) or 0)
-    self._radar_epas_buttons = multiple_button_item(
-      "Donor EPAS Type",
-      "Must match the donor car rack: 0 Bosch L538, 1 L405, 2 Mando FGR64, 3 VGR66, 4 VGR66 Gen3.",
-      buttons=["0", "1", "2", "3", "4"],
-      button_width=100,
-      selected_index=max(0, min(4, radar_epas)),
-      callback=self._on_radar_epas,
-    )
-    self._all_items.append(self._radar_epas_buttons)
-
-    self._calibrate_radar_btn = button_item(
-      "Calibrate Radar",
-      "Start",
-      description="Run the radar calibration routine.",
-      callback=self._on_calibrate_radar,
-    )
-    self._calibrate_radar_btn.action_item.set_enabled(ui_state.is_offroad)
-    self._all_items.append(self._calibrate_radar_btn)
-
-    self._test_radar_btn = button_item(
-      "Test Radar",
-      "Test",
-      description="Test radar connectivity and verify signals.",
-      callback=self._on_test_radar,
-    )
-    self._test_radar_btn.action_item.set_enabled(ui_state.is_offroad)
-    self._all_items.append(self._test_radar_btn)
+    self._main_items.append(self._radar_settings_btn)
+    self._build_radar_items()
 
     # ── Section 4: iBooster / Braking (not yet implemented — grayed out) ──
-    self._all_items.append(section_header_item("iBooster / Braking"))
+    self._main_items.append(section_header_item("iBooster / Braking"))
 
     self._add_toggle(
       NAPParamKeys.IBOOSTER_ENABLED,
@@ -260,10 +194,10 @@ class NAPLayout(Widget):
       callback=self._on_brake_factor,
     )
     self._brake_factor_buttons.action_item.set_enabled(False)
-    self._all_items.append(self._brake_factor_buttons)
+    self._main_items.append(self._brake_factor_buttons)
 
     # ── Section 5: Advanced ──
-    self._all_items.append(section_header_item("Advanced"))
+    self._main_items.append(section_header_item("Advanced"))
 
     # Force Pre-AP is always on for now — grayed out in the ON position
     self._params.put_bool(NAPParamKeys.FORCE_PRE_AP, True)
@@ -275,7 +209,7 @@ class NAPLayout(Widget):
     )
 
     # ── Section 6: Actions ──
-    self._all_items.append(section_header_item("Actions"))
+    self._main_items.append(section_header_item("Actions"))
 
     self._backup_epas_btn = button_item(
       "Backup EPAS",
@@ -284,7 +218,7 @@ class NAPLayout(Widget):
       callback=self._on_backup_epas,
     )
     self._backup_epas_btn.action_item.set_enabled(ui_state.is_offroad)
-    self._all_items.append(self._backup_epas_btn)
+    self._main_items.append(self._backup_epas_btn)
 
     self._flash_epas_btn = button_item(
       "Flash EPAS",
@@ -293,7 +227,7 @@ class NAPLayout(Widget):
       callback=self._on_flash_epas,
     )
     self._flash_epas_btn.action_item.set_enabled(ui_state.is_offroad)
-    self._all_items.append(self._flash_epas_btn)
+    self._main_items.append(self._flash_epas_btn)
 
     self._restore_epas_btn = button_item(
       "Restore EPAS",
@@ -302,7 +236,7 @@ class NAPLayout(Widget):
       callback=self._on_restore_epas,
     )
     self._restore_epas_btn.action_item.set_enabled(ui_state.is_offroad)
-    self._all_items.append(self._restore_epas_btn)
+    self._main_items.append(self._restore_epas_btn)
 
     self._emergency_disable_btn = button_item(
       "Emergency Disable",
@@ -310,7 +244,7 @@ class NAPLayout(Widget):
       description="Immediately disable pedal interceptor and clear calibration. Restart required.",
       callback=self._on_emergency_disable,
     )
-    self._all_items.append(self._emergency_disable_btn)
+    self._main_items.append(self._emergency_disable_btn)
 
     self._reset_defaults_btn = button_item(
       "Reset to Defaults",
@@ -319,14 +253,111 @@ class NAPLayout(Widget):
       callback=self._on_reset_defaults,
     )
     self._reset_defaults_btn.action_item.set_enabled(ui_state.is_offroad)
-    self._all_items.append(self._reset_defaults_btn)
+    self._main_items.append(self._reset_defaults_btn)
 
     # ── Acknowledgments ──
-    self._all_items.append(section_header_item("Acknowledgments"))
-    self._all_items.append(CreditsBlock(acknowledgments_html()))
+    self._main_items.append(section_header_item("Acknowledgments"))
+    self._main_items.append(CreditsBlock(acknowledgments_html()))
+
+  def _build_radar_items(self):
+    self._radar_items.append(section_header_item("Radar"))
+
+    self._add_toggle(
+      NAPParamKeys.RADAR_ENABLED,
+      "Radar Enabled",
+      "Enable the stock Bosch radar for lead car detection. Requires reboot.",
+      enabled=ui_state.is_offroad,
+      needs_reboot=True,
+      dest=self._radar_items,
+    )
+
+    self._add_toggle(
+      NAPParamKeys.RADAR_BEHIND_NOSECONE,
+      "Radar Behind Nosecone",
+      "Apply signal attenuation adjustment for radar mounted behind the nosecone. Requires reboot.",
+      enabled=ui_state.is_offroad,
+      needs_reboot=True,
+      dest=self._radar_items,
+    )
+
+    self._radar_offset_keyboard = Keyboard(max_text_size=10)
+    self._radar_offset_btn = button_item(
+      "Radar Lateral Offset",
+      self._get_radar_offset_text,
+      description=(
+        "Lateral offset in meters added to radar yRel. Negative shifts leads toward the left of current radar "
+        + "reading; positive shifts right. Example: -0.27 for the 3D-printed factory-location mount."
+      ),
+      callback=self._on_radar_offset_click,
+    )
+    self._radar_items.append(self._radar_offset_btn)
+
+    self._radar_vin_keyboard = Keyboard(max_text_size=17)
+    self._radar_vin_btn = button_item(
+      "Donor Radar VIN",
+      self._get_radar_vin_text,
+      description=(
+        "VIN already programmed in a salvage radar. Leave empty to send this car. "
+        + "A 17-character VIN makes panda impersonate the donor (Tinkla 0.6.6)."
+      ),
+      callback=self._on_radar_vin_click,
+    )
+    self._radar_items.append(self._radar_vin_btn)
+
+    self._read_vin_btn = button_item(
+      "Read VIN",
+      self._get_read_vin_text,
+      description=(
+        "Read the VIN stored in the radar (F190). Does not write or flash. "
+        + "Car must be on and not engaged. Power-cycle after it fills."
+      ),
+      callback=self._on_read_vin,
+    )
+    self._radar_items.append(self._read_vin_btn)
+
+    radar_position = int(self._params.get(NAPParamKeys.RADAR_POSITION, return_default=True) or 0)
+    self._radar_position_buttons = multiple_button_item(
+      "Donor Radar Position",
+      "Must match the donor car: 0 pre-facelift S, 1 post-facelift S, 2 Model X.",
+      buttons=["0", "1", "2"],
+      button_width=130,
+      selected_index=max(0, min(2, radar_position)),
+      callback=self._on_radar_position,
+    )
+    self._radar_items.append(self._radar_position_buttons)
+
+    radar_epas = int(self._params.get(NAPParamKeys.RADAR_EPAS_TYPE, return_default=True) or 0)
+    self._radar_epas_buttons = multiple_button_item(
+      "Donor EPAS Type",
+      "Must match the donor car rack: 0 Bosch L538, 1 L405, 2 Mando FGR64, 3 VGR66, 4 VGR66 Gen3.",
+      buttons=["0", "1", "2", "3", "4"],
+      button_width=100,
+      selected_index=max(0, min(4, radar_epas)),
+      callback=self._on_radar_epas,
+    )
+    self._radar_items.append(self._radar_epas_buttons)
+
+    self._calibrate_radar_btn = button_item(
+      "Calibrate Radar",
+      "Start",
+      description="Run the radar calibration routine.",
+      callback=self._on_calibrate_radar,
+    )
+    self._calibrate_radar_btn.action_item.set_enabled(ui_state.is_offroad)
+    self._radar_items.append(self._calibrate_radar_btn)
+
+    self._test_radar_btn = button_item(
+      "Test Radar",
+      "Test",
+      description="Test radar connectivity and verify signals.",
+      callback=self._on_test_radar,
+    )
+    self._test_radar_btn.action_item.set_enabled(ui_state.is_offroad)
+    self._radar_items.append(self._test_radar_btn)
 
   def _add_toggle(self, param_key: str, title: str, description: str,
-                   enabled: bool | None = None, needs_reboot: bool = False):
+                   enabled: bool | None = None, needs_reboot: bool = False,
+                   dest: list | None = None):
     """Helper to add a toggle item and register it for state refresh."""
     kwargs = {}
     if enabled is not None:
@@ -345,7 +376,7 @@ class NAPLayout(Widget):
       **kwargs,
     )
     self._toggle_map[param_key] = item
-    self._all_items.append(item)
+    (dest if dest is not None else self._main_items).append(item)
 
   # ── Multiple-button callbacks ──
 
@@ -375,6 +406,38 @@ class NAPLayout(Widget):
       raw = raw.decode("ascii", errors="ignore")
     vin = "".join(ch for ch in str(raw).upper() if ch.isalnum())
     return vin if len(vin) == 17 else "Not set"
+
+  def _get_read_vin_text(self) -> str:
+    return "Reading..." if self._params.get_bool(NAPParamKeys.RADAR_READ_VIN) else "Read"
+
+  def _open_radar(self):
+    self._page = "radar"
+    self._radar_scroller.show_event()
+
+  def _close_radar(self):
+    self._page = "main"
+    self._scroller.show_event()
+
+  def _on_read_vin(self):
+    if ui_state.engaged:
+      dlg = ConfirmDialog(
+        "<h1>Disengage first</h1><br><p>VIN read is blocked while openpilot is engaged.</p>",
+        "OK", cancel_text="Close", rich=True,
+      )
+      gui_app.push_widget(dlg)
+      return
+
+    def confirm_callback(result: int):
+      if result == DialogResult.CONFIRM:
+        self._params.put_bool(NAPParamKeys.RADAR_READ_VIN, True)
+
+    content = (
+      "<h1>Read VIN</h1><br>"
+      + "<p>Reads the VIN stored in the radar. Does not write or flash. "
+      + "Leave the car on and do not engage. Power-cycle after it fills.</p>"
+    )
+    dlg = ConfirmDialog(content, "Read", rich=True, callback=confirm_callback)
+    gui_app.push_widget(dlg)
 
   def _on_radar_vin_click(self):
     current = self._get_radar_vin_text()
@@ -546,9 +609,19 @@ class NAPLayout(Widget):
   # ── Render / lifecycle ──
 
   def _render(self, rect):
-    self._scroller.render(rect)
+    if self._page == "radar":
+      self._radar_back_btn.set_position(rect.x, rect.y + 10)
+      self._radar_back_btn.render()
+      content = rl.Rectangle(
+        rect.x, rect.y + self._radar_back_btn.rect.height + 20,
+        rect.width, rect.height - self._radar_back_btn.rect.height - 20,
+      )
+      self._radar_scroller.render(content)
+    else:
+      self._scroller.render(rect)
 
   def show_event(self):
+    self._page = "main"
     self._scroller.show_event()
     self._refresh_toggles()
 
@@ -569,3 +642,8 @@ class NAPLayout(Widget):
     brake_factor = self._params.get(NAPParamKeys.BRAKE_FACTOR, return_default=True)
     self._brake_factor_buttons.action_item.set_selected_button(
       find_preset_index(BRAKE_FACTOR_PRESETS, brake_factor))
+
+    radar_position = int(self._params.get(NAPParamKeys.RADAR_POSITION, return_default=True) or 0)
+    self._radar_position_buttons.action_item.set_selected_button(max(0, min(2, radar_position)))
+    radar_epas = int(self._params.get(NAPParamKeys.RADAR_EPAS_TYPE, return_default=True) or 0)
+    self._radar_epas_buttons.action_item.set_selected_button(max(0, min(4, radar_epas)))

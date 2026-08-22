@@ -278,6 +278,7 @@ class Car:
         controls_allowed = False
         if self.sm.valid['pandaStates']:
           controls_allowed = any(ps.controlsAllowed for ps in self.sm['pandaStates'])
+        force_read = self.params.get_bool("NAPRadarReadVin")
         can_sends.extend(self.radar_donor_vin.update(
           self._can_packets,
           time.monotonic(),
@@ -285,7 +286,10 @@ class Car:
           stored_vin=self._nap_conf.radar_donor_vin,
           controls_allowed=controls_allowed,
           enabled=bool(CC.enabled),
+          force_read=force_read,
         ))
+        if force_read and self.radar_donor_vin.read_finished:
+          self.params.put_bool("NAPRadarReadVin", False)
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
       self.CC_prev = CC
