@@ -13,7 +13,9 @@ def _load_tesla_bus_helpers():
   src = TESLA_PY.read_text()
   tree = ast.parse(src)
   wanted = {"parse_configured_pedal_bus", "pedal_bus_selector_index"}
-  body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in wanted]
+  body: list[ast.stmt] = [
+    node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in wanted
+  ]
   names = {node.name for node in body}
   if wanted - names:
     raise AssertionError(f"tesla.py missing helpers {wanted - names}")
@@ -48,8 +50,8 @@ class TestTeslaSettingsPedalBus(unittest.TestCase):
   def test_status_refresh_uses_named_helper_not_falsy_or(self):
     src = TESLA_PY.read_text()
     self.assertNotIn('params.get("NAPPedalCanBus") or', src)
-    self.assertIn("pedal_bus_selector_index(ui_state.params.get(\"NAPPedalCanBus\"))", src)
-    self.assertIn("ui_state.params.put(\"NAPPedalCanBus\", 0 if index == 0 else 2)", src)
+    self.assertTrue("pedal_bus_selector_index(ui_state.params.get(\"NAPPedalCanBus\"))" in src)
+    self.assertTrue("ui_state.params.put(\"NAPPedalCanBus\", 0 if index == 0 else 2)" in src)
 
 
 if __name__ == "__main__":
