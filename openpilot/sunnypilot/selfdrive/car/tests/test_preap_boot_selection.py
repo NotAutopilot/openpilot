@@ -206,6 +206,47 @@ class TestPreAPBootSelection(unittest.TestCase):
     assert "NAPLateralEngagementMode" in keys
     assert "NAPForcePreAP" in keys
 
+  def test_unset_pedal_bus_and_calib_range_keep_calibrated_pedal(self):
+    from opendbc.car import gen_empty_fingerprint
+    from opendbc.car.tesla.interface import CarInterface
+    from opendbc.car.tesla.preap.boot import apply_preap_hardware_snapshot, hardware_snapshot_from_values
+    from opendbc.car.tesla.values import CAR
+    from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
+
+    params = Params()
+    for key in ("NAPPedalCanBus", "NAPPedalCalibMin", "NAPPedalCalibMax"):
+      params.remove(key)
+    params.put_bool("NAPPedalEnabled", True, block=True)
+    params.put_bool("NAPPedalCalibDone", True, block=True)
+    params.put("NAPPedalCalibFactor", 0.035, block=True)
+    params.put("NAPPedalCalibZero", 0.25, block=True)
+
+    merged = {k: v for row in snapshot_param_list(params) for k, v in row.items()}
+    self.assertEqual(merged["NAPPedalCanBus"], 2)
+    self.assertEqual(merged["NAPPedalCalibMin"], -3.0)
+    self.assertEqual(merged["NAPPedalCalibMax"], 99.6)
+
+    snapshot = hardware_snapshot_from_values(
+      pedal_enabled=merged["NAPPedalEnabled"],
+      pedal_bus=merged["NAPPedalCanBus"],
+      pedal_calib_done=merged["NAPPedalCalibDone"],
+      pedal_calib_factor=merged["NAPPedalCalibFactor"],
+      pedal_calib_zero=merged["NAPPedalCalibZero"],
+      pedal_calib_min=merged["NAPPedalCalibMin"],
+      pedal_calib_max=merged["NAPPedalCalibMax"],
+    )
+    self.assertTrue(snapshot.pedal_present)
+    self.assertTrue(snapshot.pedal_calib_available)
+    self.assertEqual(snapshot.pedal_bus, 2)
+
+    CP = CarInterface.get_params(CAR.TESLA_MODEL_S_PREAP, gen_empty_fingerprint(), [], False, False, False)
+    CP_SP = CarInterface.get_params_sp(CP, CAR.TESLA_MODEL_S_PREAP, gen_empty_fingerprint(), [], False, False, False)
+    apply_preap_hardware_snapshot(CP, CP_SP, snapshot)
+    self.assertTrue(CP.openpilotLongitudinalControl)
+    self.assertFalse(CP.pcmCruise)
+    self.assertTrue(bool(CP_SP.flags & TeslaFlagsSP.PREAP_PEDAL_PRESENT))
+    self.assertTrue(bool(CP_SP.flags & TeslaFlagsSP.PREAP_PEDAL_CALIB_AVAILABLE))
+
   def test_get_car_from_raw_bundle_and_params(self):
     params = FakeParams({"CarPlatformBundle": {"platform": PREAP_PLATFORM}})
     sel, fingerprint = resolve_card_boot(params, environ={})

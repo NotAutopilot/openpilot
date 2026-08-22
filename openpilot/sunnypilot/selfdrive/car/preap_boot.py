@@ -140,7 +140,10 @@ def snapshot_param_list(params) -> list[dict[str, Any]]:
     "TeslaMadsScreenButton",
     "TeslaCoopSteering",
   ]
-  return [{k: params.get(k)} for k in keys]
+  # Match initialize_params: key defaults (bus 2, calib min/max) must survive an
+  # unset file. Omitting return_default drops a calibrated pedal onto pcmCruise
+  # and shows "Stock cruise required" instead of pedal longitudinal.
+  return [{k: params.get(k, return_default=True)} for k in keys]
 
 
 def resolve_card_boot(params, environ=None) -> tuple[PreAPBootSelection, str | None]:
