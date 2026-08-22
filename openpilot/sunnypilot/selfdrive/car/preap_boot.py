@@ -140,10 +140,23 @@ def snapshot_param_list(params) -> list[dict[str, Any]]:
     "TeslaMadsScreenButton",
     "TeslaCoopSteering",
   ]
-  # Match initialize_params: key defaults (bus 2, calib min/max) must survive an
-  # unset file. Omitting return_default drops a calibrated pedal onto pcmCruise
-  # and shows "Stock cruise required" instead of pedal longitudinal.
-  return [{k: params.get(k, return_default=True)} for k in keys]
+  # Absent-only defaults for the unsaved Param schema. Present invalid values
+  # (bus 7, min>=max) and present-but-unreadable files must pass through as
+  # None so hardware snapshot can fail closed.
+  snapshot_defaults = {
+    "NAPPedalCanBus": 2,
+    "NAPPedalCalibMin": -3.0,
+    "NAPPedalCalibMax": 99.6,
+  }
+  rows: list[dict[str, Any]] = []
+  for k in keys:
+    value = params.get(k)
+    if value is None and k in snapshot_defaults:
+      get_param_path = getattr(params, "get_param_path", None)
+      if not (callable(get_param_path) and os.path.isfile(get_param_path(k))):
+        value = snapshot_defaults[k]
+    rows.append({k: value})
+  return rows
 
 
 def resolve_card_boot(params, environ=None) -> tuple[PreAPBootSelection, str | None]:
@@ -154,6 +167,9 @@ def resolve_card_boot(params, environ=None) -> tuple[PreAPBootSelection, str | N
   if not isinstance(bundle, dict):
     bundle = {}
   bundle_platform = bundle.get("platform", None)
+  if bundle_platform and bundle_platform != PREAP_PLATFORM:
+    if _truthy_force_preap(params.get("NAPForcePreAP")):
+      params.put_bool("NAPForcePreAP", False, block=True)
   seed_preap_installer(params, bundle_platform)
   selection = resolve_preap_boot_selection(
     bundle_platform=bundle_platform,

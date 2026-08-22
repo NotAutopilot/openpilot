@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 from openpilot.common.params import Params
@@ -74,6 +75,16 @@ class TestPreAPBootSelection(unittest.TestCase):
     self.assertEqual(sel.source, "explicit")
     self.assertFalse(sel.lock_preap)
     self.assertIsNone(sel.skip_fw_query)
+    self.assertFalse(params.get("NAPForcePreAP"))
+
+  def test_force_true_then_explicit_model_3_bundle_does_not_lock_preap(self):
+    params = FakeParams({"NAPForcePreAP": True, "CarPlatformBundle": {"platform": "TESLA_MODEL_3"}})
+    sel, fingerprint = resolve_card_boot(params, environ={})
+    self.assertFalse(params.get("NAPForcePreAP"))
+    self.assertFalse(sel.lock_preap)
+    self.assertEqual(sel.candidate, "TESLA_MODEL_3")
+    self.assertEqual(fingerprint, "TESLA_MODEL_3")
+    self.assertNotEqual(sel.candidate, PREAP_PLATFORM)
 
   def test_env_override_locks_preap_and_skips_fw(self):
     params = FakeParams()
@@ -206,26 +217,9 @@ class TestPreAPBootSelection(unittest.TestCase):
     assert "NAPLateralEngagementMode" in keys
     assert "NAPForcePreAP" in keys
 
-  def test_unset_pedal_bus_and_calib_range_keep_calibrated_pedal(self):
-    from opendbc.car import gen_empty_fingerprint
-    from opendbc.car.tesla.interface import CarInterface
-    from opendbc.car.tesla.preap.boot import apply_preap_hardware_snapshot, hardware_snapshot_from_values
-    from opendbc.car.tesla.values import CAR
-    from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
-
-    params = Params()
-    for key in ("NAPPedalCanBus", "NAPPedalCalibMin", "NAPPedalCalibMax"):
-      params.remove(key)
-    params.put_bool("NAPPedalEnabled", True, block=True)
-    params.put_bool("NAPPedalCalibDone", True, block=True)
-    params.put("NAPPedalCalibFactor", 0.035, block=True)
-    params.put("NAPPedalCalibZero", 0.25, block=True)
-
+  def _hardware_snapshot_from_params(self, params):
+    from opendbc.car.tesla.preap.boot import hardware_snapshot_from_values
     merged = {k: v for row in snapshot_param_list(params) for k, v in row.items()}
-    self.assertEqual(merged["NAPPedalCanBus"], 2)
-    self.assertEqual(merged["NAPPedalCalibMin"], -3.0)
-    self.assertEqual(merged["NAPPedalCalibMax"], 99.6)
-
     snapshot = hardware_snapshot_from_values(
       pedal_enabled=merged["NAPPedalEnabled"],
       pedal_bus=merged["NAPPedalCanBus"],
@@ -235,6 +229,25 @@ class TestPreAPBootSelection(unittest.TestCase):
       pedal_calib_min=merged["NAPPedalCalibMin"],
       pedal_calib_max=merged["NAPPedalCalibMax"],
     )
+    return merged, snapshot
+
+  def test_unset_pedal_bus_and_calib_range_keep_calibrated_pedal(self):
+    from opendbc.car import gen_empty_fingerprint
+    from opendbc.car.tesla.interface import CarInterface
+    from opendbc.car.tesla.preap.boot import apply_preap_hardware_snapshot
+    from opendbc.car.tesla.values import CAR
+    from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
+
+    params = FakeParams({
+      "NAPPedalEnabled": True,
+      "NAPPedalCalibDone": True,
+      "NAPPedalCalibFactor": 0.035,
+      "NAPPedalCalibZero": 0.25,
+    })
+    merged, snapshot = self._hardware_snapshot_from_params(params)
+    self.assertEqual(merged["NAPPedalCanBus"], 2)
+    self.assertEqual(merged["NAPPedalCalibMin"], -3.0)
+    self.assertEqual(merged["NAPPedalCalibMax"], 99.6)
     self.assertTrue(snapshot.pedal_present)
     self.assertTrue(snapshot.pedal_calib_available)
     self.assertEqual(snapshot.pedal_bus, 2)
@@ -246,6 +259,73 @@ class TestPreAPBootSelection(unittest.TestCase):
     self.assertFalse(CP.pcmCruise)
     self.assertTrue(bool(CP_SP.flags & TeslaFlagsSP.PREAP_PEDAL_PRESENT))
     self.assertTrue(bool(CP_SP.flags & TeslaFlagsSP.PREAP_PEDAL_CALIB_AVAILABLE))
+
+  def test_absent_pedal_factor_zero_does_not_grant_calib_available(self):
+    params = FakeParams({
+      "NAPPedalEnabled": True,
+      "NAPPedalCalibDone": True,
+    })
+    merged, snapshot = self._hardware_snapshot_from_params(params)
+    self.assertIsNone(merged["NAPPedalCalibFactor"])
+    self.assertIsNone(merged["NAPPedalCalibZero"])
+    self.assertEqual(merged["NAPPedalCanBus"], 2)
+    self.assertEqual(merged["NAPPedalCalibMin"], -3.0)
+    self.assertEqual(merged["NAPPedalCalibMax"], 99.6)
+    self.assertTrue(snapshot.pedal_present)
+    self.assertFalse(snapshot.pedal_calib_available)
+
+  def test_present_invalid_pedal_bus_or_range_fail_closed(self):
+    params = FakeParams({
+      "NAPPedalEnabled": True,
+      "NAPPedalCanBus": 7,
+      "NAPPedalCalibDone": True,
+      "NAPPedalCalibFactor": 0.035,
+      "NAPPedalCalibZero": 0.25,
+      "NAPPedalCalibMin": -3.0,
+      "NAPPedalCalibMax": 99.6,
+    })
+    merged, snapshot = self._hardware_snapshot_from_params(params)
+    self.assertEqual(merged["NAPPedalCanBus"], 7)
+    self.assertFalse(snapshot.pedal_present)
+    self.assertFalse(snapshot.pedal_calib_available)
+
+    from opendbc.car import gen_empty_fingerprint
+    from opendbc.car.tesla.interface import CarInterface
+    from opendbc.car.tesla.preap.boot import apply_preap_hardware_snapshot
+    from opendbc.car.tesla.values import CAR
+    CP = CarInterface.get_params(CAR.TESLA_MODEL_S_PREAP, gen_empty_fingerprint(), [], False, False, False)
+    CP_SP = CarInterface.get_params_sp(CP, CAR.TESLA_MODEL_S_PREAP, gen_empty_fingerprint(), [], False, False, False)
+    apply_preap_hardware_snapshot(CP, CP_SP, snapshot)
+    self.assertFalse(CP.openpilotLongitudinalControl)
+    self.assertTrue(CP.pcmCruise)
+
+    params = FakeParams({
+      "NAPPedalEnabled": True,
+      "NAPPedalCanBus": 2,
+      "NAPPedalCalibDone": True,
+      "NAPPedalCalibFactor": 0.035,
+      "NAPPedalCalibZero": 0.25,
+      "NAPPedalCalibMin": 10.0,
+      "NAPPedalCalibMax": 5.0,
+    })
+    merged, snapshot = self._hardware_snapshot_from_params(params)
+    self.assertEqual(merged["NAPPedalCalibMin"], 10.0)
+    self.assertEqual(merged["NAPPedalCalibMax"], 5.0)
+    self.assertTrue(snapshot.pedal_present)
+    self.assertFalse(snapshot.pedal_calib_available)
+
+  def test_present_unreadable_pedal_bus_fails_closed(self):
+    params = FakeParams({
+      "NAPPedalEnabled": True,
+      "NAPPedalCalibDone": True,
+      "NAPPedalCalibFactor": 0.035,
+      "NAPPedalCalibZero": 0.25,
+    })
+    with tempfile.NamedTemporaryFile() as tmp:
+      params.get_param_path = lambda key="": tmp.name
+      merged, snapshot = self._hardware_snapshot_from_params(params)
+      self.assertIsNone(merged["NAPPedalCanBus"])
+      self.assertFalse(snapshot.pedal_present)
 
   def test_get_car_from_raw_bundle_and_params(self):
     params = FakeParams({"CarPlatformBundle": {"platform": PREAP_PLATFORM}})
