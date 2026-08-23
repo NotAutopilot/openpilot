@@ -59,6 +59,8 @@ class RadarSettingsLayoutMici(NavScroller):
                                     toggle_callback=_reboot_on_toggle)
     radar_enabled.set_enabled(ui_state.is_offroad)
 
+    ignore_hw_fail = BigParamControl("ignore radar hardware fail", NAPParamKeys.RADAR_IGNORE_HW_FAIL)
+
     radar_offset_btn = BigButton("radar lateral offset", self._radar_offset_label())
     radar_offset_btn.set_click_callback(lambda: self._open_radar_offset_input(radar_offset_btn))
 
@@ -100,6 +102,7 @@ class RadarSettingsLayoutMici(NavScroller):
 
     self._scroller.add_widgets([
       radar_enabled,
+      ignore_hw_fail,
       radar_offset_btn,
       donor_vin_btn,
       read_vin_btn,

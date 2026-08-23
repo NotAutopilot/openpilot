@@ -271,6 +271,13 @@ class NAPLayout(Widget):
       dest=self._radar_items,
     )
 
+    self._add_toggle(
+      NAPParamKeys.RADAR_IGNORE_HW_FAIL,
+      "Ignore radar hardware fail",
+      "Lets you engage when Bosch raises HWFail even though tracks are still live.",
+      dest=self._radar_items,
+    )
+
     self._radar_offset_keyboard = Keyboard(max_text_size=10)
     self._radar_offset_btn = button_item(
       "Radar Lateral Offset",
