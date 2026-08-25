@@ -5,9 +5,9 @@ pandad running. NAP's script runner killed the comma session instead.
 This dialog is a push_widget overlay: open while driving, close without
 reboot, no NAPScriptRunning.
 
-Hidpi 2160x1080 is the product: full key-on chips, range rings, All tracks.
-C4 536x240 is cut-down: state plus one or two reject/table bits, the
-ID/dRel/yRel/vRel table, optional unlabeled-ring plot, and Close.
+Hidpi 2160x1080 is the product: full key-on chips, range rings, tracks table
+top-right. C4 536x240 is cut-down: state plus one or two reject/table bits,
+the ID/dRel/yRel/vRel table, optional small plot, and Close.
 """
 
 from __future__ import annotations
@@ -33,7 +33,6 @@ from openpilot.system.ui.widgets.button import Button, ButtonStyle
 RANGE_M = 120.0
 LATERAL_M = 8.0
 
-
 # Concentric dRel rings. Distinct colors so 20/40/60/80 m read at a glance.
 RANGE_RINGS = (
   (20.0, rl.Color(72, 210, 160, 230)),   # sea
@@ -42,13 +41,14 @@ RANGE_RINGS = (
   (80.0, rl.Color(180, 120, 230, 230)),   # orchid
 )
 
-
 # C4 on-road strip. Must fit inside 536x240 (content ~476x180 after 30px border).
 C4_HUD_W = 460.0
 C4_HUD_H = 44.0
-# Hidpi on-road panel: plot + full key-on chips.
-HIDPI_HUD_W = 980.0
-HIDPI_HUD_H = 380.0
+# Hidpi on-road panel: plot + chips + tracks table. Slightly bigger than 900x340.
+HIDPI_HUD_W = 1200.0
+HIDPI_HUD_H = 400.0
+
+TABLE_HEADER = "  ID     dRel     yRel     vRel"
 
 # 0x501 bits Jack uses to decide "wrong radar / wrong car" — product names, not DBC ids.
 ALERT_CHIP = (
@@ -107,7 +107,7 @@ def radar_hud_rect(content: rl.Rectangle) -> rl.Rectangle:
   """On-road HUD that always fits inside `content`.
 
   C4 536x240 / content ~476x180: 460x44 status strip.
-  Hidpi 2160x1080 / content ~2100x1020: 980x380 chip panel.
+  Hidpi 2160x1080 / content ~2100x1020: 1200x400 chip + table panel.
   """
   if is_c4_screen(content):
     margin = 8.0
@@ -245,6 +245,9 @@ def vin_refs(status: BoschRadarStatus) -> tuple[str, str, str]:
   return feed, f190, chassis
 
 
+def _light(color: rl.Color) -> rl.Color:
+  return rl.Color(min(255, color.r + 36), min(255, color.g + 36), min(255, color.b + 36), 210)
+
 
 def _draw_range_rings(rect: rl.Rectangle, to_px, compact: bool) -> None:
   """Concentric range arcs centered on the car. Labels are hidpi-only."""
@@ -269,7 +272,7 @@ def _draw_range_rings(rect: rl.Rectangle, to_px, compact: bool) -> None:
       prev = (x, y)
     if not compact:
       lx, ly = to_px(r_m, 0.0)
-      _draw_text(font, f"{int(r_m)}m", lx + 8, ly - 12, label_size, color)
+      _draw_text(font, f"{int(r_m)}m", lx + 8, ly - 12, label_size, _light(color))
 
 
 def draw_radar_plot(rect: rl.Rectangle, status: BoschRadarStatus, align_box: bool = True,
@@ -320,6 +323,27 @@ def draw_radar_plot(rect: rl.Rectangle, status: BoschRadarStatus, align_box: boo
 def _track_row(track: RadarTrack) -> str:
   flag = "m" if track.measured else "c"
   return f"{track.track_id:>4}  {track.d_rel:6.1f}  {track.y_rel:+6.2f}  {track.v_rel:+6.2f}  {flag}"
+
+
+def draw_tracks_table(x: float, y: float, bottom: float, status: BoschRadarStatus,
+                      font_size: int, max_rows: int, empty: str) -> float:
+  """ID / dRel / yRel / vRel. The table C4 must not lose."""
+  if bottom - y < font_size + 2:
+    return y
+  font = gui_app.font(FontWeight.MEDIUM)
+  _draw_text(font, TABLE_HEADER, x, y, font_size, MUTED)
+  y += _line_h(font, "dRel", font_size, 3 if font_size < 16 else 6)
+  rows = sorted(status.tracks, key=lambda t: t.d_rel)[:max_rows]
+  gap = 2 if font_size < 16 else 4
+  for track in rows:
+    if y + font_size > bottom:
+      break
+    _draw_text(font, _track_row(track), x, y, font_size, TEXT)
+    y += _line_h(font, _track_row(track), font_size, gap)
+  if not rows and y + font_size <= bottom:
+    _draw_text(font, empty, x, y, font_size, MUTED)
+    y += _line_h(font, empty, font_size, gap)
+  return y
 
 
 def _c4_chip_list(status: BoschRadarStatus) -> list[tuple[str, rl.Color, rl.Color | None]]:
@@ -402,9 +426,7 @@ def draw_hidpi_chips(rect: rl.Rectangle, status: BoschRadarStatus, font_size: in
 
   def vin_chip(tag: str, value: str) -> tuple[str, rl.Color, rl.Color | None]:
     shown = value or "—"
-    bad = bool(value) and mismatch and value not in [v for v in present if v != value]
-    if value and mismatch and any(v != value for v in present):
-      bad = True
+    bad = bool(value) and mismatch and any(v != value for v in present)
     return (f"{tag} {shown}", health_color("REJECT") if bad else TEXT, CHIP_ON_FILL if bad else CHIP_FILL)
 
   row("VIN", [
@@ -446,12 +468,22 @@ class RadarHudOverlay(Widget):
     rl.draw_rectangle_rounded(panel, 0.06, 8, PANEL_BG)
     rl.draw_rectangle_rounded_lines_ex(panel, 0.06, 8, 2, health_color(status.health_label))
     pad = 14
-    plot_w = min(220.0, panel.width * 0.28)
+    plot_w = min(230.0, panel.width * 0.22)
     plot = rl.Rectangle(panel.x + pad, panel.y + pad, plot_w, panel.height - pad * 2)
     draw_radar_plot(plot, status, align_box=False, compact=False)
-    chips = rl.Rectangle(plot.x + plot.width + 14, panel.y + pad,
-                         panel.width - plot.width - pad * 3, panel.height - pad * 2)
+
+    table_w = 390.0 if panel.width >= 980 else 0.0
+    gap = 14.0
+    chips_x = plot.x + plot.width + gap
+    chips_w = panel.width - plot.width - pad * 2 - gap
+    if table_w:
+      chips_w = panel.width - plot.width - table_w - pad * 2 - gap * 2
+    chips = rl.Rectangle(chips_x, panel.y + pad, max(8.0, chips_w), panel.height - pad * 2)
     draw_hidpi_chips(chips, status, font_size=18)
+    if table_w:
+      table_x = panel.x + panel.width - pad - table_w
+      draw_tracks_table(table_x, panel.y + pad, panel.y + panel.height - pad,
+                        status, 16, 8, "no published tracks")
 
 
 class RadarMonitorDialog(Widget):
@@ -472,7 +504,7 @@ class RadarMonitorDialog(Widget):
     self._align_only = not self._align_only
 
   def _tune_buttons(self, compact: bool) -> None:
-    font = 18 if compact else 35
+    font = 16 if compact else 35
     pad = 4 if compact else 16
     radius = 8 if compact else 10
     for btn in (self._close, self._align_btn):
@@ -499,47 +531,32 @@ class RadarMonitorDialog(Widget):
       self._render_hidpi(rect, status)
 
   def _render_c4(self, rect: rl.Rectangle, status: BoschRadarStatus) -> None:
-    """Cut-down 536x240 modal: chips, small plot, All tracks table, Close.
-    No Align, no VIN dump, no full desk.
-    """
-    pad = 8
-    title_size = 18
-    body = 13
-    btn_w, btn_h = 110, 36
-    footer_h = btn_h + 10
+    """536x240: chips + tracks TABLE + small plot + Close. No Align, no VIN dump."""
+    pad = 6
+    title_size = 16
+    btn_w, btn_h = 96, 30
+    footer_h = btn_h + 8
     title_font = gui_app.font(FontWeight.BOLD)
-    body_font = gui_app.font(FontWeight.MEDIUM)
-    _draw_text(title_font, "Live radar", rect.x + pad, rect.y + 6, title_size, TEXT)
-    chip_y = rect.y + 30
-    draw_chip_row(rect.x + pad, chip_y, rect.width - pad * 2, _c4_chip_list(status), 13, gap=6)
-
-    footer_y = rect.y + rect.height - footer_h
-    content_y = rect.y + 54
-    content_h = max(0.0, footer_y - content_y - 2)
-    plot_w = min(rect.width * 0.28, 148.0)
-    plot = rl.Rectangle(rect.x + pad, content_y, plot_w, content_h)
-    if plot.height > 24 and plot.width > 24:
+    _draw_text(title_font, "Live radar", rect.x + pad, rect.y + 3, title_size, TEXT)
+    chip_y = rect.y + 22
+    draw_chip_row(rect.x + pad, chip_y, rect.width - pad * 2, _c4_chip_list(status), 12, gap=5)
+    body_y = rect.y + 46
+    body_h = rect.height - 46 - footer_h
+    # Table is required. Plot stays only if the table still has room.
+    table_font = 11
+    min_table_w = 220.0
+    plot_w = 120.0
+    if rect.width - pad * 3 - plot_w < min_table_w:
+      plot_w = 0.0
+    if plot_w and body_h > 40:
+      plot = rl.Rectangle(rect.x + pad, body_y, plot_w, body_h)
       draw_radar_plot(plot, status, align_box=False, compact=True)
-
-    info_x = plot.x + plot.width + 8
-    info_w = rect.x + rect.width - info_x - pad
-    table_y = content_y
-    table_bottom = footer_y - 2
-    if info_w > 40 and table_y + body < table_bottom:
-      _draw_text(body_font, "  ID     dRel     yRel     vRel", info_x, table_y, body, MUTED)
-      table_y += _line_h(body_font, "dRel", body, 2)
-      rows = sorted(status.tracks, key=lambda t: t.d_rel)[:6]
-      for track in rows:
-        if table_y + body > table_bottom:
-          break
-        _draw_text(body_font, _track_row(track), info_x, table_y, body, TEXT)
-        table_y += _line_h(body_font, _track_row(track), body, 2)
-      if not rows:
-        empty = "no published tracks"
-        if table_y + body <= table_bottom:
-          _draw_text(body_font, empty, info_x, table_y, body, MUTED)
-
-    btn_y = footer_y + 4
+      table_x = plot.x + plot.width + 8
+    else:
+      table_x = rect.x + pad
+    empty = "no published tracks"
+    draw_tracks_table(table_x, body_y, body_y + body_h - 2, status, table_font, 8, empty)
+    btn_y = rect.y + rect.height - footer_h + 4
     self._close.render(rl.Rectangle(rect.x + pad, btn_y, btn_w, btn_h))
 
   def _render_hidpi(self, rect: rl.Rectangle, status: BoschRadarStatus) -> None:
@@ -565,31 +582,18 @@ class RadarMonitorDialog(Widget):
     draw_chip(mode_x, mode_y, mode, mode_color, body,
               fill=ALIGN_FILL if self._align_only else CHIP_FILL)
 
-    plot_w = min(rect.width * 0.34, 680)
-    plot = rl.Rectangle(rect.x + pad, rect.y + header_h, plot_w, rect.height - header_h - footer_h)
+    table_w = 460.0
+    plot_w = min(rect.width * 0.34, 720)
+    footer_y = rect.y + rect.height - footer_h
+    plot = rl.Rectangle(rect.x + pad, rect.y + header_h, plot_w, footer_y - (rect.y + header_h))
     draw_radar_plot(plot, status, align_box=True, compact=False)
 
-    info_x = plot.x + plot.width + 28
-    info_w = rect.x + rect.width - info_x - pad
-    footer_y = rect.y + rect.height - footer_h
-    chips_h = min(280.0, max(80.0, (footer_y - plot.y) * 0.52))
-    y = draw_hidpi_chips(rl.Rectangle(info_x, plot.y, info_w, chips_h), status, font_size=20)
-
-    table_y = y + 12
-    table_bottom = footer_y - 8
-    if table_y + body < table_bottom and info_w > 40:
-      _draw_text(body_font, "  ID     dRel     yRel     vRel", info_x, table_y, body, MUTED)
-      table_y += _line_h(body_font, "dRel", body, 6)
-      rows = sorted(status.tracks, key=lambda t: t.d_rel)[:8]
-      for track in rows:
-        if table_y + body > table_bottom:
-          break
-        _draw_text(body_font, _track_row(track), info_x, table_y, body, TEXT)
-        table_y += _line_h(body_font, _track_row(track), body, 4)
-      if not rows:
-        empty = "no tracks in 2.5–14.5 m" if self._align_only else "no published tracks"
-        if table_y + body <= table_bottom:
-          _draw_text(body_font, empty, info_x, table_y, body, MUTED)
+    table_x = rect.x + rect.width - pad - table_w
+    chips_x = plot.x + plot.width + 24
+    chips_w = table_x - chips_x - 20
+    draw_hidpi_chips(rl.Rectangle(chips_x, plot.y, max(8.0, chips_w), plot.height), status, font_size=20)
+    empty = "no tracks in 2.5–14.5 m" if self._align_only else "no published tracks"
+    draw_tracks_table(table_x, plot.y, footer_y - 8, status, body, 12, empty)
 
     btn_y = footer_y + 12
     self._close.render(rl.Rectangle(rect.x + pad, btn_y, btn_w, btn_h))
