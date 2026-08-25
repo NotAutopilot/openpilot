@@ -45,8 +45,8 @@ RANGE_RINGS = (
 C4_HUD_W = 460.0
 C4_HUD_H = 44.0
 # Hidpi on-road panel: plot + chips + tracks table. Slightly bigger than 900x340.
-HIDPI_HUD_W = 1200.0
-HIDPI_HUD_H = 400.0
+HIDPI_HUD_W = 980.0
+HIDPI_HUD_H = 380.0
 
 TABLE_HEADER = "  ID     dRel     yRel     vRel"
 
