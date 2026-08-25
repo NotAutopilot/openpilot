@@ -4,11 +4,14 @@ Tinkla C2's calibrate/test tools subscribed to cereal `can` and left
 pandad running. NAP's script runner killed the comma session instead.
 This dialog is a push_widget overlay: open while driving, close without
 reboot, no NAPScriptRunning.
+
+Hidpi 2160x1080 is the product: full key-on chips.
+C4 536x240 is cut-down: state plus one or two reject/table bits and Close.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 import pyray as rl
 
@@ -28,12 +31,21 @@ from openpilot.system.ui.widgets.button import Button, ButtonStyle
 RANGE_M = 120.0
 LATERAL_M = 8.0
 
-ALERT_CHIP = {
-  "vinValidity": "VIN",
-  "xwdValidity": "XWD",
-  "radPositionMismatch": "POS",
-  "strRackMismatch": "RACK",
-}
+# C4 on-road strip. Must fit inside 536x240 (content ~476x180 after 30px border).
+C4_HUD_W = 460.0
+C4_HUD_H = 44.0
+# Hidpi on-road panel: plot + full key-on chips.
+HIDPI_HUD_W = 900.0
+HIDPI_HUD_H = 340.0
+
+# 0x501 bits Jack uses to decide "wrong radar / wrong car" — product names, not DBC ids.
+ALERT_CHIP = (
+  ("vinValidity", "VIN"),
+  ("xwdValidity", "XWD"),
+  ("radPositionMismatch", "POS"),
+  ("strRackMismatch", "RACK"),
+)
+KEY_REJECT = tuple(k for k, _ in ALERT_CHIP)
 
 HEALTH_COLOR = {
   "LIVE": rl.Color(70, 200, 120, 255),
@@ -55,12 +67,12 @@ ALIGN_LINE = rl.Color(70, 91, 234, 160)
 TRACK_FILL = rl.Color(90, 200, 255, 230)
 TRACK_COAST = rl.Color(180, 180, 180, 200)
 LEAD_FILL = rl.Color(128, 216, 166, 255)
-TEXT = rl.Color(230, 230, 230, 255)
+TEXT = rl.Color(236, 236, 236, 255)
 MUTED = rl.Color(170, 170, 170, 255)
+CHIP_MUTED = rl.Color(128, 128, 128, 255)
 CHIP_FILL = rl.Color(57, 57, 57, 255)
-CHIP_ALERT = rl.Color(230, 120, 40, 255)
-MATCH = rl.Color(70, 200, 120, 255)
-PRIMARY = rl.Color(70, 91, 234, 255)
+CHIP_ON_FILL = rl.Color(70, 40, 20, 230)
+OK_FILL = rl.Color(20, 50, 32, 230)
 
 
 def health_color(label: str) -> rl.Color:
@@ -75,52 +87,24 @@ def _line_h(font, text: str, size: int, gap: int = 4) -> float:
   return measure_text_cached(font, text or "Ag", size).y + gap
 
 
-def _clean_vin(raw) -> str:
-  if raw is None:
-    return ""
-  if isinstance(raw, (bytes, bytearray)):
-    raw = raw.decode("ascii", errors="ignore")
-  vin = "".join(ch for ch in str(raw).upper() if ch.isalnum())
-  return vin if len(vin) == 17 else ""
-
-
-def decorate_status(status: BoschRadarStatus) -> BoschRadarStatus:
-  """Fill F190 (donor / last F190 read) and chassis (CarParams) when empty."""
-  f190 = _clean_vin(getattr(status, "vin_f190", ""))
-  chassis = _clean_vin(getattr(status, "vin_chassis", ""))
-  if not f190:
-    try:
-      raw = ui_state.params.get("NAPRadarDonorVin", return_default=True) or ""
-      f190 = _clean_vin(raw)
-      if not f190:
-        raw = ui_state.params.get("NAPRadarVinReadStatus", return_default=True) or ""
-        f190 = _clean_vin(raw)
-    except Exception:
-      f190 = ""
-  if not chassis:
-    try:
-      if getattr(ui_state, "CP", None) is not None:
-        chassis = _clean_vin(getattr(ui_state.CP, "carVin", "") or "")
-      if not chassis:
-        chassis = _clean_vin(ui_state.params.get("CarVin"))
-    except Exception:
-      chassis = ""
-  if f190 != getattr(status, "vin_f190", "") or chassis != getattr(status, "vin_chassis", ""):
-    return replace(status, vin_f190=f190, vin_chassis=chassis)
-  return status
+def is_c4_screen(rect: rl.Rectangle) -> bool:
+  return rect.width < 800 and rect.height < 500
 
 
 def radar_hud_rect(content: rl.Rectangle) -> rl.Rectangle:
-  """On-road HUD that always fits inside `content`. C4 536x240 must not overflow."""
-  compact = content.height < 500
-  if compact:
-    margin = 6.0
-    w = max(0.0, content.width - margin * 2)
-    h = min(168.0, max(0.0, content.height - margin * 2))
+  """On-road HUD that always fits inside `content`.
+
+  C4 536x240 / content ~476x180: 460x44 status strip.
+  Hidpi 2160x1080 / content ~2100x1020: 900x340 chip panel.
+  """
+  if is_c4_screen(content):
+    margin = 8.0
+    w = min(C4_HUD_W, max(0.0, content.width - margin * 2))
+    h = min(C4_HUD_H, max(0.0, content.height - margin))
     return rl.Rectangle(content.x + margin, content.y + content.height - h - margin, w, h)
-  margin_x, margin_y = 24.0, 16.0
-  w = min(720.0, max(0.0, content.width - margin_x * 2))
-  h = min(280.0, max(0.0, content.height - 24.0))
+  margin_x, margin_y = 24.0, 20.0
+  w = min(HIDPI_HUD_W, max(0.0, content.width - margin_x * 2))
+  h = min(HIDPI_HUD_H, max(0.0, content.height - 24.0))
   return rl.Rectangle(content.x + margin_x, content.y + content.height - h - margin_y, w, h)
 
 
@@ -134,11 +118,18 @@ def _clamp_to_window(rect: rl.Rectangle) -> rl.Rectangle:
   return rl.Rectangle(x, y, w, h)
 
 
-def _chip_size(text: str, font_size: int) -> tuple[float, float]:
+def _chip_pad(font_size: int) -> tuple[int, int]:
+  if font_size < 16:
+    return 6, 2
+  if font_size < 22:
+    return 8, 3
+  return 12, 5
+
+
+def chip_size(text: str, font_size: int) -> tuple[float, float]:
   font = gui_app.font(FontWeight.BOLD)
   sz = measure_text_cached(font, text, font_size)
-  pad_x = 5 if font_size < 20 else 12
-  pad_y = 1 if font_size < 20 else 5
+  pad_x, pad_y = _chip_pad(font_size)
   return sz.x + pad_x * 2, sz.y + pad_y * 2
 
 
@@ -146,101 +137,100 @@ def draw_chip(x: float, y: float, text: str, color: rl.Color, font_size: int,
               fill: rl.Color | None = None) -> tuple[float, float]:
   font = gui_app.font(FontWeight.BOLD)
   sz = measure_text_cached(font, text, font_size)
-  pad_x = 5 if font_size < 20 else 12
-  pad_y = 1 if font_size < 20 else 5
+  pad_x, pad_y = _chip_pad(font_size)
   w = sz.x + pad_x * 2
   h = sz.y + pad_y * 2
   rec = rl.Rectangle(x, y, w, h)
   bg = fill if fill is not None else rl.Color(color.r, color.g, color.b, 48)
-  rl.draw_rectangle_rounded(rec, 0.45, 8, bg)
-  rl.draw_rectangle_rounded_lines_ex(rec, 0.45, 8, 1.5 if font_size < 20 else 2, color)
+  rl.draw_rectangle_rounded(rec, 0.5, 8, bg)
+  rl.draw_rectangle_rounded_lines_ex(rec, 0.5, 8, 1.5 if font_size < 20 else 2, color)
   _draw_text(font, text, x + pad_x, y + pad_y, font_size, color)
   return w, h
 
 
-def _flow_chips(x: float, y: float, max_w: float, bottom: float,
-                items: list[tuple[str, rl.Color, rl.Color | None]],
-                font_size: int, gap: float = 4) -> float:
-  if not items:
-    return y
-  cx = x
+def draw_chip_row(x: float, y: float, max_w: float, chips: list[tuple[str, rl.Color, rl.Color | None]],
+                  font_size: int, gap: float = 6) -> tuple[float, float]:
+  cx, cy = x, y
   row_h = 0.0
-  started = False
-  for text, color, fill in items:
-    tw, th = _chip_size(text, font_size)
+  used_w = 0.0
+  bottom = y
+  for text, color, fill in chips:
+    tw, th = chip_size(text, font_size)
     if cx + tw > x + max_w and cx > x:
       cx = x
-      y += row_h + 2
+      cy += row_h + 4
       row_h = 0.0
-    if y + th > bottom:
-      break
-    draw_chip(cx, y, text, color, font_size, fill=fill)
+    if tw > max_w:
+      continue
+    draw_chip(cx, cy, text, color, font_size, fill=fill)
     cx += tw + gap
     row_h = max(row_h, th)
-    started = True
-  if started:
-    y += row_h + (2 if font_size < 16 else 5)
-  return y
+    used_w = max(used_w, cx - x)
+    bottom = cy + row_h
+  return used_w, max(0.0, bottom - y)
 
 
-def _lamp_chips(status: BoschRadarStatus) -> list[tuple[str, rl.Color, rl.Color | None]]:
-  items = []
-  health = status.health_label
-  if status.hw_fail and health != "FAULT":
-    items.append(("HWFail", HEALTH_COLOR["FAULT"], None))
-  if status.sgu_fail:
-    items.append(("SGUFail", CHIP_ALERT, None))
-  if status.dirty:
-    items.append(("dirty", MUTED, CHIP_FILL))
-  if status.radar_fault and health != "FAULT":
-    items.append(("radarFault", HEALTH_COLOR["FAULT"], None))
-  if status.can_error and health != "CAN":
-    items.append(("canError", HEALTH_COLOR["CAN"], None))
-  return items
+def table_bit(status: BoschRadarStatus) -> str | None:
+  if status.table_frozen or status.unique_raw == 1:
+    return "frozen"
+  if status.unique_raw >= 2:
+    return "moving"
+  return None
 
 
-def _alert_chips(status: BoschRadarStatus) -> list[tuple[str, rl.Color, rl.Color | None]]:
-  items = []
-  named = set()
-  for key, short in ALERT_CHIP.items():
+def link_label(status: BoschRadarStatus) -> str:
+  # silent-until-VIN-complete: host 0x560 mux must finish before panda talks
+  return "talking" if status.vin_stream_complete else "waiting"
+
+
+def c4_extra_chips(status: BoschRadarStatus) -> list[tuple[str, rl.Color]]:
+  """One or two bits that matter on C4. No VIN trio, no 0x2A9 desk."""
+  extras: list[tuple[str, rl.Color]] = []
+  reason = None
+  for key, short in ALERT_CHIP:
     if key in status.alerts:
-      items.append((short, CHIP_ALERT, None))
-      named.add(key)
-  for name in status.alerts:
-    if name not in named:
-      items.append((name, MUTED, CHIP_FILL))
-  return items
+      reason = short
+      break
+  if reason is None and status.hw_fail:
+    reason = "HWFail"
+  elif reason is None and status.sgu_fail:
+    reason = "SGUFail"
+  elif reason is None and status.health_label in ("WAIT VIN", "WAIT GTW"):
+    reason = "waiting"
+  if reason:
+    extras.append((reason, health_color("REJECT" if reason in ("VIN", "XWD", "POS", "RACK") else status.health_label)))
+  bit = table_bit(status)
+  if bit:
+    extras.append((bit, health_color("FROZEN" if bit == "frozen" else "LIVE")))
+  return extras[:2]
 
 
-def _gtw_chips(status: BoschRadarStatus) -> list[tuple[str, rl.Color, rl.Color | None]]:
-  items = []
-  if status.awd is None and status.position is None and status.epas_type is None:
-    return items
-  if status.awd is not None:
-    items.append(("4WD" if status.awd else "2WD", TEXT, CHIP_FILL))
-  if status.position is not None:
-    items.append((f"pos {status.position}", TEXT, CHIP_FILL))
-  if status.epas_type is not None:
-    items.append((f"EPAS {status.epas_type}", TEXT, CHIP_FILL))
-  return items
+def _extract_vin(raw) -> str:
+  if raw is None:
+    return ""
+  if isinstance(raw, (bytes, bytearray)):
+    raw = raw.decode("ascii", "ignore")
+  token = "".join(ch for ch in str(raw).upper() if ch.isalnum())
+  return token if len(token) == 17 else ""
 
 
-def _gate_chip(status: BoschRadarStatus) -> tuple[str, rl.Color, rl.Color | None]:
-  if not status.vin_stream_complete:
-    return "waiting", HEALTH_COLOR["WAIT VIN"], None
-  return "talking", MATCH, None
-
-
-def _raw_chip(status: BoschRadarStatus) -> tuple[str, rl.Color, rl.Color | None]:
-  age = getattr(status, "last_raw_age_s", None)
-  if age is None:
-    label = f"310 {status.unique_raw}"
-  elif age < 10:
-    label = f"310 {status.unique_raw}  {age:.1f}s"
-  else:
-    label = f"310 {status.unique_raw}  {age:.0f}s"
-  frozenish = status.unique_raw <= 1 and (status.table_frozen or status.unique_raw == 1)
-  return label, (HEALTH_COLOR["FROZEN"] if frozenish else MUTED), CHIP_FILL
+def vin_refs(status: BoschRadarStatus) -> tuple[str, str, str]:
+  """0x2B9 feed vs F190 (radar EEPROM / donor param) vs chassis CarVin."""
+  feed = status.vin if len(status.vin) == 17 else (status.vin or "")
+  f190 = _extract_vin(getattr(status, "vin_f190", "") or "")
+  chassis = _extract_vin(getattr(status, "vin_chassis", "") or "")
+  if not f190 or not chassis:
+    try:
+      if not f190:
+        raw = ui_state.params.get("NAPRadarDonorVin", return_default=True) or ""
+        f190 = _extract_vin(raw)
+      if not chassis and getattr(ui_state, "CP", None) is not None:
+        chassis = _extract_vin(getattr(ui_state.CP, "carVin", "") or "")
+      if not chassis:
+        chassis = _extract_vin(ui_state.params.get("CarVin"))
+    except Exception:
+      pass
+  return feed, f190, chassis
 
 
 def draw_radar_plot(rect: rl.Rectangle, status: BoschRadarStatus, align_box: bool = True,
@@ -255,8 +245,8 @@ def draw_radar_plot(rect: rl.Rectangle, status: BoschRadarStatus, align_box: boo
     y = rect.y + rect.height * (1.0 - d_rel / RANGE_M)
     return x, y
 
-  rl.begin_scissor_mode(int(rect.x) + 1, int(rect.y) + 1,
-                        max(1, int(rect.width) - 2), max(1, int(rect.height) - 2))
+  rl.begin_scissor_mode(int(rect.x) + 1, int(rect.y) + 1, max(1, int(rect.width) - 2), max(1, int(rect.height) - 2))
+
   if align_box:
     left, bottom = to_px(ALIGN_D_MIN, ALIGN_Y_MAX)
     right, top = to_px(ALIGN_D_MAX, -ALIGN_Y_MAX)
@@ -277,6 +267,7 @@ def draw_radar_plot(rect: rl.Rectangle, status: BoschRadarStatus, align_box: boo
     color = LEAD_FILL if track is closest else (TRACK_FILL if track.measured else TRACK_COAST)
     radius = (4 if track is closest else 3) if compact else (7 if track is closest else 5)
     rl.draw_circle(int(x), int(y), radius, color)
+
   rl.end_scissor_mode()
 
   font = gui_app.font(FontWeight.NORMAL)
@@ -285,142 +276,141 @@ def draw_radar_plot(rect: rl.Rectangle, status: BoschRadarStatus, align_box: boo
   _draw_text(font, f"{int(RANGE_M)}m", rect.x + 4, rect.y + 3, tick, MUTED)
 
 
-def _vin_value(status: BoschRadarStatus) -> str:
-  vin = getattr(status, "vin", "") or ""
-  return vin if len(vin) == 17 else (vin or "--")
-
-
-def draw_vin_trio(x: float, y: float, max_w: float, bottom: float, status: BoschRadarStatus,
-                  font_size: int) -> float:
-  """0x2B9 vs F190 vs chassis. Jack spare / Ian donor mixups were real."""
-  font = gui_app.font(FontWeight.MEDIUM)
-  bold = gui_app.font(FontWeight.BOLD)
-  rows = (
-    ("2B9", _vin_value(status)),
-    ("F190", _clean_vin(getattr(status, "vin_f190", "")) or "--"),
-    ("CHS", _clean_vin(getattr(status, "vin_chassis", "")) or "--"),
-  )
-  present = [v for _, v in rows if v != "--"]
-  mismatch = len(set(present)) > 1
-  tag_w = measure_text_cached(bold, "F190", font_size).x + 6
-  line = _line_h(font, "VIN", font_size, 0 if font_size < 16 else 3)
-  for tag, value in rows:
-    if y + line > bottom:
-      break
-    _draw_text(bold, tag, x, y, font_size, MUTED)
-    color = TEXT
-    suffix = ""
-    if value != "--" and mismatch:
-      others = [v for t, v in rows if t != tag and v != "--"]
-      if others and value not in others:
-        color = CHIP_ALERT
-        suffix = "  !="
-      elif others and all(value == o for o in others):
-        color = MATCH
-    label = value + suffix
-    size = font_size
-    while size >= 10 and measure_text_cached(font, label, size).x > max_w - tag_w:
-      size -= 1
-    _draw_text(font, label, x + tag_w, y, size, color)
-    y += line
-  return y
-
-
-def draw_status_panel(rect: rl.Rectangle, status: BoschRadarStatus, *, compact: bool,
-                      font_size: int, show_health_chip: bool = True) -> float:
-  if rect.width < 8 or rect.height < 8:
-    return rect.y
-  x, y = rect.x, rect.y
-  max_w = rect.width
-  bottom = rect.y + rect.height
-  font = gui_app.font(FontWeight.MEDIUM)
-  chip = max(11, font_size)
-
-  if show_health_chip:
-    label = status.health_label
-    cw, ch = draw_chip(x, y, label, health_color(label), chip)
-    meta = f"{len(status.tracks)} trk"
-    mx = x + cw + 6
-    if mx + measure_text_cached(font, meta, font_size).x <= x + max_w:
-      _draw_text(font, meta, mx, y + max(0, (ch - measure_text_cached(font, meta, font_size).y) / 2),
-                 font_size, MUTED)
-    y += ch + (2 if compact else 6)
-
-  y = _flow_chips(x, y, max_w, bottom, [_gate_chip(status), _raw_chip(status)], chip)
-  y = _flow_chips(x, y, max_w, bottom, _lamp_chips(status), chip)
-  y = _flow_chips(x, y, max_w, bottom, _alert_chips(status), chip)
-  y = _flow_chips(x, y, max_w, bottom, _gtw_chips(status), chip)
-  if y + 12 <= bottom:
-    y = draw_vin_trio(x, y, max_w, bottom, status, font_size)
-  return y
-
-
 def _track_row(track: RadarTrack) -> str:
   flag = "m" if track.measured else "c"
   return f"{track.track_id:>4}  {track.d_rel:6.1f}  {track.y_rel:+6.2f}  {track.v_rel:+6.2f}  {flag}"
 
 
-@dataclass(frozen=True)
-class _DialogMetrics:
-  compact: bool
-  pad: int
-  title_size: int
-  body: int
-  chip: int
-  btn_h: int
-  btn_w: int
-  align_w: int
-  btn_font: int
-  btn_pad: int
-  btn_radius: int
-  header_h: int
-  footer_h: int
-  plot_frac: float
-  status_size: int
-  table_rows: int
+def _c4_chip_list(status: BoschRadarStatus) -> list[tuple[str, rl.Color, rl.Color | None]]:
+  chips: list[tuple[str, rl.Color, rl.Color | None]] = [
+    (status.health_label, health_color(status.health_label), None),
+  ]
+  for text, color in c4_extra_chips(status):
+    fill = CHIP_FILL if text in ("moving", "frozen", "waiting") else CHIP_ON_FILL
+    chips.append((text, color, fill))
+  return chips
 
 
-def _dialog_metrics(rect: rl.Rectangle) -> _DialogMetrics:
-  compact = rect.height < 500
-  if compact:
-    btn_h = 22
-    return _DialogMetrics(
-      compact=True, pad=6, title_size=16, body=12, chip=12,
-      btn_h=btn_h, btn_w=78, align_w=78, btn_font=14, btn_pad=2, btn_radius=7,
-      header_h=22, footer_h=btn_h + 12, plot_frac=0.30, status_size=12, table_rows=1,
-    )
-  btn_h = 80
-  return _DialogMetrics(
-    compact=False, pad=24, title_size=40, body=22, chip=22,
-    btn_h=btn_h, btn_w=240, align_w=200, btn_font=35, btn_pad=16, btn_radius=10,
-    header_h=88, footer_h=btn_h + 20, plot_frac=0.36, status_size=22, table_rows=8,
+def draw_c4_strip(panel: rl.Rectangle, status: BoschRadarStatus) -> None:
+  """Cut-down C4 HUD: state + at most two reject/table bits."""
+  rl.draw_rectangle_rounded(panel, 0.18, 6, PANEL_BG)
+  rl.draw_rectangle_rounded_lines_ex(panel, 0.18, 6, 2, health_color(status.health_label))
+  font_size = 13
+  chips = _c4_chip_list(status)
+  max_h = 0.0
+  for text, _, _ in chips:
+    _w, th = chip_size(text, font_size)
+    max_h = max(max_h, th)
+  pad = 6.0
+  y = panel.y + max(pad, (panel.height - max_h) / 2)
+  draw_chip_row(panel.x + pad, y, panel.width - pad * 2, chips, font_size, gap=6)
+
+
+def draw_hidpi_chips(rect: rl.Rectangle, status: BoschRadarStatus, font_size: int) -> float:
+  """Full key-on chips. Product names, not a wall of CAN ids."""
+  if rect.width < 8 or rect.height < 8:
+    return rect.y
+  font = gui_app.font(FontWeight.MEDIUM)
+  label_size = max(14, font_size - 4)
+  x, y = rect.x, rect.y
+  max_w = rect.width
+  bottom = rect.y + rect.height
+  gap = 8
+
+  def row(label: str, chips: list[tuple[str, rl.Color, rl.Color | None]]) -> None:
+    nonlocal y
+    if y + 20 > bottom:
+      return
+    lw = 0.0
+    if label:
+      _draw_text(font, label, x, y + 4, label_size, MUTED)
+      lw = measure_text_cached(font, label, label_size).x + 10
+    _, h = draw_chip_row(x + lw, y, max_w - lw, chips, font_size, gap=6)
+    y += max(h, _line_h(font, label or "Ag", label_size, 0)) + gap
+
+  label = status.health_label
+  talking = link_label(status)
+  row("", [
+    (label, health_color(label), None),
+    ("SGUFail", health_color("SGU") if status.sgu_fail else CHIP_MUTED,
+     CHIP_ON_FILL if status.sgu_fail else CHIP_FILL),
+    ("HWFail", health_color("FAULT") if status.hw_fail else CHIP_MUTED,
+     CHIP_ON_FILL if status.hw_fail else CHIP_FILL),
+    (talking, health_color("LIVE") if talking == "talking" else health_color("WAIT VIN"),
+     OK_FILL if talking == "talking" else CHIP_FILL),
+  ])
+
+  alert_chips = []
+  for key, short in ALERT_CHIP:
+    on = key in status.alerts
+    alert_chips.append((short, health_color("REJECT") if on else CHIP_MUTED, CHIP_ON_FILL if on else CHIP_FILL))
+  row("reject", alert_chips)
+
+  awd = "4WD" if status.awd else ("2WD" if status.awd is False else "drive —")
+  pos = "—" if status.position is None else str(status.position)
+  epas = "—" if status.epas_type is None else str(status.epas_type)
+  row("drive", [
+    (awd, TEXT, CHIP_FILL),
+    (f"pos {pos}", TEXT, CHIP_FILL),
+    (f"EPAS {epas}", TEXT, CHIP_FILL),
+  ])
+
+  feed, f190, chassis = vin_refs(status)
+  present = [v for v in (feed, f190, chassis) if v]
+  mismatch = len(set(present)) > 1
+
+  def vin_chip(tag: str, value: str) -> tuple[str, rl.Color, rl.Color | None]:
+    shown = value or "—"
+    bad = bool(value) and mismatch and value not in [v for v in present if v != value]
+    if value and mismatch and any(v != value for v in present):
+      bad = True
+    return (f"{tag} {shown}", health_color("REJECT") if bad else TEXT, CHIP_ON_FILL if bad else CHIP_FILL)
+
+  row("VIN", [
+    vin_chip("2B9", feed),
+    vin_chip("F190", f190),
+    vin_chip("CHS", chassis),
+  ])
+
+  age = "age —" if status.last_raw_age_s is None else (
+    f"age {status.last_raw_age_s:.1f}s" if status.last_raw_age_s < 10 else f"age {status.last_raw_age_s:.0f}s"
   )
+  bit = table_bit(status)
+  raw_chips: list[tuple[str, rl.Color, rl.Color | None]] = [
+    (f"raw {status.unique_raw}", TEXT, CHIP_FILL),
+    (age, TEXT, CHIP_FILL),
+    (f"{len(status.tracks)} trk", TEXT, CHIP_FILL),
+  ]
+  if bit:
+    raw_chips.append((bit, health_color("FROZEN" if bit == "frozen" else "LIVE"),
+                      CHIP_ON_FILL if bit == "frozen" else OK_FILL))
+  row("table", raw_chips)
+  return y
 
 
 class RadarHudOverlay(Widget):
-  """Compact on-road readout. Hidden unless NAPRadarHud is set."""
+  """On-road readout. Hidden unless NAPRadarHud is set."""
 
   def _render(self, rect: rl.Rectangle):
     if not ui_state.radar_hud:
       return
-    status = decorate_status(ui_state.radar_status)
+    status = ui_state.radar_status
     panel = _clamp_to_window(rect)
     if panel.width < 8 or panel.height < 8:
       return
-    compact = panel.height < 200
-    rl.draw_rectangle_rounded(panel, 0.08, 8, PANEL_BG)
-    rl.draw_rectangle_rounded_lines_ex(panel, 0.08, 8, 2, health_color(status.health_label))
-    pad = 5 if compact else 12
-    plot_w = min(96 if compact else 160, panel.width * (0.26 if compact else 0.34))
+    if panel.height < 80:
+      draw_c4_strip(panel, status)
+      return
+
+    rl.draw_rectangle_rounded(panel, 0.06, 8, PANEL_BG)
+    rl.draw_rectangle_rounded_lines_ex(panel, 0.06, 8, 2, health_color(status.health_label))
+    pad = 14
+    plot_w = min(220.0, panel.width * 0.28)
     plot = rl.Rectangle(panel.x + pad, panel.y + pad, plot_w, panel.height - pad * 2)
-    draw_radar_plot(plot, status, align_box=False, compact=compact)
-    text = rl.Rectangle(
-      plot.x + plot.width + (5 if compact else 12),
-      panel.y + pad,
-      panel.width - plot.width - pad * 3,
-      panel.height - pad * 2,
-    )
-    draw_status_panel(text, status, compact=compact, font_size=11 if compact else 18)
+    draw_radar_plot(plot, status, align_box=False, compact=False)
+    chips = rl.Rectangle(plot.x + plot.width + 14, panel.y + pad,
+                         panel.width - plot.width - pad * 3, panel.height - pad * 2)
+    draw_hidpi_chips(chips, status, font_size=18)
 
 
 class RadarMonitorDialog(Widget):
@@ -428,13 +418,11 @@ class RadarMonitorDialog(Widget):
 
   def __init__(self):
     super().__init__()
-    self._close = Button("Close", click_callback=self._on_close,
-                         font_size=35, text_padding=16,
-                         button_style=ButtonStyle.TRANSPARENT_WHITE_BORDER)
+    self._close = Button("Close", click_callback=self._on_close, font_size=35,
+                         text_padding=16, button_style=ButtonStyle.TRANSPARENT_WHITE_BORDER)
     self._align_only = False
-    self._align_btn = Button("Align", click_callback=self._toggle_align,
-                             font_size=35, text_padding=16,
-                             button_style=ButtonStyle.ACTION)
+    self._align_btn = Button("Align", click_callback=self._toggle_align, font_size=35,
+                             text_padding=16, button_style=ButtonStyle.ACTION)
 
   def _on_close(self):
     gui_app.pop_widget()
@@ -442,68 +430,98 @@ class RadarMonitorDialog(Widget):
   def _toggle_align(self):
     self._align_only = not self._align_only
 
-  def _tune_buttons(self, m: _DialogMetrics) -> None:
+  def _tune_buttons(self, compact: bool) -> None:
+    font = 18 if compact else 35
+    pad = 4 if compact else 16
+    radius = 8 if compact else 10
     for btn in (self._close, self._align_btn):
-      btn._label.set_font_size(m.btn_font)
-      btn._label._text_padding = m.btn_pad
-      btn._border_radius = m.btn_radius
+      btn._label.set_font_size(font)
+      btn._label._text_padding = pad
+      btn._border_radius = radius
     self._align_btn.set_button_style(ButtonStyle.PRIMARY if self._align_only else ButtonStyle.ACTION)
 
   def _render(self, rect: rl.Rectangle):
-    status = decorate_status(ui_state.radar_status)
-    if self._align_only:
+    status = ui_state.radar_status
+    compact = is_c4_screen(rect)
+    if self._align_only and not compact:
       tracks = tuple(
         t for t in status.tracks
         if ALIGN_D_MIN <= t.d_rel <= ALIGN_D_MAX and abs(t.y_rel) <= ALIGN_Y_MAX
       )
       status = replace(status, tracks=tracks)
 
-    m = _dialog_metrics(rect)
-    self._tune_buttons(m)
+    self._tune_buttons(compact)
     rl.draw_rectangle_rec(rect, rl.Color(0, 0, 0, 255))
+    if compact:
+      self._render_c4(rect, status)
+    else:
+      self._render_hidpi(rect, status)
 
+  def _render_c4(self, rect: rl.Rectangle, status: BoschRadarStatus) -> None:
+    """Cut-down 536x240 modal: title, state+bits, plot, Close. No Align, no VIN dump."""
+    pad = 8
+    title_size = 18
+    btn_w, btn_h = 110, 36
+    footer_h = btn_h + 10
+    title_font = gui_app.font(FontWeight.BOLD)
+    _draw_text(title_font, "Live radar", rect.x + pad, rect.y + 6, title_size, TEXT)
+    chip_y = rect.y + 30
+    draw_chip_row(rect.x + pad, chip_y, rect.width - pad * 2, _c4_chip_list(status), 13, gap=6)
+    plot = rl.Rectangle(rect.x + pad, rect.y + 64, rect.width - pad * 2, rect.height - 64 - footer_h)
+    if plot.height > 24:
+      draw_radar_plot(plot, status, align_box=False, compact=True)
+    btn_y = rect.y + rect.height - footer_h + 4
+    self._close.render(rl.Rectangle(rect.x + pad, btn_y, btn_w, btn_h))
+
+  def _render_hidpi(self, rect: rl.Rectangle, status: BoschRadarStatus) -> None:
+    pad = 28
+    title_size = 42
+    body = 22
+    btn_h, btn_w, align_w = 80, 240, 200
+    header_h = 92
+    footer_h = btn_h + 24
     title_font = gui_app.font(FontWeight.BOLD)
     body_font = gui_app.font(FontWeight.MEDIUM)
-    _draw_text(title_font, "Live radar", rect.x + m.pad, rect.y + (2 if m.compact else 14), m.title_size, TEXT)
-    chip_x = rect.x + m.pad + measure_text_cached(title_font, "Live radar", m.title_size).x + (8 if m.compact else 16)
-    chip_y = rect.y + (2 if m.compact else 18)
-    draw_chip(chip_x, chip_y, status.health_label, health_color(status.health_label), m.chip)
-    if not m.compact:
-      _draw_text(body_font, "openpilot stays running", rect.x + m.pad, rect.y + 60, 20, MUTED)
 
-    plot_w = min(rect.width * m.plot_frac, 156 if m.compact else 700)
-    plot = rl.Rectangle(rect.x + m.pad, rect.y + m.header_h, plot_w,
-                        rect.height - m.header_h - m.footer_h)
-    draw_radar_plot(plot, status, align_box=True, compact=m.compact)
+    _draw_text(title_font, "Live radar", rect.x + pad, rect.y + 16, title_size, TEXT)
+    chip_x = rect.x + pad + measure_text_cached(title_font, "Live radar", title_size).x + 16
+    draw_chip(chip_x, rect.y + 20, status.health_label, health_color(status.health_label), 22)
+    _draw_text(body_font, "openpilot stays running", rect.x + pad, rect.y + 64, 20, MUTED)
 
-    info_x = plot.x + plot.width + (6 if m.compact else 24)
-    info_w = rect.x + rect.width - info_x - m.pad
-    footer_y = rect.y + rect.height - m.footer_h
-    info = rl.Rectangle(info_x, plot.y, info_w, max(0, footer_y - plot.y - 2))
-    y = draw_status_panel(info, status, compact=m.compact, font_size=m.status_size, show_health_chip=False)
+    plot_w = min(rect.width * 0.34, 680)
+    plot = rl.Rectangle(rect.x + pad, rect.y + header_h, plot_w, rect.height - header_h - footer_h)
+    draw_radar_plot(plot, status, align_box=True, compact=False)
 
-    table_y = y + (2 if m.compact else 10)
-    table_bottom = footer_y - 2
-    if table_y + m.body < table_bottom and info_w > 40:
-      _draw_text(body_font, "  ID     dRel     yRel     vRel", info_x, table_y, m.body, MUTED)
-      table_y += _line_h(body_font, "dRel", m.body, 2 if m.compact else 5)
-      rows = sorted(status.tracks, key=lambda t: t.d_rel)[: m.table_rows]
+    info_x = plot.x + plot.width + 28
+    info_w = rect.x + rect.width - info_x - pad
+    footer_y = rect.y + rect.height - footer_h
+    chips_h = min(280.0, max(80.0, (footer_y - plot.y) * 0.52))
+    y = draw_hidpi_chips(rl.Rectangle(info_x, plot.y, info_w, chips_h), status, font_size=20)
+
+    table_y = y + 12
+    table_bottom = footer_y - 8
+    if table_y + body < table_bottom and info_w > 40:
+      _draw_text(body_font, "  ID     dRel     yRel     vRel", info_x, table_y, body, MUTED)
+      table_y += _line_h(body_font, "dRel", body, 6)
+      rows = sorted(status.tracks, key=lambda t: t.d_rel)[:8]
       for track in rows:
-        if table_y + m.body > table_bottom:
+        if table_y + body > table_bottom:
           break
-        _draw_text(body_font, _track_row(track), info_x, table_y, m.body, TEXT)
-        table_y += _line_h(body_font, _track_row(track), m.body, 2 if m.compact else 4)
+        _draw_text(body_font, _track_row(track), info_x, table_y, body, TEXT)
+        table_y += _line_h(body_font, _track_row(track), body, 4)
       if not rows:
-        empty = "no tracks in 2.5-14.5 m" if self._align_only else "no published tracks"
-        if table_y + m.body <= table_bottom:
-          _draw_text(body_font, empty, info_x, table_y, m.body, MUTED)
+        empty = "no tracks in 2.5–14.5 m" if self._align_only else "no published tracks"
+        if table_y + body <= table_bottom:
+          _draw_text(body_font, empty, info_x, table_y, body, MUTED)
 
-    btn_y = footer_y + (5 if m.compact else 10)
-    self._close.render(rl.Rectangle(rect.x + m.pad, btn_y, m.btn_w, m.btn_h))
-    self._align_btn.render(rl.Rectangle(rect.x + m.pad + m.btn_w + 6, btn_y, m.align_w, m.btn_h))
-    mode = "2.5-14.5 m" if self._align_only else "all tracks"
-    mode_x = rect.x + m.pad + m.btn_w + m.align_w + 8
-    mode_y = btn_y + max(0, (m.btn_h - _chip_size(mode, m.body)[1]) / 2)
-    if mode_x + 20 < rect.x + rect.width - m.pad:
-      draw_chip(mode_x, mode_y, mode, PRIMARY if self._align_only else MUTED, m.body,
+    btn_y = footer_y + 12
+    self._close.render(rl.Rectangle(rect.x + pad, btn_y, btn_w, btn_h))
+    self._align_btn.render(rl.Rectangle(rect.x + pad + btn_w + 14, btn_y, align_w, btn_h))
+    mode = "2.5–14.5 m" if self._align_only else "all tracks"
+    mode_color = health_color("LIVE") if self._align_only else MUTED
+    mw, mh = chip_size(mode, body)
+    mode_x = rect.x + pad + btn_w + align_w + 20
+    mode_y = btn_y + max(0, (btn_h - mh) / 2)
+    if mode_x + mw <= rect.x + rect.width - pad:
+      draw_chip(mode_x, mode_y, mode, mode_color, body,
                 fill=ALIGN_FILL if self._align_only else CHIP_FILL)
