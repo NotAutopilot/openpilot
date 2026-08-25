@@ -44,9 +44,9 @@ RANGE_RINGS = (
 # C4 on-road strip. Must fit inside 536x240 (content ~476x180 after 30px border).
 C4_HUD_W = 468.0
 C4_HUD_H = 112.0
-# Hidpi on-road panel: plot + chips + tracks table. Slightly bigger than 980x380.
-HIDPI_HUD_W = 980.0
-HIDPI_HUD_H = 380.0
+# Hidpi on-road panel: plot + chips + tracks table. Slightly bigger than 900x340.
+HIDPI_HUD_W = 1200.0
+HIDPI_HUD_H = 400.0
 
 TABLE_HEADER = "  ID     dRel     yRel     vRel"
 
@@ -107,7 +107,7 @@ def radar_hud_rect(content: rl.Rectangle) -> rl.Rectangle:
   """On-road HUD that always fits inside `content`.
 
   C4 536x240 / content ~476x180: 460x44 status strip.
-  Hidpi 2160x1080 / content ~2100x1020: 980x380 chip + table panel.
+  Hidpi 2160x1080 / content ~2100x1020: 1200x400 chip + table panel.
   """
   if is_c4_screen(content):
     margin = 8.0
