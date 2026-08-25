@@ -17,13 +17,14 @@ from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets.html_render import HtmlRenderer, ElementType
 from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   BACKUP_EPAS_INSTRUCTIONS, BRAKE_FACTOR_PRESETS,
-  CALIBRATE_PEDAL_INSTRUCTIONS, CALIBRATE_RADAR_INSTRUCTIONS,
+  CALIBRATE_PEDAL_INSTRUCTIONS,
   FLASH_EPAS_INSTRUCTIONS, PEDAL_CAN_BUS_VALUES,
   RADAR_OFFSET_MAX, RADAR_OFFSET_MIN,
-  RESTORE_EPAS_INSTRUCTIONS, TEST_RADAR_INSTRUCTIONS,
+  RESTORE_EPAS_INSTRUCTIONS,
   acknowledgments_html, find_preset_index,
 )
 from opendbc.car.tesla.preap.nap_params import NAPParamKeys, DEFAULTS
+from openpilot.selfdrive.ui.radar.radar_view import RadarMonitorDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
 
 
@@ -278,6 +279,19 @@ class NAPLayout(Widget):
       dest=self._radar_items,
     )
 
+    def on_radar_hud(state):
+      self._params.put_bool(NAPParamKeys.RADAR_HUD, state)
+      ui_state.radar_hud = state
+
+    hud_item = toggle_item(
+      "Radar HUD",
+      description="Show live tracks, lamps, and alert bits over the driving view. Works while driving.",
+      initial_state=self._params.get_bool(NAPParamKeys.RADAR_HUD),
+      callback=on_radar_hud,
+    )
+    self._toggle_map[NAPParamKeys.RADAR_HUD] = hud_item
+    self._radar_items.append(hud_item)
+
     self._radar_offset_keyboard = Keyboard(max_text_size=10)
     self._radar_offset_btn = button_item(
       "Radar Lateral Offset",
@@ -335,23 +349,13 @@ class NAPLayout(Widget):
     )
     self._radar_items.append(self._radar_epas_buttons)
 
-    self._calibrate_radar_btn = button_item(
-      "Calibrate Radar",
-      "Start",
-      description="Run the radar calibration routine.",
-      callback=self._on_calibrate_radar,
+    self._live_radar_btn = button_item(
+      "Live Radar",
+      "Open",
+      description="Live tracks, ECU lamps, and alert bits. Stays in this session; works while driving.",
+      callback=self._on_live_radar,
     )
-    self._calibrate_radar_btn.action_item.set_enabled(ui_state.is_offroad)
-    self._radar_items.append(self._calibrate_radar_btn)
-
-    self._test_radar_btn = button_item(
-      "Test Radar",
-      "Test",
-      description="Test radar connectivity and verify signals.",
-      callback=self._on_test_radar,
-    )
-    self._test_radar_btn.action_item.set_enabled(ui_state.is_offroad)
-    self._radar_items.append(self._test_radar_btn)
+    self._radar_items.append(self._live_radar_btn)
 
   def _add_toggle(self, param_key: str, title: str, description: str,
                    enabled: bool | None = None, needs_reboot: bool = False,
@@ -536,19 +540,8 @@ class NAPLayout(Widget):
       script_module="scripts.nap.calibrate_pedal",
     )
 
-  def _on_calibrate_radar(self):
-    self._show_script_runner(
-      title="Radar Calibration",
-      instructions=CALIBRATE_RADAR_INSTRUCTIONS,
-      script_module="scripts.nap.calibrate_radar",
-    )
-
-  def _on_test_radar(self):
-    self._show_script_runner(
-      title="Radar Test",
-      instructions=TEST_RADAR_INSTRUCTIONS,
-      script_module="scripts.nap.test_radar",
-    )
+  def _on_live_radar(self):
+    gui_app.push_widget(RadarMonitorDialog())
 
   def _on_flash_epas(self):
     self._show_script_runner(

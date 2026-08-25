@@ -15,14 +15,13 @@ from openpilot.selfdrive.ui.mici.layouts.settings.nap_script import launch_scrip
 from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   BACKUP_EPAS_INSTRUCTIONS,
   CALIBRATE_PEDAL_INSTRUCTIONS,
-  CALIBRATE_RADAR_INSTRUCTIONS,
   FLASH_EPAS_INSTRUCTIONS,
   PEDAL_CAN_BUS_VALUES,
   RADAR_OFFSET_MAX,
   RADAR_OFFSET_MIN,
   RESTORE_EPAS_INSTRUCTIONS,
-  TEST_RADAR_INSTRUCTIONS,
 )
+from openpilot.selfdrive.ui.radar.radar_view import RadarMonitorDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
 from opendbc.car.tesla.preap.nap_params import NAPParamKeys
 
@@ -61,6 +60,11 @@ class RadarSettingsLayoutMici(NavScroller):
 
     ignore_hw_fail = BigParamControl("ignore radar hardware fail", NAPParamKeys.RADAR_IGNORE_HW_FAIL)
 
+    def on_radar_hud(checked):
+      ui_state.radar_hud = checked
+
+    radar_hud = BigParamControl("radar HUD", NAPParamKeys.RADAR_HUD, toggle_callback=on_radar_hud)
+
     radar_offset_btn = BigButton("radar lateral offset", self._radar_offset_label())
     radar_offset_btn.set_click_callback(lambda: self._open_radar_offset_input(radar_offset_btn))
 
@@ -86,30 +90,19 @@ class RadarSettingsLayoutMici(NavScroller):
       default_value=0,
     )
 
-    calibrate_radar_btn = BigButton("calibrate radar", "start")
-    calibrate_radar_btn.set_click_callback(
-      lambda: launch_script("Radar Calibration", CALIBRATE_RADAR_INSTRUCTIONS,
-                            "scripts.nap.calibrate_radar",
-                            ))
-    calibrate_radar_btn.set_enabled(ui_state.is_offroad)
-
-    test_radar_btn = BigButton("test radar", "test")
-    test_radar_btn.set_click_callback(
-      lambda: launch_script("Radar Test", TEST_RADAR_INSTRUCTIONS,
-                            "scripts.nap.test_radar",
-                            ))
-    test_radar_btn.set_enabled(ui_state.is_offroad)
+    live_radar_btn = BigButton("live radar", "open")
+    live_radar_btn.set_click_callback(lambda: gui_app.push_widget(RadarMonitorDialog()))
 
     self._scroller.add_widgets([
       radar_enabled,
       ignore_hw_fail,
+      radar_hud,
       radar_offset_btn,
       donor_vin_btn,
       read_vin_btn,
       radar_position,
       radar_epas,
-      calibrate_radar_btn,
-      test_radar_btn,
+      live_radar_btn,
     ])
 
   def _radar_offset_label(self) -> str:

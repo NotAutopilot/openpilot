@@ -9,6 +9,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.lib.prime_state import PrimeState
+from openpilot.selfdrive.ui.radar.bosch_status import BoschRadarMonitor, BoschRadarStatus
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.hardware import HARDWARE, PC
 
@@ -55,6 +56,8 @@ class UIState:
         "carControl",
         "liveParameters",
         "rawAudioData",
+        "liveTracks",
+        "can",
       ]
     )
 
@@ -80,6 +83,9 @@ class UIState:
     self.CP: car.CarParams | None = None
     self.light_sensor: float = -1.0
     self._param_update_time: float = 0.0
+    self.radar_monitor = BoschRadarMonitor()
+    self.radar_status = BoschRadarStatus()
+    self.radar_hud: bool = False
 
     # Callbacks
     self._offroad_transition_callbacks: list[Callable[[], None]] = []
@@ -141,6 +147,7 @@ class UIState:
 
     self.is_metric = self.params.get_bool("IsMetric")
     self.always_on_dm = self.params.get_bool("AlwaysOnDM")
+    self._update_radar_monitor()
 
   def _update_status(self) -> None:
     if self.started and self.sm.updated["selfdriveState"]:
@@ -186,6 +193,18 @@ class UIState:
       else:
         self.has_longitudinal_control = self.CP.openpilotLongitudinalControl
     self._param_update_time = time.monotonic()
+    try:
+      self.radar_hud = self.params.get_bool("NAPRadarHud")
+    except Exception:
+      self.radar_hud = False
+
+  def _update_radar_monitor(self) -> None:
+    can_messages = []
+    if self.sm.updated.get("can", False):
+      can_messages = [(int(c.address), bytes(c.dat), int(c.src)) for c in self.sm["can"]]
+    live_tracks = self.sm["liveTracks"] if self.sm.updated.get("liveTracks", False) else None
+    if can_messages or live_tracks is not None:
+      self.radar_status = self.radar_monitor.update(time.monotonic(), can_messages, live_tracks)
 
 
 class Device:

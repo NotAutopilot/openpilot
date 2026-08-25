@@ -9,6 +9,7 @@ from openpilot.selfdrive.ui.onroad.alert_renderer import AlertRenderer
 from openpilot.selfdrive.ui.onroad.driver_state import DriverStateRenderer
 from openpilot.selfdrive.ui.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer
+from openpilot.selfdrive.ui.radar.radar_view import RadarHudOverlay
 from openpilot.selfdrive.ui.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.common.transformations.camera import DEVICE_CAMERAS, DeviceCameraConfig, view_frame_from_device_frame
@@ -46,6 +47,7 @@ class AugmentedRoadView(CameraView):
 
     self.model_renderer = ModelRenderer()
     self._hud_renderer = HudRenderer()
+    self._radar_hud = RadarHudOverlay()
     self.alert_renderer = AlertRenderer()
     self.driver_state_renderer = DriverStateRenderer()
 
@@ -86,6 +88,13 @@ class AugmentedRoadView(CameraView):
     # Draw all UI overlays
     self.model_renderer.render(self._content_rect)
     self._hud_renderer.render(self._content_rect)
+    radar_rect = rl.Rectangle(
+      self._content_rect.x + 24,
+      self._content_rect.y + self._content_rect.height - 300,
+      560,
+      280,
+    )
+    self._radar_hud.render(radar_rect)
     self.alert_renderer.render(self._content_rect)
     self.driver_state_renderer.render(self._content_rect)
 

@@ -9,6 +9,7 @@ from openpilot.selfdrive.ui.mici.onroad.alert_renderer import AlertRenderer
 from openpilot.selfdrive.ui.mici.onroad.driver_state import DriverStateRenderer
 from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
+from openpilot.selfdrive.ui.radar.radar_view import RadarHudOverlay
 from openpilot.selfdrive.ui.mici.onroad.confidence_ball import ConfidenceBall
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import FontWeight, gui_app, MousePos, MouseEvent
@@ -151,6 +152,7 @@ class AugmentedRoadView(CameraView):
 
     self._model_renderer = ModelRenderer()
     self._hud_renderer = HudRenderer()
+    self._radar_hud = RadarHudOverlay()
     self._alert_renderer = AlertRenderer()
     self._driver_state_renderer = DriverStateRenderer()
     self._confidence_ball = ConfidenceBall()
@@ -231,6 +233,13 @@ class AugmentedRoadView(CameraView):
     if ui_state.started:
       self._alert_renderer.render(self._content_rect)
     self._hud_renderer.render(self._content_rect)
+    radar_rect = rl.Rectangle(
+      self._content_rect.x + 8,
+      self._content_rect.y + self._content_rect.height - 148,
+      min(320, self._content_rect.width - 16),
+      140,
+    )
+    self._radar_hud.render(radar_rect)
 
     # Draw fake rounded border
     rl.draw_rectangle_rounded_lines_ex(self._content_rect, 0.2 * 1.02, 10, 50, rl.BLACK)
