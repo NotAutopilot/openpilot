@@ -30,6 +30,8 @@ LATERAL_M = 8.0
 HEALTH_COLOR = {
   "LIVE": rl.Color(70, 200, 120, 255),
   "NO TRACKS": rl.Color(180, 180, 180, 255),
+  "WAIT VIN": rl.Color(230, 170, 50, 255),
+  "WAIT GTW": rl.Color(230, 170, 50, 255),
   "SGU": rl.Color(230, 170, 50, 255),
   "REJECT": rl.Color(230, 120, 40, 255),
   "UNAVAIL": rl.Color(230, 170, 50, 255),

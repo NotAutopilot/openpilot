@@ -17,6 +17,7 @@ ADDR_POINT0 = 0x310
 ADDR_ALERT = 0x501
 ADDR_CAR_CONFIG = 0x2A9
 ADDR_VIN_FEED = 0x2B9
+ADDR_VIN_HOST = 0x560
 
 # DBC TeslaRadarSguInfo / TeslaRadarAlertMatrix, little-endian @1+.
 SGU_HW_FAIL_BIT = 45
@@ -100,11 +101,15 @@ class BoschRadarStatus:
   epas_type: int | None = None
   vin: str = ""
   unique_raw: int = 0
+  vin_stream_complete: bool = False
+  gtw_live: bool = False
   last_sgu_age_s: float | None = None
   last_tracks_age_s: float | None = None
 
   @property
   def health_label(self) -> str:
+    if not self.gtw_live and not self.tracks:
+      return "WAIT GTW" if self.vin_stream_complete else "WAIT VIN"
     if self.radar_fault or self.hw_fail:
       return "FAULT"
     if self.table_frozen:
@@ -134,6 +139,8 @@ class BoschRadarMonitor:
     self._raw_seen: deque[tuple[float, bytes]] = deque()
     self._last_sgu_t: float | None = None
     self._last_tracks_t: float | None = None
+    self._vin_bits = 0
+    self._gtw_live = False
 
   @property
   def status(self) -> BoschRadarStatus:
@@ -153,9 +160,18 @@ class BoschRadarMonitor:
     tracks = self._status.tracks
 
     for addr, dat, src in can_messages:
+      dat = bytes(dat)
+      if addr == ADDR_VIN_HOST and dat:
+        rec = dat[0]
+        if rec == 0:
+          self._vin_bits |= 1
+        elif rec == 1:
+          self._vin_bits |= 2
+        elif rec == 2:
+          self._vin_bits |= 4
+        continue
       if not radar_bus(src):
         continue
-      dat = bytes(dat)
       if addr == ADDR_SGU:
         hw_fail = _bit(dat, SGU_HW_FAIL_BIT)
         sgu_fail = _bit(dat, SGU_FAIL_BIT)
@@ -165,6 +181,7 @@ class BoschRadarMonitor:
         alerts = tuple(name for bit_i, name in ALERT_BITS if _bit(dat, bit_i))
       elif addr == ADDR_CAR_CONFIG and len(dat) >= 8:
         awd, position, epas_type = decode_car_config(dat)
+        self._gtw_live = True
       elif addr == ADDR_VIN_FEED:
         parsed = vin_mux_chars(dat)
         if parsed is not None:
@@ -228,6 +245,8 @@ class BoschRadarMonitor:
       epas_type=epas_type,
       vin=vin,
       unique_raw=unique_raw,
+      vin_stream_complete=self._vin_bits == 7,
+      gtw_live=self._gtw_live,
       last_sgu_age_s=None if self._last_sgu_t is None else now - self._last_sgu_t,
       last_tracks_age_s=None if self._last_tracks_t is None else now - self._last_tracks_t,
     )

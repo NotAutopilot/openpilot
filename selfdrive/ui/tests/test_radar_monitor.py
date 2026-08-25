@@ -5,6 +5,7 @@ from openpilot.selfdrive.ui.radar.bosch_status import (
   ADDR_CAR_CONFIG,
   ADDR_SGU,
   ADDR_VIN_FEED,
+  ADDR_VIN_HOST,
   BoschRadarMonitor,
   decode_car_config,
   vin_mux_chars,
@@ -41,6 +42,7 @@ def _tracks(*points):
 def test_sgu_and_alert_bits():
   mon = BoschRadarMonitor()
   status = mon.update(0.0, [
+    (ADDR_CAR_CONFIG, bytes.fromhex("4a85555300200010"), 129),
     (ADDR_SGU, _sgu(sgu=1), 1),
     (ADDR_ALERT, _alert(36, 41, 60), 1),
   ])
@@ -105,5 +107,26 @@ def test_moving_table_is_live():
 
 def test_hw_fail_is_fault():
   mon = BoschRadarMonitor()
-  status = mon.update(0.0, [(ADDR_SGU, _sgu(hw=1), 1)], None)
+  status = mon.update(0.0, [
+    (ADDR_CAR_CONFIG, bytes.fromhex("4295555310001710"), 129),
+    (ADDR_SGU, _sgu(hw=1), 1),
+  ], None)
   assert status.health_label == "FAULT"
+
+
+def test_wait_vin_until_host_stream_and_gtw():
+  mon = BoschRadarMonitor()
+  status = mon.update(0.0, [], None)
+  assert status.health_label == "WAIT VIN"
+
+  status = mon.update(0.1, [
+    (ADDR_VIN_HOST, bytes([0, 1, 1, 0, 0, 0x20, 0x20, 0x20]), 192),
+    (ADDR_VIN_HOST, bytes([1, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20]), 192),
+    (ADDR_VIN_HOST, bytes([2, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20]), 192),
+  ], None)
+  assert status.vin_stream_complete is True
+  assert status.health_label == "WAIT GTW"
+
+  status = mon.update(0.2, [(ADDR_CAR_CONFIG, bytes.fromhex("4295555310001710"), 129)], None)
+  assert status.gtw_live is True
+  assert status.health_label == "NO TRACKS"
