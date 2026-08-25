@@ -45,8 +45,8 @@ RANGE_RINGS = (
 C4_HUD_W = 468.0
 C4_HUD_H = 112.0
 # Hidpi on-road panel: plot + chips + tracks table. Slightly bigger than 900x340.
-HIDPI_HUD_W = 1200.0
-HIDPI_HUD_H = 400.0
+HIDPI_HUD_W = 980.0
+HIDPI_HUD_H = 380.0
 
 TABLE_HEADER = "  ID     dRel     yRel     vRel"
 
@@ -538,21 +538,40 @@ class RadarMonitorDialog(Widget):
       self._render_hidpi(rect, status)
 
   def _render_c4(self, rect: rl.Rectangle, status: BoschRadarStatus) -> None:
-    """Cut-down 536x240 modal: title+bits, full-width plot, Close. No Align, no VIN, no table."""
+    """536x240: chips + tracks TABLE + small plot + Close. No Align, no VIN dump."""
     pad = 8
-    title_size = 16
-    btn_w, btn_h = 96, 30
-    footer_h = btn_h + 8
+    title_size = 18
+    body = 13
+    btn_w, btn_h = 110, 36
+    footer_h = btn_h + 10
     title_font = gui_app.font(FontWeight.BOLD)
-    _draw_text(title_font, "Live radar", rect.x + pad, rect.y + 5, title_size, TEXT)
-    title_w = measure_text_cached(title_font, "Live radar", title_size).x
-    chip_x = rect.x + pad + title_w + 10
-    draw_chip_row(chip_x, rect.y + 5, rect.width - pad * 2 - title_w - 10, _c4_chip_list(status), 12, gap=5)
-    plot_y = rect.y + 32
-    plot = rl.Rectangle(rect.x + pad, plot_y, rect.width - pad * 2, rect.height - (plot_y - rect.y) - footer_h)
-    if plot.height > 28:
+    body_font = gui_app.font(FontWeight.MEDIUM)
+    _draw_text(title_font, "Live radar", rect.x + pad, rect.y + 6, title_size, TEXT)
+    chip_y = rect.y + 30
+    draw_chip_row(rect.x + pad, chip_y, rect.width - pad * 2, _c4_chip_list(status), 13, gap=6)
+    footer_y = rect.y + rect.height - footer_h
+    content_y = rect.y + 54
+    content_h = max(0.0, footer_y - content_y - 2)
+    plot_w = min(rect.width * 0.28, 148.0)
+    plot = rl.Rectangle(rect.x + pad, content_y, plot_w, content_h)
+    if plot.height > 24 and plot.width > 24:
       draw_radar_plot(plot, status, align_box=False, compact=True)
-    btn_y = rect.y + rect.height - footer_h + 3
+    info_x = plot.x + plot.width + 8
+    info_w = rect.x + rect.width - info_x - pad
+    table_y = content_y
+    table_bottom = footer_y - 2
+    if info_w > 40 and table_y + body < table_bottom:
+      _draw_text(body_font, "  ID     dRel     yRel     vRel", info_x, table_y, body, MUTED)
+      table_y += _line_h(body_font, "dRel", body, 2)
+      rows = sorted(status.tracks, key=lambda t: t.d_rel)[:6]
+      for track in rows:
+        if table_y + body > table_bottom:
+          break
+        _draw_text(body_font, _track_row(track), info_x, table_y, body, TEXT)
+        table_y += _line_h(body_font, _track_row(track), body, 2)
+      if not rows and table_y + body <= table_bottom:
+        _draw_text(body_font, "no published tracks", info_x, table_y, body, MUTED)
+    btn_y = footer_y + 4
     self._close.render(rl.Rectangle(rect.x + pad, btn_y, btn_w, btn_h))
 
   def _render_hidpi(self, rect: rl.Rectangle, status: BoschRadarStatus) -> None:
