@@ -14,7 +14,7 @@ os.environ.setdefault("SCALE", "1")
 from dataclasses import replace
 
 from openpilot.selfdrive.ui.radar.bosch_status import BoschRadarStatus, RadarTrack
-from openpilot.selfdrive.ui.radar.radar_view import RadarHudOverlay, RadarMonitorDialog
+from openpilot.selfdrive.ui.radar.radar_view import RadarHudOverlay, RadarMonitorDialog, radar_hud_rect
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app
 import pyray as rl
@@ -39,6 +39,11 @@ def _status(label_tracks=True) -> BoschRadarStatus:
     epas_type=2,
     vin="5YJSA1E45FF108485",
     unique_raw=2,
+    gtw_live=True,
+    vin_stream_complete=True,
+    last_raw_age_s=0.4,
+    vin_f190="5YJSA1E45FF108485",
+    vin_chassis="5YJSA1H15EFP37440",
   )
 
 
@@ -53,10 +58,10 @@ def main() -> None:
   overlay = RadarHudOverlay()
   dialog = RadarMonitorDialog()
 
+  hud = radar_hud_rect(rl.Rectangle(0, 0, gui_app.width, gui_app.height))
   rl.begin_drawing()
   rl.clear_background(rl.Color(30, 40, 50, 255))
-  rl.draw_rectangle(0, 0, gui_app.width, 120, rl.Color(20, 20, 20, 255))
-  overlay.render(rl.Rectangle(30, gui_app.height - 320, 560, 280))
+  overlay.render(hud)
   rl.end_drawing()
   overlay_path = str(out / "radar_hud.png")
   rl.take_screenshot(overlay_path)
@@ -77,10 +82,13 @@ def main() -> None:
     epas_type=0,
     vin="5YJSA1S11EFP54129",
     unique_raw=14,
+    last_raw_age_s=0.1,
+    vin_f190="5YJSA1S11EFP54129",
+    vin_chassis="5YJSA1S11EFP54129",
   )
   rl.begin_drawing()
   rl.clear_background(rl.Color(30, 40, 50, 255))
-  overlay.render(rl.Rectangle(30, gui_app.height - 320, 560, 280))
+  overlay.render(hud)
   rl.end_drawing()
   live_path = str(out / "radar_hud_live.png")
   rl.take_screenshot(live_path)
