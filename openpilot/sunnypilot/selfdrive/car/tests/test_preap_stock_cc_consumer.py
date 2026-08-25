@@ -288,7 +288,8 @@ def _force_confirmed(CI, stalk_counter=5):
   t._blocked = False
   t._panda_counter_at_bind = 0
   t.bound_counter = 1
-  t.sync_counter(stalk_counter)
+  t.update_live_stw({"MC_STW_ACTN_RQ": stalk_counter})
+  t.update_stalk(IDLE, stalk_counter, 0)
   t._prev_lever = 0
   return t
 
@@ -347,9 +348,15 @@ class TestNoPedalLogicalActiveMadsEvents(unittest.TestCase):
     t = _force_confirmed(CI)
     CI.update(_packet("DI_state", {"DI_cruiseState": 2, "DI_speedUnits": 1, "DI_digitalSpeed": 20}, ts=1_500_000))
     self.assertEqual(t.state, structs.CarStateSP.PreapStockCcTransactionState.confirmed)
-    _cs, CS_SP = CI.update(_packet(
+    CI.update(_packet(
       "DI_state", {"DI_cruiseState": 0, "DI_speedUnits": 1, "DI_digitalSpeed": 20}, ts=2_000_000,
     ))
+    CI.CS.update_stock_cc_panda(SimpleNamespace(
+      stockCcReengageCounter=t.bound_counter,
+      stockCcReengageConfirmed=False,
+      controlsAllowedLongitudinal=True,
+    ))
+    _cs, CS_SP = CI.update([])
     return CS_SP
 
   def test_produced_nopedal_independent_confirmed_di_fall_does_not_lkas_disable(self):
@@ -459,11 +466,12 @@ class TestProducedNopedalCoupledDirectAdjustment(unittest.TestCase):
         self.assertTrue(CI.CS.stock_cc._post_cancel_di)
 
         frozen[0] = 399_000_000
-        CI.update(_stw(IDLE, 4, 4_000_000))
-        _cs, CS_SP = CI.update(_stw(MAIN, 5, 4_000_001))
+        CI.update(_stw(IDLE, 3, 4_000_000))
+        _cs, CS_SP = CI.update(_stw(MAIN, 4, 4_000_001))
         self.assertTrue(CI.CS.intent._coupled_deferred)
         self.assertEqual(CS_SP.preapLateralIntent.name, "none")
 
+        CI.update(_di(False, 5_000_000))
         set_tx, set_echo = self._drain_stock_cc_tx(CI)
         self.assertEqual(set_tx, [SET_ACCEL])
         self.assertNotIn(MAIN, set_tx)
