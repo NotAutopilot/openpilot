@@ -42,11 +42,11 @@ RANGE_RINGS = (
 )
 
 # C4 on-road strip. Must fit inside 536x240 (content ~476x180 after 30px border).
-C4_HUD_W = 460.0
-C4_HUD_H = 44.0
-# Hidpi on-road panel: plot + full key-on chips. 640x340.
-HIDPI_HUD_W = 640.0
-HIDPI_HUD_H = 340.0
+C4_HUD_W = 468.0
+C4_HUD_H = 112.0
+# Hidpi on-road panel: plot + chips + tracks table. Slightly bigger than 980x380.
+HIDPI_HUD_W = 980.0
+HIDPI_HUD_H = 380.0
 
 TABLE_HEADER = "  ID     dRel     yRel     vRel"
 
@@ -107,7 +107,7 @@ def radar_hud_rect(content: rl.Rectangle) -> rl.Rectangle:
   """On-road HUD that always fits inside `content`.
 
   C4 536x240 / content ~476x180: 460x44 status strip.
-  Hidpi 2160x1080 / content ~2100x1020: 640x340 chip panel.
+  Hidpi 2160x1080 / content ~2100x1020: 980x380 chip + table panel.
   """
   if is_c4_screen(content):
     margin = 8.0
@@ -357,16 +357,23 @@ def _c4_chip_list(status: BoschRadarStatus) -> list[tuple[str, rl.Color, rl.Colo
 
 
 def draw_c4_strip(panel: rl.Rectangle, status: BoschRadarStatus) -> None:
-  """Cut-down C4 HUD: state + at most two reject/table bits."""
-  rl.draw_rectangle_rounded(panel, 0.18, 6, PANEL_BG)
-  rl.draw_rectangle_rounded_lines_ex(panel, 0.18, 6, 2, health_color(status.health_label))
+  """Cut-down C4 HUD: mini plot + state + at most two bits. No VIN trio, no table."""
+  rl.draw_rectangle_rounded(panel, 0.12, 6, PANEL_BG)
+  rl.draw_rectangle_rounded_lines_ex(panel, 0.12, 6, 2, health_color(status.health_label))
   font_size = 13
   chips = _c4_chip_list(status)
+  pad = 6.0
+  if panel.height >= 72 and panel.width >= 160:
+    plot_w = min(108.0, panel.width * 0.30)
+    plot = rl.Rectangle(panel.x + pad, panel.y + pad, plot_w, panel.height - pad * 2)
+    draw_radar_plot(plot, status, align_box=False, compact=True)
+    chip_x = plot.x + plot.width + 8
+    draw_chip_row(chip_x, panel.y + pad + 4, panel.x + panel.width - chip_x - pad, chips, font_size, gap=6)
+    return
   max_h = 0.0
   for text, _, _ in chips:
     _w, th = chip_size(text, font_size)
     max_h = max(max_h, th)
-  pad = 6.0
   y = panel.y + max(pad, (panel.height - max_h) / 2)
   draw_chip_row(panel.x + pad, y, panel.width - pad * 2, chips, font_size, gap=6)
 
@@ -461,7 +468,7 @@ class RadarHudOverlay(Widget):
     panel = _clamp_to_window(rect)
     if panel.width < 8 or panel.height < 8:
       return
-    if panel.height < 80:
+    if is_c4_screen(panel) or panel.height < 130:
       draw_c4_strip(panel, status)
       return
 
@@ -531,32 +538,21 @@ class RadarMonitorDialog(Widget):
       self._render_hidpi(rect, status)
 
   def _render_c4(self, rect: rl.Rectangle, status: BoschRadarStatus) -> None:
-    """536x240: chips + tracks TABLE + small plot + Close. No Align, no VIN dump."""
-    pad = 6
+    """Cut-down 536x240 modal: title+bits, full-width plot, Close. No Align, no VIN, no table."""
+    pad = 8
     title_size = 16
     btn_w, btn_h = 96, 30
     footer_h = btn_h + 8
     title_font = gui_app.font(FontWeight.BOLD)
-    _draw_text(title_font, "Live radar", rect.x + pad, rect.y + 3, title_size, TEXT)
-    chip_y = rect.y + 22
-    draw_chip_row(rect.x + pad, chip_y, rect.width - pad * 2, _c4_chip_list(status), 12, gap=5)
-    body_y = rect.y + 46
-    body_h = rect.height - 46 - footer_h
-    # Table is required. Plot stays only if the table still has room.
-    table_font = 11
-    min_table_w = 220.0
-    plot_w = 120.0
-    if rect.width - pad * 3 - plot_w < min_table_w:
-      plot_w = 0.0
-    if plot_w and body_h > 40:
-      plot = rl.Rectangle(rect.x + pad, body_y, plot_w, body_h)
+    _draw_text(title_font, "Live radar", rect.x + pad, rect.y + 5, title_size, TEXT)
+    title_w = measure_text_cached(title_font, "Live radar", title_size).x
+    chip_x = rect.x + pad + title_w + 10
+    draw_chip_row(chip_x, rect.y + 5, rect.width - pad * 2 - title_w - 10, _c4_chip_list(status), 12, gap=5)
+    plot_y = rect.y + 32
+    plot = rl.Rectangle(rect.x + pad, plot_y, rect.width - pad * 2, rect.height - (plot_y - rect.y) - footer_h)
+    if plot.height > 28:
       draw_radar_plot(plot, status, align_box=False, compact=True)
-      table_x = plot.x + plot.width + 8
-    else:
-      table_x = rect.x + pad
-    empty = "no published tracks"
-    draw_tracks_table(table_x, body_y, body_y + body_h - 2, status, table_font, 8, empty)
-    btn_y = rect.y + rect.height - footer_h + 4
+    btn_y = rect.y + rect.height - footer_h + 3
     self._close.render(rl.Rectangle(rect.x + pad, btn_y, btn_w, btn_h))
 
   def _render_hidpi(self, rect: rl.Rectangle, status: BoschRadarStatus) -> None:
