@@ -41,7 +41,7 @@ def _status(label_tracks=True) -> BoschRadarStatus:
     unique_raw=2,
     gtw_live=True,
     vin_stream_complete=True,
-    last_raw_age_s=0.4,
+    last_raw_age_s=0.08,
     vin_f190="5YJSA1E45FF108485",
     vin_chassis="5YJSA1H15EFP37440",
   )
@@ -57,10 +57,11 @@ def main() -> None:
 
   overlay = RadarHudOverlay()
   dialog = RadarMonitorDialog()
-
   hud = radar_hud_rect(rl.Rectangle(0, 0, gui_app.width, gui_app.height))
+
   rl.begin_drawing()
   rl.clear_background(rl.Color(30, 40, 50, 255))
+  rl.draw_rectangle(0, 0, gui_app.width, 120, rl.Color(20, 20, 20, 255))
   overlay.render(hud)
   rl.end_drawing()
   overlay_path = str(out / "radar_hud.png")
@@ -82,9 +83,9 @@ def main() -> None:
     epas_type=0,
     vin="5YJSA1S11EFP54129",
     unique_raw=14,
-    last_raw_age_s=0.1,
-    vin_f190="5YJSA1S11EFP54129",
-    vin_chassis="5YJSA1S11EFP54129",
+    last_raw_age_s=0.04,
+    vin_f190="5YJSA1E25FF106153",
+    vin_chassis="5YJSA1H13EFP20460",
   )
   rl.begin_drawing()
   rl.clear_background(rl.Color(30, 40, 50, 255))

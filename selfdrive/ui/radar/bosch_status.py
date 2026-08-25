@@ -105,6 +105,9 @@ class BoschRadarStatus:
   gtw_live: bool = False
   last_sgu_age_s: float | None = None
   last_tracks_age_s: float | None = None
+  last_raw_age_s: float | None = None
+  vin_f190: str = ""
+  vin_chassis: str = ""
 
   @property
   def health_label(self) -> str:
@@ -226,6 +229,7 @@ class BoschRadarMonitor:
       table_frozen = span >= FREEZE_HOLD_S - 1e-3 and same and bool(self._fingerprints[-1][1])
 
     unique_raw = len({payload for _, payload in self._raw_seen})
+    last_raw_age_s = None if not self._raw_seen else now - self._raw_seen[-1][0]
     vin = "".join(self._vin)
     if vin == "." * 17:
       vin = ""
@@ -249,5 +253,6 @@ class BoschRadarMonitor:
       gtw_live=self._gtw_live,
       last_sgu_age_s=None if self._last_sgu_t is None else now - self._last_sgu_t,
       last_tracks_age_s=None if self._last_tracks_t is None else now - self._last_tracks_t,
+      last_raw_age_s=last_raw_age_s,
     )
     return self._status
