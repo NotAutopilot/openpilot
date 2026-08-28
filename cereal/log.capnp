@@ -132,6 +132,7 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     userBookmark @95;
     excessiveActuation @96;
     audioFeedback @97;
+    # NAP events. @98/@99 are comma 0.11.1 (stockLkas, lateralManeuver).
     pedalCruiseEnabled @100;
     pedalCruiseDisabled @101;
     pedalMaxRegen @102;
