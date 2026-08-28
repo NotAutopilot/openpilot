@@ -275,7 +275,7 @@ class NAPLayout(Widget):
     self._add_toggle(
       NAPParamKeys.RADAR_IGNORE_HW_FAIL,
       "Ignore radar hardware fail",
-      "Lets you engage when Bosch raises HWFail even though tracks are still live.",
+      "Let's you engage when Bosch raises HWFail even though tracks are still live.",
       dest=self._radar_items,
     )
 
