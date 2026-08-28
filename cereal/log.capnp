@@ -132,14 +132,14 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     userBookmark @95;
     excessiveActuation @96;
     audioFeedback @97;
-    pedalCruiseEnabled @99;
-    pedalCruiseDisabled @100;
-    pedalMaxRegen @101;
-    teslaCCEngaged @102;
-    teslaCCDisengaged @103;
-    teslaCCNotArmed @104;
-    pedalNotCalibrated @105;
-    pedalUnavailable @106;
+    pedalCruiseEnabled @100;
+    pedalCruiseDisabled @101;
+    pedalMaxRegen @102;
+    teslaCCEngaged @103;
+    teslaCCDisengaged @104;
+    teslaCCNotArmed @105;
+    pedalNotCalibrated @106;
+    pedalUnavailable @107;
 
     soundsUnavailableDEPRECATED @47;
   }

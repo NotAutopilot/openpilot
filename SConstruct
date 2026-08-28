@@ -257,8 +257,15 @@ if GetOption('extras') and arch != "larch64":
   SConscript([
     'tools/replay/SConscript',
     'tools/cabana/SConscript',
-    'tools/jotpluggler/SConscript',
   ])
+  # jotpluggler needs get_generated_dbcs from a newer opendbc than NAP's
+  # Pre-AP submodule. Skip until that API exists in opendbc_repo.
+  try:
+    from opendbc import get_generated_dbcs  # noqa: F401
+  except ImportError:
+    get_generated_dbcs = None
+  if get_generated_dbcs is not None:
+    SConscript(['tools/jotpluggler/SConscript'])
 
 
 env.CompilationDatabase('compile_commands.json')
