@@ -1,12 +1,13 @@
-"""Pre-AP pedal-long regen demand check.
+"""Pre-AP pedal-long helpers used by selfdrived.
 
-The planner's deceleration request is clamped to the regen envelope
-(get_preap_accel_limits) before the car ever sees it, so a demand the envelope
-cannot cover is invisible to the pedal controller. This check reads the
-unclamped plan and prompts the driver to add friction brake when the demand
-sits meaningfully below the envelope floor. The carstate pedalMaxRegen flag
-covers the other failure shape: a request inside the envelope that weak
-battery regen fails to deliver.
+RegenDemandCheck reads the unclamped plan and prompts when planned
+deceleration sits below the regen envelope floor. The carstate
+pedalMaxRegen flag covers the other failure shape: a request inside the
+envelope that weak battery regen fails to deliver.
+
+update_pedal_cruise_session keeps the engage/disengage chime on the
+driver's cruise session, not interceptor authority. Gas override drops
+pedalLongActive while cruiseState.enabled stays true.
 """
 import math
 
@@ -15,11 +16,21 @@ from opendbc.car.tesla.preap.interface import get_preap_accel_limits
 
 # Evidence accumulates in a saturating up/down counter so a single MPC sample
 # cannot flash a driver prompt, while brief dropouts do not restart the clock.
-REGEN_DEMAND_EVIDENCE_COUNT = int(0.3 / DT_CTRL)
-REGEN_DEMAND_TRIGGER_MARGIN = 0.2  # m/s² below the envelope floor
-REGEN_DEMAND_CLEAR_MARGIN = 0.05  # m/s²
+REGEN_DEMAND_EVIDENCE_COUNT = int(0.2 / DT_CTRL)
+REGEN_DEMAND_TRIGGER_MARGIN = 0.1  # m/s² below the envelope floor
+REGEN_DEMAND_CLEAR_MARGIN = 0.03  # m/s²
 REGEN_DEMAND_MIN_SPEED = 2.0  # m/s; do not prompt for a stopped/settling car
 REGEN_DEMAND_CLEAR_SPEED = 1.0  # m/s
+
+
+def update_pedal_cruise_session(*, cruise_enabled: bool, pedal_long_active: bool,
+                                prev_session: bool) -> bool:
+  """True while this pedal-cruise engagement is still the driver's session."""
+  if pedal_long_active:
+    return True
+  if not cruise_enabled:
+    return False
+  return prev_session
 
 
 class RegenDemandCheck:
