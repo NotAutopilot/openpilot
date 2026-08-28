@@ -10,19 +10,18 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.big_multi_value_param import BigMultiValueParamToggle
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigParamControl
-from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog, BigInputDialog
+from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog, BigDialog, BigInputDialog
 from openpilot.selfdrive.ui.mici.layouts.settings.nap_script import launch_script
 from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   BACKUP_EPAS_INSTRUCTIONS,
   CALIBRATE_PEDAL_INSTRUCTIONS,
-  CALIBRATE_RADAR_INSTRUCTIONS,
   FLASH_EPAS_INSTRUCTIONS,
   PEDAL_CAN_BUS_VALUES,
   RADAR_OFFSET_MAX,
   RADAR_OFFSET_MIN,
   RESTORE_EPAS_INSTRUCTIONS,
-  TEST_RADAR_INSTRUCTIONS,
 )
+from openpilot.selfdrive.ui.radar.radar_view import RadarMonitorDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
 from opendbc.car.tesla.preap.nap_params import NAPParamKeys
 
@@ -48,6 +47,135 @@ def _confirm_then_flash(slider_title: str, runner_title: str, instructions: str,
     launch_script(runner_title, instructions, module)
   icon = gui_app.texture("icons_mici/buttons/button_circle_red.png", 180, 180)
   gui_app.push_widget(BigConfirmationDialog(slider_title, icon, confirm, red=True))
+
+
+class RadarSettingsLayoutMici(NavScroller):
+  def __init__(self):
+    super().__init__()
+    self._params = Params()
+
+    radar_enabled = BigParamControl("radar enabled", NAPParamKeys.RADAR_ENABLED,
+                                    toggle_callback=_reboot_on_toggle)
+    radar_enabled.set_enabled(ui_state.is_offroad)
+
+    ignore_hw_fail = BigParamControl("ignore radar hardware fail", NAPParamKeys.RADAR_IGNORE_HW_FAIL)
+
+    def on_radar_hud(checked):
+      ui_state.radar_hud = checked
+
+    radar_hud = BigParamControl("radar HUD", NAPParamKeys.RADAR_HUD, toggle_callback=on_radar_hud)
+
+    radar_offset_btn = BigButton("radar lateral offset", self._radar_offset_label())
+    radar_offset_btn.set_click_callback(lambda: self._open_radar_offset_input(radar_offset_btn))
+
+    donor_vin_btn = BigButton("donor radar vin", self._radar_vin_label())
+    donor_vin_btn.set_click_callback(lambda: self._open_radar_vin_input(donor_vin_btn))
+
+    read_vin_btn = BigButton("read vin", self._read_vin_label())
+    read_vin_btn.set_click_callback(lambda: self._on_read_vin(read_vin_btn))
+
+    radar_position = BigMultiValueParamToggle(
+      "donor radar position",
+      NAPParamKeys.RADAR_POSITION,
+      values=[0, 1, 2],
+      labels=["0", "1", "2"],
+      default_value=0,
+    )
+
+    radar_epas = BigMultiValueParamToggle(
+      "donor epas type",
+      NAPParamKeys.RADAR_EPAS_TYPE,
+      values=[0, 1, 2, 3, 4],
+      labels=["0", "1", "2", "3", "4"],
+      default_value=0,
+    )
+
+    live_radar_btn = BigButton("live radar", "open")
+    live_radar_btn.set_click_callback(lambda: gui_app.push_widget(RadarMonitorDialog()))
+
+    self._scroller.add_widgets([
+      radar_enabled,
+      ignore_hw_fail,
+      radar_hud,
+      radar_offset_btn,
+      donor_vin_btn,
+      read_vin_btn,
+      radar_position,
+      radar_epas,
+      live_radar_btn,
+    ])
+
+  def _radar_offset_label(self) -> str:
+    raw = self._params.get(NAPParamKeys.RADAR_OFFSET, return_default=True)
+    try:
+      return f"{float(raw or 0):+.2f}m"
+    except (TypeError, ValueError):
+      return "+0.00m"
+
+  def _radar_vin_label(self) -> str:
+    raw = self._params.get(NAPParamKeys.RADAR_DONOR_VIN, return_default=True) or ""
+    if isinstance(raw, bytes):
+      raw = raw.decode("ascii", errors="ignore")
+    vin = "".join(ch for ch in str(raw).upper() if ch.isalnum())
+    return vin if len(vin) == 17 else "not set"
+
+  def _read_vin_label(self) -> str:
+    return "reading..." if self._params.get_bool(NAPParamKeys.RADAR_READ_VIN) else "read"
+
+  def _open_radar_offset_input(self, btn: BigButton) -> None:
+    raw = self._params.get(NAPParamKeys.RADAR_OFFSET, return_default=True)
+    try:
+      default_text = f"{float(raw or 0):.2f}"
+    except (TypeError, ValueError):
+      default_text = "0.00"
+
+    def on_confirm(text: str) -> None:
+      try:
+        v = float(text)
+      except (TypeError, ValueError):
+        return
+      v = max(RADAR_OFFSET_MIN, min(RADAR_OFFSET_MAX, v))
+      try:
+        self._params.put(NAPParamKeys.RADAR_OFFSET, v)
+      except Exception:
+        return
+      btn.set_value(self._radar_offset_label())
+
+    gui_app.push_widget(BigInputDialog(
+      f"radar offset (m, {RADAR_OFFSET_MIN} to {RADAR_OFFSET_MAX})",
+      default_text=default_text,
+      confirm_callback=on_confirm,
+    ))
+
+  def _open_radar_vin_input(self, btn: BigButton) -> None:
+    current = self._radar_vin_label()
+
+    def on_confirm(text: str) -> None:
+      vin = "".join(ch for ch in (text or "").upper() if ch.isalnum())
+      try:
+        self._params.put(NAPParamKeys.RADAR_DONOR_VIN, vin if len(vin) == 17 else "")
+      except Exception:
+        return
+      btn.set_value(self._radar_vin_label())
+
+    gui_app.push_widget(BigInputDialog(
+      "donor radar vin",
+      default_text="" if current == "not set" else current,
+      minimum_length=0,
+      confirm_callback=on_confirm,
+    ))
+
+  def _on_read_vin(self, btn: BigButton) -> None:
+    if ui_state.engaged:
+      gui_app.push_widget(BigDialog("disengage first", "VIN read is blocked while engaged."))
+      return
+
+    def confirm():
+      self._params.put_bool(NAPParamKeys.RADAR_READ_VIN, True)
+      btn.set_value(self._read_vin_label())
+
+    icon = gui_app.texture("icons_mici/buttons/button_circle_red.png", 180, 180)
+    gui_app.push_widget(BigConfirmationDialog("slide to\nread vin", icon, confirm))
 
 
 class NAPLayoutMici(NavScroller):
@@ -102,33 +230,8 @@ class NAPLayoutMici(NavScroller):
                             ))
     calibrate_pedal_btn.set_enabled(ui_state.is_offroad)
 
-    # ── Radar ────────────────────────────────────────
-    radar_enabled = BigParamControl("radar enabled", NAPParamKeys.RADAR_ENABLED,
-                                    toggle_callback=_reboot_on_toggle)
-    radar_enabled.set_enabled(ui_state.is_offroad)
-
-    radar_behind_nosecone = BigParamControl(
-      "radar behind nosecone", NAPParamKeys.RADAR_BEHIND_NOSECONE,
-      toggle_callback=_reboot_on_toggle,
-    )
-    radar_behind_nosecone.set_enabled(ui_state.is_offroad)
-
-    radar_offset_btn = BigButton("radar lateral offset", self._radar_offset_label())
-    radar_offset_btn.set_click_callback(lambda: self._open_radar_offset_input(radar_offset_btn))
-
-    calibrate_radar_btn = BigButton("calibrate radar", "start")
-    calibrate_radar_btn.set_click_callback(
-      lambda: launch_script("Radar Calibration", CALIBRATE_RADAR_INSTRUCTIONS,
-                            "scripts.nap.calibrate_radar",
-                            ))
-    calibrate_radar_btn.set_enabled(ui_state.is_offroad)
-
-    test_radar_btn = BigButton("test radar", "test")
-    test_radar_btn.set_click_callback(
-      lambda: launch_script("Radar Test", TEST_RADAR_INSTRUCTIONS,
-                            "scripts.nap.test_radar",
-                            ))
-    test_radar_btn.set_enabled(ui_state.is_offroad)
+    radar_settings_btn = BigButton("radar settings", "open")
+    radar_settings_btn.set_click_callback(lambda: gui_app.push_widget(RadarSettingsLayoutMici()))
 
     # ── iBooster (locked off) ────────────────────────
     ibooster_enabled = BigParamControl("ibooster enabled", NAPParamKeys.IBOOSTER_ENABLED)
@@ -168,11 +271,7 @@ class NAPLayoutMici(NavScroller):
       pedal_can_bus,
       pedal_calib_status,
       calibrate_pedal_btn,
-      radar_enabled,
-      radar_behind_nosecone,
-      radar_offset_btn,
-      calibrate_radar_btn,
-      test_radar_btn,
+      radar_settings_btn,
       ibooster_enabled,
       force_pre_ap,
       backup_epas_btn,
@@ -180,36 +279,3 @@ class NAPLayoutMici(NavScroller):
       restore_epas_btn,
     ])
 
-  def _radar_offset_label(self) -> str:
-    raw = self._params.get(NAPParamKeys.RADAR_OFFSET, return_default=True)
-    try:
-      return f"{float(raw or 0):+.2f}m"
-    except (TypeError, ValueError):
-      return "+0.00m"
-
-  def _open_radar_offset_input(self, btn: BigButton) -> None:
-    raw = self._params.get(NAPParamKeys.RADAR_OFFSET, return_default=True)
-    try:
-      default_text = f"{float(raw or 0):.2f}"
-    except (TypeError, ValueError):
-      default_text = "0.00"
-
-    def on_confirm(text: str) -> None:
-      try:
-        v = float(text)
-      except (TypeError, ValueError):
-        return
-      v = max(RADAR_OFFSET_MIN, min(RADAR_OFFSET_MAX, v))
-      try:
-        self._params.put(NAPParamKeys.RADAR_OFFSET, v)
-      except Exception:
-        # FLOAT keys raise on bad value type; swallow so the UI
-        # doesn't crash on a corrupt write.
-        return
-      btn.set_value(self._radar_offset_label())
-
-    gui_app.push_widget(BigInputDialog(
-      f"radar offset (m, {RADAR_OFFSET_MIN} to {RADAR_OFFSET_MAX})",
-      default_text=default_text,
-      confirm_callback=on_confirm,
-    ))

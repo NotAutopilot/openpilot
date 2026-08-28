@@ -158,11 +158,27 @@ class Car:
     # card is driven by can recv, expected at 100Hz
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
+    self._can_packets: list[CanData] = []
+    self.radar_donor_vin = None
+    tesla_preap = any(cfg.safetyModel == car.CarParams.SafetyModel.teslaPreap for cfg in self.CP.safetyConfigs)
+    if tesla_preap:
+      from opendbc.car.tesla.preap.nap_conf import nap_conf
+      from opendbc.car.tesla.preap.radar_donor_vin import RadarDonorVinCommissioner
+
+      def store_donor_vin(vin: str) -> None:
+        nap_conf.radar_donor_vin = vin
+        self.params.put("NAPRadarVinReadStatus", f"saved {vin}")
+        cloudlog.info("preap radar donor vin stored")
+
+      self._nap_conf = nap_conf
+      self.radar_donor_vin = RadarDonorVinCommissioner(store_donor_vin)
+
   def state_update(self) -> tuple[car.CarState, structs.RadarDataT | None]:
     """carState update loop, driven by can"""
 
     can_strs = messaging.drain_sock_raw(self.can_sock, wait_for_one=True)
     can_list = can_capnp_to_list(can_strs)
+    self._can_packets = [CanData(addr, dat, src) for _ts, frames in can_list for addr, dat, src in frames]
 
     # Update carState from CAN
     CS = self.CI.update(can_list)
@@ -258,6 +274,32 @@ class Car:
       # send car controls over can
       now_nanos = self.can_log_mono_time if REPLAY else int(time.monotonic() * 1e9)
       self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos)
+      can_sends = list(can_sends)
+      if self.radar_donor_vin is not None:
+        controls_allowed = False
+        if self.sm.valid['pandaStates']:
+          controls_allowed = any(ps.controlsAllowed for ps in self.sm['pandaStates'])
+        force_read = self.params.get_bool("NAPRadarReadVin")
+        if force_read and not self._nap_conf.radar_enabled:
+          self.params.put("NAPRadarVinReadStatus", "enable radar first")
+          self.params.put_bool("NAPRadarReadVin", False)
+        else:
+          can_sends.extend(self.radar_donor_vin.update(
+            self._can_packets,
+            time.monotonic(),
+            radar_enabled=self._nap_conf.radar_enabled,
+            stored_vin=self._nap_conf.radar_donor_vin,
+            controls_allowed=controls_allowed,
+            enabled=bool(CC.enabled),
+            force_read=force_read,
+          ))
+          if force_read and self.radar_donor_vin.read_finished:
+            if not self.radar_donor_vin.reader.vin and self.radar_donor_vin.reader.failure:
+              self.params.put(
+                "NAPRadarVinReadStatus",
+                self.radar_donor_vin.reader.failure.name.lower().replace("_", " "),
+              )
+            self.params.put_bool("NAPRadarReadVin", False)
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
       self.CC_prev = CC
