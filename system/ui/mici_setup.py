@@ -28,7 +28,7 @@ from openpilot.system.ui.widgets.slider import LargerSlider
 from openpilot.selfdrive.ui.mici.layouts.settings.network import WifiNetworkButton
 from openpilot.selfdrive.ui.mici.layouts.settings.network.wifi_ui import WifiUIMici
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigInputDialog, BigConfirmationCircleButton
-from openpilot.selfdrive.ui.mici.widgets.button import BigButton
+from openpilot.selfdrive.ui.mici.widgets.button import BigButton, GreyBigButton
 
 NetworkType = log.DeviceState.NetworkType
 
@@ -254,43 +254,6 @@ class FailedPage(NavScroller):
       self._reason_card.set_visible(False)
 
 
-class GreyBigButton(BigButton):
-  """Users should manage newlines with this class themselves"""
-
-  LABEL_HORIZONTAL_PADDING = 30
-
-  def __init__(self, *args, **kwargs):
-    super().__init__(*args, **kwargs)
-    self.set_touch_valid_callback(lambda: False)
-
-    self._rect.width = 476
-
-    self._label.set_font_size(36)
-    self._label.set_font_weight(FontWeight.BOLD)
-    self._label.set_line_height(1.0)
-
-    self._sub_label.set_font_size(36)
-    self._sub_label.set_text_color(rl.Color(255, 255, 255, int(255 * 0.9)))
-    self._sub_label.set_font_weight(FontWeight.DISPLAY_REGULAR)
-    self._sub_label.set_alignment_vertical(rl.GuiTextAlignmentVertical.TEXT_ALIGN_MIDDLE if not self._label.text else
-                                           rl.GuiTextAlignmentVertical.TEXT_ALIGN_BOTTOM)
-    self._sub_label.set_line_height(0.95)
-
-  @property
-  def LABEL_VERTICAL_PADDING(self):
-    return BigButton.LABEL_VERTICAL_PADDING if self._label.text else 18
-
-  def _width_hint(self) -> int:
-    return int(self._rect.width - self.LABEL_HORIZONTAL_PADDING * 2)
-
-  def _get_label_font_size(self):
-    return 36
-
-  def _render(self, _):
-    rl.draw_rectangle_rounded(self._rect, 0.4, 10, rl.Color(255, 255, 255, int(255 * 0.15)))
-    self._draw_content(self._rect.y)
-
-
 class BigPillButton(BigButton):
   def __init__(self, *args, green: bool = False, disabled_background: bool = False, **kwargs):
     self._green = green
@@ -353,7 +316,7 @@ class NetworkSetupPageBase(Scroller):
 
     def on_waiting_click():
       offset = (self._wifi_button.rect.x + self._wifi_button.rect.width / 2) - (self._rect.x + self._rect.width / 2)
-      self._scroller.scroll_to(offset, smooth=True, block_interaction=True)
+      self._scroller.scroll_to(offset, smooth=True, block_interrupt=True, block_widget_interaction=True)
       # trigger grow when wifi button in view
       self._pending_wifi_grow_animation = True
 
@@ -436,7 +399,7 @@ class NetworkSetupPageBase(Scroller):
     self._scroller._layout()
     end_offset = -(self._scroller.content_size - self._rect.width)
     remaining = self._scroller.scroll_panel.get_offset() - end_offset
-    self._scroller.scroll_to(remaining, smooth=True, block_interaction=True)
+    self._scroller.scroll_to(remaining, smooth=True, block_interrupt=True, block_widget_interaction=True)
     self._pending_continue_grow_animation = True
 
   def set_custom_software(self, custom_software: bool):

@@ -82,6 +82,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LiveParametersV2", {PERSISTENT, BYTES}},
     {"LiveTorqueParameters", {PERSISTENT | DONT_LOG, BYTES}},
     {"LocationFilterInitialState", {PERSISTENT, BYTES}},
+    {"LateralManeuverMode", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"LongitudinalManeuverMode", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"LongitudinalPersonality", {PERSISTENT, INT, std::to_string(static_cast<int>(cereal::LongitudinalPersonality::STANDARD))}},
     {"NetworkMetered", {PERSISTENT, BOOL}},
@@ -102,8 +103,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"OnroadCycleRequested", {CLEAR_ON_MANAGER_START, BOOL}},
     {"OpenpilotEnabledToggle", {PERSISTENT, BOOL, "1"}},
     {"PandaHeartbeatLost", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
-    {"PandaSomResetTriggered", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
-    {"PandaSignatures", {CLEAR_ON_MANAGER_START, BYTES}},
     {"PrimeType", {PERSISTENT, INT}},
     {"RecordAudio", {PERSISTENT, BOOL}},
     {"RecordAudioFeedback", {PERSISTENT, BOOL, "0"}},
@@ -128,6 +127,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"UpdaterLastFetchTime", {PERSISTENT, TIME}},
     {"UptimeOffroad", {PERSISTENT, FLOAT, "0.0"}},
     {"UptimeOnroad", {PERSISTENT, FLOAT, "0.0"}},
+    {"UsbGpuPresent", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
+    {"UsbGpuCompiled", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"Version", {PERSISTENT, STRING}},
 
     // NAP (NotAutopilot) Pre-AP Tesla params
