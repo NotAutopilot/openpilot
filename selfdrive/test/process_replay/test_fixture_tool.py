@@ -135,7 +135,6 @@ def compact_stream(*, pedal: bool = True, private_vin: str = PRIVATE_VIN,
   state.teslaCCEngaged = False
   state.teslaCCDisengaged = False
   state.teslaCCNotArmed = False
-  state.enableLongControl = False
   state.pedalAuthorityFailed = False
   events.append(cs)
 
@@ -767,7 +766,6 @@ def test_retained_consumer_fields_survive_sanitize(tmp_path: Path):
   messages = list(LogReader.from_bytes(zstandard.ZstdDecompressor().decompress(output)))
   state = next(message.carState for message in messages if message.which() == "carState")
   assert state.leftBlindspot is True
-  assert state.enableLongControl is False
   assert state.pedalAuthorityFailed is False
   control = next(message.carControl for message in messages if message.which() == "carControl")
   assert control.leftBlinker is True

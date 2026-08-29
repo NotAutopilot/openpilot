@@ -108,7 +108,6 @@
       "blockPcmEnable",
       "regenBraking",
       "pedalLongActive",
-      "enableLongControl",
       "pedalMaxRegen",
       "leftBlindspot",
       "rightBlindspot",
