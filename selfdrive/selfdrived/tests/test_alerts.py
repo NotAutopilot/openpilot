@@ -9,7 +9,7 @@ from cereal.messaging import SubMaster
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
-from openpilot.selfdrive.selfdrived.events import Alert, EVENTS, ET
+from openpilot.selfdrive.selfdrived.events import Alert, EVENTS, ET, AudibleAlert
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.selfdrive.test.process_replay.process_replay import CONFIGS
 
@@ -112,6 +112,7 @@ class TestAlerts:
     assert alert.alert_text_2 == "Press Brake to Slow Down"
     assert alert.alert_size == AlertSize.mid
     assert alert.visual_alert == car.CarControl.HUDControl.VisualAlert.brakePressed
+    assert alert.audible_alert == AudibleAlert.promptRepeat
     assert alert.duration == int(0.2 / DT_CTRL)
 
   def test_preap_pedal_unavailable_alert_is_visible_without_disabling_lateral(self):

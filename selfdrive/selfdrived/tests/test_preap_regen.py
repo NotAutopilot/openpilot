@@ -1,6 +1,7 @@
 from openpilot.selfdrive.selfdrived.preap_regen import (
   REGEN_DEMAND_EVIDENCE_COUNT,
   RegenDemandCheck,
+  update_pedal_cruise_session,
 )
 
 # get_preap_accel_limits floor is -1.5 m/s²; -2.0 clears the trigger margin.
@@ -36,7 +37,8 @@ def test_demand_prompt_survives_single_sample_dropouts():
   for _ in range(3 * REGEN_DEMAND_EVIDENCE_COUNT):
     for _ in range(9):
       fired = _update(check) or fired
-    fired = _update(check, a_target=-1.6) or fired
+    # -1.55 is inside the 0.10 trigger margin, outside the 0.03 clear margin.
+    fired = _update(check, a_target=-1.55) or fired
     if fired:
       break
   assert fired
@@ -65,7 +67,7 @@ def test_demand_prompt_uses_hysteresis_before_clearing():
   assert check.active
 
   # Back inside the trigger margin but still beyond the clear margin.
-  assert _update(check, a_target=-1.6, v_ego=1.5)
+  assert _update(check, a_target=-1.55, v_ego=1.5)
 
   # Demand returns to the envelope: prompt clears.
   assert not _update(check, a_target=-1.5)
@@ -80,3 +82,30 @@ def test_demand_prompt_resets_when_pedal_long_inactive():
 
   assert not _update(check, pedal_long_active=False)
   assert not check.active
+
+
+def test_pedal_cruise_session_starts_when_authority_is_accepted():
+  assert update_pedal_cruise_session(
+    cruise_enabled=True, pedal_long_active=True, prev_session=False,
+  )
+
+
+def test_pedal_cruise_session_survives_gas_override():
+  # Gas override drops pedalLongActive while cruise stays enabled.
+  assert update_pedal_cruise_session(
+    cruise_enabled=True, pedal_long_active=False, prev_session=True,
+  )
+
+
+def test_pedal_cruise_session_ends_on_cancel():
+  assert not update_pedal_cruise_session(
+    cruise_enabled=False, pedal_long_active=False, prev_session=True,
+  )
+
+
+def test_pedal_cruise_session_ignores_lateral_only_gas():
+  # Lateral-only engagement never accepted pedal authority, so a gas press
+  # must not look like a pedal-cruise session.
+  assert not update_pedal_cruise_session(
+    cruise_enabled=True, pedal_long_active=False, prev_session=False,
+  )

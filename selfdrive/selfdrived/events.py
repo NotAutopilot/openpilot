@@ -1041,7 +1041,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "Regen Limit Reached",
       "Press Brake to Slow Down",
       AlertStatus.userPrompt, AlertSize.mid,
-      Priority.HIGH, VisualAlert.brakePressed, AudibleAlert.prompt, .2),
+      Priority.HIGH, VisualAlert.brakePressed, AudibleAlert.promptRepeat, .2),
   },
 
   EventName.teslaCCEngaged: {
