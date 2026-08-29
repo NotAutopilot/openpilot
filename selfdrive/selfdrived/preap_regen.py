@@ -5,9 +5,10 @@ deceleration sits below the regen envelope floor. The carstate
 pedalMaxRegen flag covers the other failure shape: a request inside the
 envelope that weak battery regen fails to deliver.
 
-update_pedal_cruise_session keeps the engage/disengage chime on the
-driver's cruise session, not interceptor authority. Gas override drops
-pedalLongActive while cruiseState.enabled stays true.
+pedal_long_chime binds engage/disengage to enableLongControl edges.
+Gas override drops interceptor authority (pedalLongActive) but keeps
+enableLongControl, so a pedal press/release must not chime. Brake and
+first-pull drop enableLongControl while cruise stays, and those must.
 """
 import math
 
@@ -22,15 +23,17 @@ REGEN_DEMAND_CLEAR_MARGIN = 0.03  # m/s²
 REGEN_DEMAND_MIN_SPEED = 2.0  # m/s; do not prompt for a stopped/settling car
 REGEN_DEMAND_CLEAR_SPEED = 1.0  # m/s
 
+PEDAL_CHIME_ENABLED = "enabled"
+PEDAL_CHIME_DISABLED = "disabled"
 
-def update_pedal_cruise_session(*, cruise_enabled: bool, pedal_long_active: bool,
-                                prev_session: bool) -> bool:
-  """True while this pedal-cruise engagement is still the driver's session."""
-  if pedal_long_active:
-    return True
-  if not cruise_enabled:
-    return False
-  return prev_session
+
+def pedal_long_chime(*, enable_long_control: bool, prev_enable_long_control: bool) -> str | None:
+  """Engage/disengage chime follows the FSM long-control flag, not authority."""
+  if enable_long_control and not prev_enable_long_control:
+    return PEDAL_CHIME_ENABLED
+  if prev_enable_long_control and not enable_long_control:
+    return PEDAL_CHIME_DISABLED
+  return None
 
 
 class RegenDemandCheck:

@@ -148,6 +148,7 @@ def test_pedal_acquisition_failure_keeps_lateral_and_surfaces_alert():
 
     public_state = interface.update(drive_packet)
     assert public_state.cruiseState.enabled
+    assert not public_state.enableLongControl
     assert not public_state.pedalLongActive
     assert public_state.pedalAuthorityFailed
 

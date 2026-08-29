@@ -1,7 +1,9 @@
 from openpilot.selfdrive.selfdrived.preap_regen import (
+  PEDAL_CHIME_DISABLED,
+  PEDAL_CHIME_ENABLED,
   REGEN_DEMAND_EVIDENCE_COUNT,
   RegenDemandCheck,
-  update_pedal_cruise_session,
+  pedal_long_chime,
 )
 
 # get_preap_accel_limits floor is -1.5 m/s²; -2.0 clears the trigger margin.
@@ -84,28 +86,44 @@ def test_demand_prompt_resets_when_pedal_long_inactive():
   assert not check.active
 
 
-def test_pedal_cruise_session_starts_when_authority_is_accepted():
-  assert update_pedal_cruise_session(
-    cruise_enabled=True, pedal_long_active=True, prev_session=False,
-  )
+def _chimes(enable_long_frames):
+  prev = False
+  events = []
+  for enable_long in enable_long_frames:
+    chime = pedal_long_chime(
+      enable_long_control=enable_long,
+      prev_enable_long_control=prev,
+    )
+    if chime is not None:
+      events.append(chime)
+    prev = enable_long
+  return events
 
 
-def test_pedal_cruise_session_survives_gas_override():
-  # Gas override drops pedalLongActive while cruise stays enabled.
-  assert update_pedal_cruise_session(
-    cruise_enabled=True, pedal_long_active=False, prev_session=True,
-  )
+def test_brake_or_single_pull_to_lat_only_fires_disengage():
+  # enableLongControl 1→0 while cruise stays (brake or first-pull).
+  # Interceptor authority also drops, but the chime is the FSM edge.
+  assert _chimes([True, False]) == [PEDAL_CHIME_ENABLED, PEDAL_CHIME_DISABLED]
 
 
-def test_pedal_cruise_session_ends_on_cancel():
-  assert not update_pedal_cruise_session(
-    cruise_enabled=False, pedal_long_active=False, prev_session=True,
-  )
+def test_double_pull_long_on_fires_engage():
+  # Lat-only (cruise on, long off) then double-pull: enableLongControl 0→1.
+  assert _chimes([False, True]) == [PEDAL_CHIME_ENABLED]
 
 
-def test_pedal_cruise_session_ignores_lateral_only_gas():
-  # Lateral-only engagement never accepted pedal authority, so a gas press
-  # must not look like a pedal-cruise session.
-  assert not update_pedal_cruise_session(
-    cruise_enabled=True, pedal_long_active=False, prev_session=False,
-  )
+def test_pedal_override_does_not_use_pedal_up_as_engage():
+  # Gas override drops pedalLongActive while enableLongControl stays true.
+  # Pedal-up re-accepts authority on the same still-true flag — not a 0→1.
+  assert pedal_long_chime(enable_long_control=True, prev_enable_long_control=True) is None
+  assert _chimes([True, True, True]) == [PEDAL_CHIME_ENABLED]
+
+
+def test_full_off_then_on_still_chimes():
+  assert _chimes([True, False, True]) == [
+    PEDAL_CHIME_ENABLED, PEDAL_CHIME_DISABLED, PEDAL_CHIME_ENABLED,
+  ]
+
+
+def test_authority_drop_is_not_a_disengage_when_long_stays_on():
+  # The 55704413 failure mode: chiming pedalLongActive 1→0. Long stays on.
+  assert pedal_long_chime(enable_long_control=True, prev_enable_long_control=True) is None
