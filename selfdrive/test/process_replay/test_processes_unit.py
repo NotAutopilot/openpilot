@@ -46,6 +46,18 @@ def test_staged_inventory_counts_and_pending_not_executable():
   tp.assert_inventory_invariants(cases)
 
 
+def test_panda_states_migration_uses_opendbc_flag_names():
+  # 0.11.1 migration used HyundaiSafetyFlags.CANFD_LKA_STEER_MSG; NAP opendbc
+  # still names that bit CANFD_LKA_STEERING. Building the map must not crash.
+  from opendbc.car.hyundai.values import HyundaiSafetyFlags
+  from openpilot.selfdrive.test.process_replay.migration import migrate_pandaStates
+  assert hasattr(HyundaiSafetyFlags, "CANFD_LKA_STEERING")
+  assert not hasattr(HyundaiSafetyFlags, "CANFD_LKA_STEER_MSG")
+  src = migrate_pandaStates.__code__.co_names
+  assert "CANFD_LKA_STEER_MSG" not in src
+  HyundaiSafetyFlags.EV_GAS | HyundaiSafetyFlags.CANFD_LKA_STEERING
+
+
 def test_source_segments_compat():
   assert len(tp.source_segments) == 17
   assert tp.source_segments[0][0] == "HYUNDAI"

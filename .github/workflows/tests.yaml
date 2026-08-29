@@ -146,6 +146,9 @@ jobs:
         uv pip install natsort
     - name: Build openpilot
       run: scons -j$(nproc)
+    - name: Build libsafety
+      working-directory: opendbc_repo
+      run: scons -j$(nproc) opendbc/safety/tests/libsafety/libsafety.so
     - name: Validate process replay release contracts
       run: |
         pytest -q -n 0 \
@@ -156,8 +159,9 @@ jobs:
       run: |
         source selfdrive/test/setup_xvfb.sh
         # Pre-compile Python bytecode so each pytest worker doesn't need to
-        $PYTEST --collect-only -m 'not slow' -qq
-        MAX_EXAMPLES=1 $PYTEST -m 'not slow'
+        # NAP opendbc does not ship comma's generated honda DBCs; sim tests cannot collect.
+        $PYTEST --collect-only -m 'not slow' -qq --ignore=tools/sim
+        MAX_EXAMPLES=1 $PYTEST -m 'not slow' --ignore=tools/sim
 
   process_replay:
     name: process replay (${{ matrix.shard }})
