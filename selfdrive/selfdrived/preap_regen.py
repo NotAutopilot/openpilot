@@ -16,9 +16,9 @@ from opendbc.car.tesla.preap.interface import get_preap_accel_limits
 
 # Evidence accumulates in a saturating up/down counter so a single MPC sample
 # cannot flash a driver prompt, while brief dropouts do not restart the clock.
-REGEN_DEMAND_EVIDENCE_COUNT = int(0.2 / DT_CTRL)
-REGEN_DEMAND_TRIGGER_MARGIN = 0.1  # m/s² below the envelope floor
-REGEN_DEMAND_CLEAR_MARGIN = 0.03  # m/s²
+REGEN_DEMAND_EVIDENCE_COUNT = int(0.3 / DT_CTRL)
+REGEN_DEMAND_TRIGGER_MARGIN = 0.2  # m/s² below the envelope floor
+REGEN_DEMAND_CLEAR_MARGIN = 0.05  # m/s²
 REGEN_DEMAND_MIN_SPEED = 2.0  # m/s; do not prompt for a stopped/settling car
 REGEN_DEMAND_CLEAR_SPEED = 1.0  # m/s
 
