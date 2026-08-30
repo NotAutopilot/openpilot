@@ -231,6 +231,22 @@ Export('messaging')
 # Build other submodules
 SConscript(['panda/SConscript'])
 
+# Pytest collection loads libsafety and generated DBCs from the opendbc
+# tree. openpilot scons does not otherwise enter that repo.
+if GetOption('extras'):
+  env.Command(
+    target=[
+      File('#opendbc_repo/opendbc/safety/tests/libsafety/libsafety.so'),
+      File('#opendbc_repo/opendbc/dbc/honda_bosch_radarless_generated.dbc'),
+    ],
+    source=[
+      File('#opendbc_repo/SConstruct'),
+      File('#opendbc_repo/opendbc/safety/tests/libsafety/safety.c'),
+      File('#opendbc_repo/opendbc/dbc/generator/generator.py'),
+    ],
+    action='scons -C opendbc_repo',
+  )
+
 # Build rednose library
 SConscript(['rednose/SConscript'])
 
