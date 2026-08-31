@@ -1,3 +1,5 @@
+import os
+import shutil
 import subprocess
 
 Import('env', 'arch', 'common', 'messaging', 'visionipc', 'cereal')
@@ -5,7 +7,17 @@ Import('env', 'arch', 'common', 'messaging', 'visionipc', 'cereal')
 replay_env = env.Clone()
 replay_env['CCFLAGS'] += ['-Wno-deprecated-declarations']
 if arch == "Darwin":
-  openssl_prefix = subprocess.check_output(['brew', '--prefix', 'openssl@3'], encoding='utf8').strip()
+  openssl_prefix = None
+  brew = shutil.which("brew")
+  if brew:
+    openssl_prefix = subprocess.check_output([brew, '--prefix', 'openssl@3'], encoding='utf8').strip()
+  else:
+    for candidate in ("/opt/homebrew/opt/openssl@3", "/usr/local/opt/openssl@3"):
+      if os.path.isdir(candidate):
+        openssl_prefix = candidate
+        break
+  if not openssl_prefix:
+    raise FileNotFoundError("openssl@3 not found (brew not on PATH and no keg at /opt/homebrew or /usr/local)")
   replay_env['CPPPATH'] += [f'{openssl_prefix}/include']
   replay_env['LIBPATH'] += [f'{openssl_prefix}/lib']
 

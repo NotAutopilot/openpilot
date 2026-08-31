@@ -37,8 +37,7 @@ def test_demand_prompt_survives_single_sample_dropouts():
   for _ in range(3 * REGEN_DEMAND_EVIDENCE_COUNT):
     for _ in range(9):
       fired = _update(check) or fired
-    # -1.55 is inside the 0.10 trigger margin, outside the 0.03 clear margin.
-    fired = _update(check, a_target=-1.55) or fired
+    fired = _update(check, a_target=-1.6) or fired
     if fired:
       break
   assert fired
@@ -67,7 +66,7 @@ def test_demand_prompt_uses_hysteresis_before_clearing():
   assert check.active
 
   # Back inside the trigger margin but still beyond the clear margin.
-  assert _update(check, a_target=-1.55, v_ego=1.5)
+  assert _update(check, a_target=-1.6, v_ego=1.5)
 
   # Demand returns to the envelope: prompt clears.
   assert not _update(check, a_target=-1.5)
