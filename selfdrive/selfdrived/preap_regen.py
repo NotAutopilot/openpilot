@@ -7,8 +7,9 @@ envelope that weak battery regen fails to deliver.
 
 update_preap_chimes edge-detects lat and long engage/disengage. Long
 follows FSM intent (enableLongControl), not interceptor handshake, so a
-stalk engage chimes immediately. Gas override is a long disengage; a
-release back to control does not re-chime if long was already requested.
+stalk engage chimes immediately. Gas override is not an engagement edge:
+enableLongControl stays true while the driver is on the pedal, so press
+and release are silent.
 """
 import math
 from typing import NamedTuple
@@ -28,7 +29,6 @@ REGEN_DEMAND_CLEAR_SPEED = 1.0  # m/s
 class PreAPChimeState(NamedTuple):
   lat_engaged: bool = False
   long_engaged: bool = False
-  gas_pressed: bool = False
 
 
 class PreAPChimes(NamedTuple):
@@ -38,25 +38,16 @@ class PreAPChimes(NamedTuple):
   long_disengage: bool = False
 
 
-def update_preap_chimes(*, lat_engaged: bool, long_engaged: bool, gas_pressed: bool,
+def update_preap_chimes(*, lat_engaged: bool, long_engaged: bool,
                         prev: PreAPChimeState) -> tuple[PreAPChimes, PreAPChimeState]:
   """Rising/falling edges for Pre-AP lat and long driver prompts."""
-  lat_engage = lat_engaged and not prev.lat_engaged
-  lat_disengage = (not lat_engaged) and prev.lat_engaged
-
-  long_intent_engage = long_engaged and not prev.long_engaged
-  long_intent_disengage = (not long_engaged) and prev.long_engaged
-
-  was_controlling_long = prev.long_engaged and not prev.gas_pressed
-  long_override_start = was_controlling_long and long_engaged and gas_pressed
-
   chimes = PreAPChimes(
-    lat_engage=lat_engage,
-    lat_disengage=lat_disengage,
-    long_engage=long_intent_engage,
-    long_disengage=long_intent_disengage or long_override_start,
+    lat_engage=lat_engaged and not prev.lat_engaged,
+    lat_disengage=(not lat_engaged) and prev.lat_engaged,
+    long_engage=long_engaged and not prev.long_engaged,
+    long_disengage=(not long_engaged) and prev.long_engaged,
   )
-  return chimes, PreAPChimeState(lat_engaged, long_engaged, gas_pressed)
+  return chimes, PreAPChimeState(lat_engaged, long_engaged)
 
 
 class RegenDemandCheck:
