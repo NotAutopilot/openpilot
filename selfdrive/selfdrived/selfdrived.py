@@ -18,7 +18,7 @@ from openpilot.selfdrive.car.car_specific import CarSpecificEvents
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.selfdrive.selfdrived.events import Events, ET
 from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
-from openpilot.selfdrive.selfdrived.preap_regen import RegenDemandCheck, update_pedal_cruise_session
+from openpilot.selfdrive.selfdrived.preap_regen import PreAPChimeState, RegenDemandCheck, update_preap_chimes
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
 
@@ -128,7 +128,7 @@ class SelfdriveD:
     self.dm_uncertain_alerted = False
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
-    self.prev_pedal_cruise_session = False
+    self.prev_preap_chimes = PreAPChimeState()
     self.preap_regen_demand = RegenDemandCheck()
 
     # Determine startup event
@@ -217,24 +217,24 @@ class SelfdriveD:
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
       self.events.add_from_msg(car_events)
 
-      # Tesla Pre-AP pedal-long status alerts (banner + engage/disengage sounds).
-      # Chime on the driver's cruise session, not interceptor authority:
-      # gas override drops pedalLongActive while cruiseState.enabled stays true.
+      # Tesla Pre-AP lat/long engage and disengage prompts. Long follows
+      # enableLongControl (stalk/brake intent), not interceptor handshake.
+      # Gas override is a long disengage; releasing gas does not re-chime.
       if (self.CP.brand == "tesla"
           and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
           and self.CP.openpilotLongitudinalControl
           and not self.CP.pcmCruise):
         pedal_long_active = bool(CS.cruiseState.enabled and getattr(CS, 'pedalLongActive', False))
-        pedal_cruise_session = update_pedal_cruise_session(
-          cruise_enabled=bool(CS.cruiseState.enabled),
-          pedal_long_active=pedal_long_active,
-          prev_session=self.prev_pedal_cruise_session,
+        chimes, self.prev_preap_chimes = update_preap_chimes(
+          lat_engaged=bool(CS.cruiseState.enabled),
+          long_engaged=bool(getattr(CS, 'enableLongControl', False)),
+          gas_pressed=bool(CS.gasPressed),
+          prev=self.prev_preap_chimes,
         )
-        if pedal_cruise_session and not self.prev_pedal_cruise_session:
+        if chimes.long_engage:
           self.events.add(EventName.pedalCruiseEnabled)
-        elif self.prev_pedal_cruise_session and not pedal_cruise_session:
+        elif chimes.long_disengage:
           self.events.add(EventName.pedalCruiseDisabled)
-        self.prev_pedal_cruise_session = pedal_cruise_session
 
         # Two shapes of "regen is not enough, add friction brake": the carstate
         # flag covers weak regen under-delivering an in-envelope request; the
@@ -249,7 +249,7 @@ class SelfdriveD:
         if getattr(CS, 'pedalMaxRegen', False) or regen_demand_overflow:
           self.events.add(EventName.pedalMaxRegen)
       else:
-        self.prev_pedal_cruise_session = False
+        self.prev_preap_chimes = PreAPChimeState()
 
       if self.CP.notCar:
         # wait for everything to init first

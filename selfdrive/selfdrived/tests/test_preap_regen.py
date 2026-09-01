@@ -1,7 +1,8 @@
 from openpilot.selfdrive.selfdrived.preap_regen import (
   REGEN_DEMAND_EVIDENCE_COUNT,
+  PreAPChimeState,
   RegenDemandCheck,
-  update_pedal_cruise_session,
+  update_preap_chimes,
 )
 
 # get_preap_accel_limits floor is -1.5 m/s²; -2.0 clears the trigger margin.
@@ -83,28 +84,93 @@ def test_demand_prompt_resets_when_pedal_long_inactive():
   assert not check.active
 
 
-def test_pedal_cruise_session_starts_when_authority_is_accepted():
-  assert update_pedal_cruise_session(
-    cruise_enabled=True, pedal_long_active=True, prev_session=False,
+def _chime(prev, *, lat=False, long_on=False, gas=False):
+  return update_preap_chimes(
+    lat_engaged=lat, long_engaged=long_on, gas_pressed=gas, prev=prev,
   )
 
 
-def test_pedal_cruise_session_survives_gas_override():
-  # Gas override drops pedalLongActive while cruise stays enabled.
-  assert update_pedal_cruise_session(
-    cruise_enabled=True, pedal_long_active=False, prev_session=True,
-  )
+def test_lat_engage_and_disengage_chime_on_cruise_edges():
+  chimes, state = _chime(PreAPChimeState(), lat=True)
+  assert chimes.lat_engage
+  assert not chimes.lat_disengage
+  assert not chimes.long_engage
+
+  chimes, state = _chime(state, lat=True)
+  assert not chimes.lat_engage
+  assert not chimes.lat_disengage
+
+  chimes, _ = _chime(state, lat=False)
+  assert chimes.lat_disengage
+  assert not chimes.lat_engage
 
 
-def test_pedal_cruise_session_ends_on_cancel():
-  assert not update_pedal_cruise_session(
-    cruise_enabled=False, pedal_long_active=False, prev_session=True,
-  )
+def test_long_engage_chimes_on_fsm_intent_not_pedal_authority():
+  # Stalk long engage must chime even before interceptor handshake.
+  chimes, state = _chime(PreAPChimeState(), lat=True, long_on=True)
+  assert chimes.lat_engage
+  assert chimes.long_engage
+
+  chimes, _ = _chime(state, lat=True, long_on=True)
+  assert not chimes.long_engage
 
 
-def test_pedal_cruise_session_ignores_lateral_only_gas():
-  # Lateral-only engagement never accepted pedal authority, so a gas press
-  # must not look like a pedal-cruise session.
-  assert not update_pedal_cruise_session(
-    cruise_enabled=True, pedal_long_active=False, prev_session=False,
-  )
+def test_long_engage_while_gas_pressed_is_not_deferred():
+  chimes, state = _chime(PreAPChimeState(gas_pressed=True), lat=True, long_on=True, gas=True)
+  assert chimes.long_engage
+  assert not chimes.long_disengage
+
+  # Release back to control: already engaged, no second engage chime.
+  chimes, _ = _chime(state, lat=True, long_on=True, gas=False)
+  assert not chimes.long_engage
+  assert not chimes.long_disengage
+
+
+def test_gas_override_is_long_disengage():
+  chimes, state = _chime(PreAPChimeState(), lat=True, long_on=True)
+  assert chimes.long_engage
+
+  chimes, state = _chime(state, lat=True, long_on=True, gas=True)
+  assert chimes.long_disengage
+  assert not chimes.long_engage
+  assert not chimes.lat_disengage
+
+  chimes, _ = _chime(state, lat=True, long_on=True, gas=False)
+  assert not chimes.long_engage
+  assert not chimes.long_disengage
+
+
+def test_brake_or_cancel_long_chimes_disengage():
+  chimes, state = _chime(PreAPChimeState(), lat=True, long_on=True)
+  assert chimes.long_engage
+
+  chimes, state = _chime(state, lat=True, long_on=False)
+  assert chimes.long_disengage
+  assert not chimes.lat_disengage
+
+  chimes, _ = _chime(state, lat=False, long_on=False)
+  assert chimes.lat_disengage
+  assert not chimes.long_disengage
+
+
+def test_reengage_after_disengage_chimes_again():
+  chimes, state = _chime(PreAPChimeState(), lat=True, long_on=True)
+  assert chimes.long_engage
+  chimes, state = _chime(state, lat=False, long_on=False)
+  assert chimes.lat_disengage
+  assert chimes.long_disengage
+
+  chimes, _ = _chime(state, lat=True, long_on=True)
+  assert chimes.lat_engage
+  assert chimes.long_engage
+
+
+def test_lateral_only_gas_does_not_chime_long():
+  chimes, state = _chime(PreAPChimeState(), lat=True)
+  assert chimes.lat_engage
+  assert not chimes.long_engage
+
+  chimes, _ = _chime(state, lat=True, gas=True)
+  assert not chimes.long_engage
+  assert not chimes.long_disengage
+  assert not chimes.lat_disengage

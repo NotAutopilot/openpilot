@@ -5,11 +5,13 @@ deceleration sits below the regen envelope floor. The carstate
 pedalMaxRegen flag covers the other failure shape: a request inside the
 envelope that weak battery regen fails to deliver.
 
-update_pedal_cruise_session keeps the engage/disengage chime on the
-driver's cruise session, not interceptor authority. Gas override drops
-pedalLongActive while cruiseState.enabled stays true.
+update_preap_chimes edge-detects lat and long engage/disengage. Long
+follows FSM intent (enableLongControl), not interceptor handshake, so a
+stalk engage chimes immediately. Gas override is a long disengage; a
+release back to control does not re-chime if long was already requested.
 """
 import math
+from typing import NamedTuple
 
 from openpilot.common.realtime import DT_CTRL
 from opendbc.car.tesla.preap.interface import get_preap_accel_limits
@@ -23,14 +25,38 @@ REGEN_DEMAND_MIN_SPEED = 2.0  # m/s; do not prompt for a stopped/settling car
 REGEN_DEMAND_CLEAR_SPEED = 1.0  # m/s
 
 
-def update_pedal_cruise_session(*, cruise_enabled: bool, pedal_long_active: bool,
-                                prev_session: bool) -> bool:
-  """True while this pedal-cruise engagement is still the driver's session."""
-  if pedal_long_active:
-    return True
-  if not cruise_enabled:
-    return False
-  return prev_session
+class PreAPChimeState(NamedTuple):
+  lat_engaged: bool = False
+  long_engaged: bool = False
+  gas_pressed: bool = False
+
+
+class PreAPChimes(NamedTuple):
+  lat_engage: bool = False
+  lat_disengage: bool = False
+  long_engage: bool = False
+  long_disengage: bool = False
+
+
+def update_preap_chimes(*, lat_engaged: bool, long_engaged: bool, gas_pressed: bool,
+                        prev: PreAPChimeState) -> tuple[PreAPChimes, PreAPChimeState]:
+  """Rising/falling edges for Pre-AP lat and long driver prompts."""
+  lat_engage = lat_engaged and not prev.lat_engaged
+  lat_disengage = (not lat_engaged) and prev.lat_engaged
+
+  long_intent_engage = long_engaged and not prev.long_engaged
+  long_intent_disengage = (not long_engaged) and prev.long_engaged
+
+  was_controlling_long = prev.long_engaged and not prev.gas_pressed
+  long_override_start = was_controlling_long and long_engaged and gas_pressed
+
+  chimes = PreAPChimes(
+    lat_engage=lat_engage,
+    lat_disengage=lat_disengage,
+    long_engage=long_intent_engage,
+    long_disengage=long_intent_disengage or long_override_start,
+  )
+  return chimes, PreAPChimeState(lat_engaged, long_engaged, gas_pressed)
 
 
 class RegenDemandCheck:
