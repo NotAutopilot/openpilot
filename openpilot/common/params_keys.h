@@ -228,7 +228,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TeslaMadsScreenButton", {PERSISTENT | BACKUP, INT, "0"}},
 
     // Pre-AP Tesla (NAP) retained keys. Shared sunnypilot leaves NAPForcePreAP
-    // absent/false. Do not register NAPAdaptiveAccel.
+    // absent/false.
     {"NAPForcePreAP", {PERSISTENT | BACKUP, BOOL}},
     {"NAPLateralEngagementMode", {PERSISTENT | BACKUP, INT}},
     {"NAPLateralEngagementModeMigrated", {PERSISTENT | BACKUP, BOOL, "0"}},
@@ -241,9 +241,19 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"NAPPedalCalibMin", {PERSISTENT | BACKUP, FLOAT, "-3.0"}},
     {"NAPPedalCalibMax", {PERSISTENT | BACKUP, FLOAT, "99.6"}},
     {"NAPPedalCalibZero", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
+    {"NAPAdaptiveAccel", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"NAPRadarEnabled", {PERSISTENT | BACKUP, BOOL}},
     {"NAPRadarBehindNosecone", {PERSISTENT | BACKUP, BOOL}},
     {"NAPRadarOffset", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
+    {"NAPRadarHud", {PERSISTENT | BACKUP, BOOL}},
+    {"NAPRadarIgnoreHwFail", {PERSISTENT | BACKUP, BOOL}},
+    {"NAPRadarDonorVin", {PERSISTENT | BACKUP, STRING}},
+    {"NAPRadarEpasType", {PERSISTENT | BACKUP, INT, "0"}},
+    {"NAPRadarPosition", {PERSISTENT | BACKUP, INT, "0"}},
+    {"NAPRadarReadVin", {CLEAR_ON_MANAGER_START, BOOL}},
+    {"NAPRadarVinReadStatus", {CLEAR_ON_MANAGER_START, STRING}},
+    {"NAPiBoosterEnabled", {PERSISTENT | BACKUP, BOOL}},
+    {"NAPBrakeFactor", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"NAPScriptRunning", {CLEAR_ON_MANAGER_START, BOOL, "0"}},
     {"NAPEpasRiskAccepted", {CLEAR_ON_MANAGER_START, BOOL, "0"}},
     {"ToyotaEnforceStockLongitudinal", {PERSISTENT | BACKUP, BOOL, "0"}},

@@ -3,6 +3,10 @@ import ast
 import unittest
 from pathlib import Path
 
+NAP_PY = (
+  Path(__file__).resolve().parents[4]
+  / "selfdrive/ui/sunnypilot/layouts/settings/nap.py"
+)
 TESLA_PY = (
   Path(__file__).resolve().parents[4]
   / "selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/tesla.py"
@@ -10,7 +14,7 @@ TESLA_PY = (
 
 
 def _load_tesla_bus_helpers():
-  src = TESLA_PY.read_text()
+  src = NAP_PY.read_text()
   tree = ast.parse(src)
   wanted = {"parse_configured_pedal_bus", "pedal_bus_selector_index"}
   body: list[ast.stmt] = [
@@ -18,11 +22,11 @@ def _load_tesla_bus_helpers():
   ]
   names = {node.name for node in body}
   if wanted - names:
-    raise AssertionError(f"tesla.py missing helpers {wanted - names}")
+    raise AssertionError(f"nap.py missing helpers {wanted - names}")
   mod = ast.Module(body=body, type_ignores=[])
   ast.fix_missing_locations(mod)
   ns = {}
-  exec(compile(mod, str(TESLA_PY), "exec"), ns)
+  exec(compile(mod, str(NAP_PY), "exec"), ns)
   return ns
 
 
@@ -48,10 +52,10 @@ class TestTeslaSettingsPedalBus(unittest.TestCase):
     self.assertEqual(index(2), 1)
 
   def test_status_refresh_uses_named_helper_not_falsy_or(self):
-    src = TESLA_PY.read_text()
+    src = NAP_PY.read_text()
     self.assertNotIn('params.get("NAPPedalCanBus") or', src)
-    self.assertTrue("pedal_bus_selector_index(ui_state.params.get(\"NAPPedalCanBus\"))" in src)
-    self.assertTrue("ui_state.params.put(\"NAPPedalCanBus\", 0 if index == 0 else 2)" in src)
+    self.assertTrue("pedal_bus_selector_index(self._params.get(NAPParamKeys.PEDAL_CAN_BUS))" in src)
+    self.assertTrue("self._params.put(NAPParamKeys.PEDAL_CAN_BUS, PEDAL_CAN_BUS_VALUES[index])" in src)
 
   def test_tesla_menu_does_not_own_mads_engagement(self):
     src = TESLA_PY.read_text()
@@ -59,20 +63,23 @@ class TestTeslaSettingsPedalBus(unittest.TestCase):
     self.assertNotIn("Lateral Engagement Mode", src)
     self.assertNotIn("Active Engagement Mode", src)
 
-  def test_preap_uses_native_status_and_steppers(self):
+  def test_vehicle_does_not_own_nap_sidebar(self):
     src = TESLA_PY.read_text()
-    self.assertIn("option_item_sp(", src)
+    self.assertNotIn("NAPFollowDistance", src)
+    self.assertNotIn("Radar Settings", src)
+    self.assertNotIn("Emergency Disable", src)
+    self.assertIn("Cooperative Steering", src)
+
+  def test_preap_uses_native_status_and_steppers(self):
+    src = NAP_PY.read_text()
     self.assertIn("text_item_sp(", src)
-    self.assertIn('param="NAPFollowDistance"', src)
-    self.assertIn('param="NAPRadarOffset"', src)
-    self.assertNotIn("button_width=90", src)
-    self.assertNotIn("Keyboard(", src)
-    self.assertNotIn("yRel", src)
-    self.assertIn("label_width=style.BUTTON_ACTION_WIDTH", src)
-    self.assertIn("button_width=364", src)
+    self.assertIn("NAPParamKeys.FOLLOW_DISTANCE", src)
+    self.assertIn("NAPParamKeys.RADAR_OFFSET", src)
+    self.assertIn("SectionHeader", src)
+    self.assertIn("_page = \"radar\"", src)
+    self.assertIn("RadarMonitorDialog", src)
     self.assertIn('lambda: tr("CALIBRATE")', src)
-    self.assertIn('lambda: tr("FLASH")', src)
-    self.assertNotIn("self.follow_distance.action_item.set_enabled(offroad)", src)
+    self.assertIn('lambda: tr("DIAGNOSE")', src)
 
 
 if __name__ == "__main__":

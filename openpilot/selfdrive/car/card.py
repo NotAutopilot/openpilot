@@ -190,8 +190,41 @@ class Car:
     # card is driven by can recv, expected at 100Hz
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
+    self._can_packets: list[CanData] = []
+    self.radar_donor_vin = None
+    tesla_preap = any(cfg.safetyModel == car.CarParams.SafetyModel.teslaPreap for cfg in self.CP.safetyConfigs)
+    if tesla_preap:
+      from opendbc.car.tesla.preap.radar_donor_vin import (
+        RadarDonorVinCommissioner, radar_donor_live, seed_radar_donor_live,
+      )
+
+      def store_donor_vin(vin: str) -> None:
+        self.params.put("NAPRadarDonorVin", vin)
+        seed_radar_donor_live(vin, radar_donor_live.position, radar_donor_live.epas_type)
+        self.params.put("NAPRadarVinReadStatus", f"saved {vin}")
+        cloudlog.info("preap radar donor vin stored")
+
+      self.radar_donor_vin = RadarDonorVinCommissioner(store_donor_vin)
+      self._sync_radar_donor_live()
+
     # log fingerprint in sentry
     sunnypilot_interfaces.log_fingerprint(self.CP)
+
+  def _parse_radar_int(self, key: str, default: int, lo: int, hi: int) -> int:
+    raw = self.params.get(key)
+    try:
+      value = int(raw)
+    except (TypeError, ValueError):
+      return default
+    return value if lo <= value <= hi else default
+
+  def _sync_radar_donor_live(self) -> None:
+    from opendbc.car.tesla.preap.radar_donor_vin import seed_radar_donor_live
+    seed_radar_donor_live(
+      self.params.get("NAPRadarDonorVin"),
+      self._parse_radar_int("NAPRadarPosition", 0, 0, 3),
+      self._parse_radar_int("NAPRadarEpasType", 0, 0, 7),
+    )
 
   def stamp_preap_intent_epoch(self, CS_SP: structs.CarStateSP) -> None:
     if not self.preap_intent_epoch:
@@ -214,6 +247,7 @@ class Car:
 
     can_strs = messaging.drain_sock_raw(self.can_sock, wait_for_one=True)
     can_list = can_capnp_to_list(can_strs)
+    self._can_packets = [CanData(addr, dat, src) for _ts, frames in can_list for addr, dat, src in frames]
 
     # Update carState from CAN
     CS, CS_SP = self.CI.update(can_list)
@@ -320,6 +354,35 @@ class Car:
       # send car controls over can
       now_nanos = self.can_log_mono_time if REPLAY else int(time.monotonic() * 1e9)
       self.last_actuators_output, can_sends = self.CI.apply(CC, convert_carControlSP(CC_SP), now_nanos)
+      can_sends = list(can_sends)
+      if self.radar_donor_vin is not None:
+        from opendbc.car.tesla.preap.boot import preap_radar_present
+        self._sync_radar_donor_live()
+        controls_allowed = False
+        if self.sm.valid['pandaStates']:
+          controls_allowed = any(ps.controlsAllowed for ps in self.sm['pandaStates'])
+        force_read = self.params.get_bool("NAPRadarReadVin")
+        radar_enabled = preap_radar_present(self.CP, self.CP_SP)
+        if force_read and not radar_enabled:
+          self.params.put("NAPRadarVinReadStatus", "enable radar first")
+          self.params.put_bool("NAPRadarReadVin", False)
+        else:
+          can_sends.extend(self.radar_donor_vin.update(
+            self._can_packets,
+            time.monotonic(),
+            radar_enabled=radar_enabled,
+            stored_vin=self.params.get("NAPRadarDonorVin") or "",
+            controls_allowed=controls_allowed,
+            enabled=bool(CC.enabled),
+            force_read=force_read,
+          ))
+          if force_read and self.radar_donor_vin.read_finished:
+            if not self.radar_donor_vin.reader.vin and self.radar_donor_vin.reader.failure:
+              self.params.put(
+                "NAPRadarVinReadStatus",
+                self.radar_donor_vin.reader.failure.name.lower().replace("_", " "),
+              )
+            self.params.put_bool("NAPRadarReadVin", False)
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
       self.CC_prev = CC

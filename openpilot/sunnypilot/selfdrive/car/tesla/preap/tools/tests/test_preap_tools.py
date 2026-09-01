@@ -223,17 +223,18 @@ def test_approved_tools_include_diagnose_radar():
 
 
 def test_native_panel_keyboard_and_diagnose():
-  src = Path(__file__).resolve().parents[7] / "selfdrive" / "ui" / "sunnypilot" / "layouts" / "settings" / "vehicle" / "brands" / "tesla.py"
-  text = src.read_text()
-  assert "Keyboard" not in text
-  assert "option_item_sp" in text
-  assert "text_item_sp" in text
-  assert "Diagnose Radar" in text
-  assert "NAPBrakeFactor" not in text
-  assert "Emergency Disable" not in text
-  assert "ConfirmDialog" in text
-  assert "start_tool" in text
-  assert "coop_steering_toggle.set_visible(not is_preap)" in text or "set_visible(not is_preap)" in text
+  tesla = Path(__file__).resolve().parents[7] / "selfdrive" / "ui" / "sunnypilot" / "layouts" / "settings" / "vehicle" / "brands" / "tesla.py"
+  nap = Path(__file__).resolve().parents[7] / "selfdrive" / "ui" / "sunnypilot" / "layouts" / "settings" / "nap.py"
+  tesla_text = tesla.read_text()
+  nap_text = nap.read_text()
+  assert "Diagnose Radar" not in tesla_text
+  assert "Emergency Disable" not in tesla_text
+  assert "coop_steering_toggle.set_visible(not is_preap)" in tesla_text
+  assert "Diagnose Radar" in nap_text
+  assert "Emergency Disable" in nap_text
+  assert "NAPBrakeFactor" in nap_text or "BRAKE_FACTOR" in nap_text
+  assert "start_tool" in nap_text
+  assert "RadarMonitorDialog" in nap_text
 
 
 def test_mads_parent_reachable_while_forced():
@@ -524,9 +525,9 @@ def test_flash_parser_accepts_runner_confirmation_flag():
   assert flash_epas.parse_args(["--confirm"]).accept_risk is True
 
 
-def test_napbrakefactor_is_not_registered():
+def test_napbrakefactor_is_registered_for_grayed_ui():
   src = Path(__file__).resolve().parents[7] / "common" / "params_keys.h"
-  assert '"NAPBrakeFactor"' not in src.read_text()
+  assert '"NAPBrakeFactor"' in src.read_text()
 
 
 

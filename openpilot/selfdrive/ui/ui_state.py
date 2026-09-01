@@ -13,6 +13,7 @@ from openpilot.selfdrive.ui.lib.prime_state import PrimeState
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.common.hardware import HARDWARE, PC
 
+from openpilot.selfdrive.ui.radar.bosch_status import BoschRadarMonitor, BoschRadarStatus
 from openpilot.selfdrive.ui.sunnypilot.ui_state import UIStateSP, DeviceSP
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
@@ -63,6 +64,8 @@ class UIState(UIStateSP):
         "liveParameters",
         "testJoystick",
         "rawAudioData",
+        "liveTracks",
+        "can",
       ] + self.sm_services_ext
     )
 
@@ -91,6 +94,9 @@ class UIState(UIStateSP):
     self.is_body: bool | None = None
     self.CP: car.CarParams | None = None
     self.light_sensor: float = -1.0
+    self.radar_monitor = BoschRadarMonitor()
+    self.radar_status = BoschRadarStatus()
+    self.radar_hud: bool = False
 
     self._params_thread: threading.Thread | None = None
 
@@ -166,6 +172,8 @@ class UIState(UIStateSP):
       for callback in self._on_body_changed_callbacks:
         callback()
 
+    self._update_radar_monitor()
+
   def _update_status(self) -> None:
     if self.started and self.sm.updated["selfdriveState"]:
       ss = self.sm["selfdriveState"]
@@ -213,8 +221,20 @@ class UIState(UIStateSP):
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
     self.usbgpu = self.params.get_bool("UsbGpuPresent")
     self.usbgpu_compiled = self.params.get_bool("UsbGpuCompiled")
+    try:
+      self.radar_hud = self.params.get_bool("NAPRadarHud")
+    except Exception:
+      self.radar_hud = False
 
     UIStateSP.update_params(self)
+
+  def _update_radar_monitor(self) -> None:
+    can_messages = []
+    if self.sm.updated.get("can", False):
+      can_messages = [(int(c.address), bytes(c.dat), int(c.src)) for c in self.sm["can"]]
+    live_tracks = self.sm["liveTracks"] if self.sm.updated.get("liveTracks", False) else None
+    if can_messages or live_tracks is not None:
+      self.radar_status = self.radar_monitor.update(time.monotonic(), can_messages, live_tracks)
 
 
 class Device(DeviceSP):
