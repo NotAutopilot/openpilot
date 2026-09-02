@@ -132,7 +132,9 @@ class MultipleButtonActionSP(MultipleButtonAction):
     self.param_key = param
     self.params = Params()
     if self.param_key:
-      self.selected_button = int(self.params.get(self.param_key, return_default=True))
+      raw = self.params.get(self.param_key, return_default=True)
+      if raw is not None:
+        self.selected_button = int(raw)
     self._anim_x: float | None = None
     self.enabled_buttons: set[int] | None = None
 
