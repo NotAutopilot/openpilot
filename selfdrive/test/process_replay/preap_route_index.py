@@ -24,6 +24,11 @@ _SEGMENT_DIR_RE = re.compile(RE.OP_SEGMENT_DIR)
 _ROUTE_RE = re.compile(fr"^{RE.ROUTE_NAME}$")
 _SEGMENT_RE = re.compile(fr"^{RE.SEGMENT_NAME}$")
 _LOG_ID_RE = re.compile(fr"^{RE.LOG_ID}$")
+# Comma device dump without dongle in the folder name: 00000119--99de680f15--0/rlog.zst
+_LOGID_SEGMENT_DIR_RE = re.compile(
+  r"^(?P<log_id>(?:[0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2}|[a-f0-9]{8}--[a-z0-9]{10}))--(?P<segment_num>[0-9]+)$"
+)
+_DONGLE_IN_NAME_RE = re.compile(r"([a-f0-9]{16})")
 
 
 @dataclass(frozen=True)
@@ -83,7 +88,7 @@ def index_segments(roots: list[Path] | None = None, *, dongle: str | None = JACK
     if not root.is_dir():
       continue
     for path in _iter_log_files(root):
-      located = parse_log_path(path)
+      located = parse_log_path(path, default_dongle=dongle or JACK_DONGLE)
       if located is None:
         continue
       if dongle is not None and located.dongle != dongle:
@@ -95,7 +100,7 @@ def index_segments(roots: list[Path] | None = None, *, dongle: str | None = JACK
   return sorted(found.values(), key=lambda s: (s.dongle, s.log_id, s.segment, s.kind))
 
 
-def parse_log_path(path: Path) -> LocatedSegment | None:
+def parse_log_path(path: Path, *, default_dongle: str = JACK_DONGLE) -> LocatedSegment | None:
   name = path.name
   explorer = _EXPLORER_RE.match(name)
   if explorer:
@@ -124,6 +129,15 @@ def parse_log_path(path: Path) -> LocatedSegment | None:
         path=path,
         kind=kind,
       )
+    logid_match = _LOGID_SEGMENT_DIR_RE.match(parent)
+    if logid_match:
+      return LocatedSegment(
+        dongle=_dongle_from_parents(path) or default_dongle,
+        log_id=logid_match.group("log_id"),
+        segment=int(logid_match.group("segment_num")),
+        path=path,
+        kind=kind,
+      )
   return None
 
 
@@ -138,7 +152,7 @@ def resolve_source(
   as_path = Path(query).expanduser()
   if as_path.exists():
     if as_path.is_file():
-      located = parse_log_path(as_path)
+      located = parse_log_path(as_path, default_dongle=dongle or JACK_DONGLE)
       if located is None:
         kind = _kind_from_filename(as_path.name)
         if kind is None:
@@ -180,6 +194,14 @@ def _iter_log_files(root: Path):
         yield Path(dirpath) / filename
 
 
+def _dongle_from_parents(path: Path) -> str | None:
+  for parent in path.parents:
+    match = _DONGLE_IN_NAME_RE.search(parent.name)
+    if match:
+      return match.group(1)
+  return None
+
+
 def _kind_from_filename(name: str) -> Literal["rlog", "qlog"] | None:
   match = _KIND_RE.match(name)
   if match is None:
@@ -212,5 +234,11 @@ def _matches_query(segment: LocatedSegment, query: str) -> bool:
     return q.replace("_", "|") == segment.route_name
   if _LOG_ID_RE.match(q):
     return q == segment.log_id
+  logid_seg = _LOGID_SEGMENT_DIR_RE.match(q)
+  if logid_seg:
+    return (
+      logid_seg.group("log_id") == segment.log_id
+      and int(logid_seg.group("segment_num")) == segment.segment
+    )
   needle = q.replace("|", "_")
   return needle in str(segment.path) or needle in segment.segment_name.replace("|", "_")

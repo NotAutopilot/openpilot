@@ -90,6 +90,27 @@ def test_route_index_parses_explorer_name_and_resolves(tmp_path: Path):
   assert resolved[0].path == path
 
 
+def test_route_index_logid_segment_dir_without_dongle(tmp_path: Path):
+  # montana-supercharger layout: 00000119--99de680f15--0/rlog.zst
+  seg_dir = tmp_path / "00000119--99de680f15--10"
+  seg_dir.mkdir()
+  rlog = seg_dir / "rlog.zst"
+  qlog = seg_dir / "qlog.zst"
+  rlog.write_bytes(b"r")
+  qlog.write_bytes(b"q")
+  located = parse_log_path(rlog)
+  assert located is not None
+  assert located.dongle == JACK_DONGLE
+  assert located.log_id == "00000119--99de680f15"
+  assert located.segment == 10
+  assert located.kind == "rlog"
+
+  resolved = resolve_source("00000119--99de680f15--10", roots=[tmp_path], dongle=JACK_DONGLE)
+  assert len(resolved) == 1
+  assert resolved[0].path == rlog
+  assert resolved[0].kind == "rlog"
+
+
 def test_route_index_device_segment_dir(tmp_path: Path):
   seg_dir = tmp_path / f"{JACK_DONGLE}|00000005--fb95696ac5--0"
   seg_dir.mkdir()

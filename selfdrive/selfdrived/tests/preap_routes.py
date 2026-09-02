@@ -36,22 +36,40 @@ class PinnedSegment:
   note: str = ""
 
 
-# Real rlogs found on this VPS under ~/projects/personal/notautopilot/logs.
-# Do not invent names. Locator still resolves if the file moves.
+LOGS_ROOT = Path("/home/jack/projects/personal/notautopilot/logs")
+MONTANA_ROUTE = "00000119--99de680f15"
+MONTANA_DIR = LOGS_ROOT / "montana-supercharger-2026-07-22-route-00000119--99de680f15"
+
+# Real rlogs on this VPS. Do not invent names. /data is absent here.
 PINNED_SEGMENTS: tuple[PinnedSegment, ...] = (
   PinnedSegment(
+    segment_name=f"{JACK_DONGLE}|{MONTANA_ROUTE}--0",
+    path=MONTANA_DIR / f"{MONTANA_ROUTE}--0" / "rlog.zst",
+    note="montana supercharger 2026-07-22 seg 0",
+  ),
+  PinnedSegment(
+    segment_name=f"{JACK_DONGLE}|{MONTANA_ROUTE}--1",
+    path=MONTANA_DIR / f"{MONTANA_ROUTE}--1" / "rlog.zst",
+    note="montana supercharger 2026-07-22 seg 1",
+  ),
+  PinnedSegment(
+    segment_name=f"{JACK_DONGLE}|{MONTANA_ROUTE}--10",
+    path=MONTANA_DIR / f"{MONTANA_ROUTE}--10" / "rlog.zst",
+    note="montana supercharger 2026-07-22 seg 10",
+  ),
+  PinnedSegment(
     segment_name="d0cdc986c5d023f5|0000002b--fc5c96bf2e--0",
-    path=Path("/home/jack/projects/personal/notautopilot/logs/pedal-engagement/drive-1/d0cdc986c5d023f5_0000002b--fc5c96bf2e--0--rlog.zst"),
+    path=LOGS_ROOT / "pedal-engagement/drive-1/d0cdc986c5d023f5_0000002b--fc5c96bf2e--0--rlog.zst",
     note="pedal-engagement drive-1",
   ),
   PinnedSegment(
     segment_name="d0cdc986c5d023f5|00000074--113899b226--28",
-    path=Path("/home/jack/projects/personal/notautopilot/logs/dissengagement/d0cdc986c5d023f5_00000074--113899b226--28--rlog.zst"),
+    path=LOGS_ROOT / "dissengagement/d0cdc986c5d023f5_00000074--113899b226--28--rlog.zst",
     note="dissengagement",
   ),
   PinnedSegment(
     segment_name="d0cdc986c5d023f5|00000005--fb95696ac5--0",
-    path=Path("/home/jack/projects/personal/notautopilot/logs/vdas/drive-1/d0cdc986c5d023f5_00000005--fb95696ac5--0--rlog.zst"),
+    path=LOGS_ROOT / "vdas/drive-1/d0cdc986c5d023f5_00000005--fb95696ac5--0--rlog.zst",
     note="vdas drive-1",
   ),
 )

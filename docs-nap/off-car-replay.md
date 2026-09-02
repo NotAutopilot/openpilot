@@ -19,6 +19,8 @@ The product test is `test_preap_chimes.py`. It is not the upstream TESLA process
 
 `--list` only prints routes already on disk. It will not invent a route name.
 
+Pinned on this VPS (rlog.zst, not qlog): Jack dongle `d0cdc986c5d023f5`, route `00000119--99de680f15`, segs `--0` `--1` `--10` under `logs/montana-supercharger-2026-07-22-route-00000119--99de680f15`. `/data` is not present here. Device folders are `{log_id}--{seg}/rlog.zst` with no dongle in the name.
+
 `--fixture` runs the synthetic engage / gas-override / brake / cancel stream. That is the CI path when no rlogs are present.
 
 A query can be a segment name, a log id, a dongle|route, or a path to an `rlog.zst`.
