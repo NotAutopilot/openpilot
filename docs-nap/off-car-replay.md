@@ -1,6 +1,6 @@
 # Off-car Pre-AP replay
 
-Replay a recorded Pre-AP route through openpilot `process_replay` and assert the pedal / chime / radar contracts we actually hit on the road. This is log replay, not a driving simulator. CARLA is gone from comma openpilot; MetaDrive is a later phase.
+Replay a recorded Pre-AP route through openpilot `process_replay` and assert the pedal / chime / radar contracts we actually hit on the road. This is log replay, not a driving simulator. CARLA is gone from comma openpilot. MetaDrive is `docs-nap/metadrive-sim.md`.
 
 Jack's car: dongle `d0cdc986c5d023f5`, Comma Pedal `0x551` / `0x552`, no DAS.
 

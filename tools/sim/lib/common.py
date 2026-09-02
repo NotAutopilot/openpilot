@@ -56,6 +56,10 @@ class SimulatorState:
     self.left_blinker = False
     self.right_blinker = False
 
+    # Bosch radar tracks as (d_rel_m, y_rel_m, v_rel_mps). Empty until MetaDrive
+    # objects are wired through; SimulatedCar still packs a healthy SGU.
+    self.radar_points = []
+
   @property
   def speed(self):
     return math.sqrt(self.velocity.x ** 2 + self.velocity.y ** 2 + self.velocity.z ** 2)

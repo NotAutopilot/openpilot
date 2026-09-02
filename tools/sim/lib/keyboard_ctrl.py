@@ -20,15 +20,16 @@ CC = 6
 
 
 KEYBOARD_HELP = """
-  | key  |   functionality       |
-  |------|-----------------------|
-  |  1   | Cruise Resume / Accel |
-  |  2   | Cruise Set    / Decel |
-  |  3   | Cruise Cancel         |
-  |  r   | Reset Simulation      |
-  |  i   | Toggle Ignition       |
-  |  q   | Exit all              |
-  | wasd | Control manually      |
+  | key  |   functionality                         |
+  |------|-----------------------------------------|
+  |  1   | Stalk up (SET / RES / +)                |
+  |  2   | Stalk pull MAIN (engage, double-pull)   |
+  |  3   | Stalk cancel (push away)                |
+  |  4   | Stalk down (DECEL / -)                  |
+  |  r   | Reset Simulation                        |
+  |  i   | Toggle Ignition                         |
+  |  q   | Exit all                                |
+  | wasd | Control manually                        |
 """
 
 
@@ -63,9 +64,11 @@ def keyboard_poll_thread(q: 'Queue[QueueMessage]'):
     if c == '1':
       q.put(control_cmd_gen("cruise_up"))
     elif c == '2':
-      q.put(control_cmd_gen("cruise_down"))
+      q.put(control_cmd_gen("cruise_main"))
     elif c == '3':
       q.put(control_cmd_gen("cruise_cancel"))
+    elif c == '4':
+      q.put(control_cmd_gen("cruise_down"))
     elif c == 'w':
       q.put(control_cmd_gen(f"throttle_{1.0}"))
     elif c == 'a':

@@ -8,11 +8,11 @@ from enum import Enum
 from multiprocessing import Process, Queue, Value
 from abc import ABC, abstractmethod
 
-from opendbc.car.honda.values import CruiseButtons
+from opendbc.car.tesla.values import CruiseButtons
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
-from openpilot.selfdrive.test.helpers import set_params_enabled
 from openpilot.tools.sim.lib.common import SimulatorState, World
+from openpilot.tools.sim.lib.preap_params import configure_preap_sim
 from openpilot.tools.sim.lib.simulated_car import SimulatedCar
 from openpilot.tools.sim.lib.simulated_sensors import SimulatedSensors
 
@@ -38,7 +38,7 @@ class SimulatorBridge(ABC):
   TICKS_PER_FRAME = 5
 
   def __init__(self, dual_camera, high_quality):
-    set_params_enabled()
+    configure_preap_sim()
     self.params = Params()
     self.params.put_bool("AlphaLongitudinalEnabled", True, block=True)
 
@@ -57,7 +57,8 @@ class SimulatorBridge(ABC):
     self.world: World | None = None
 
     self.past_startup_engaged = False
-    self.startup_button_prev = True
+    self.startup_engage_tick = 0
+    self.startup_engage_done = False
 
     self.test_run = False
 
@@ -179,8 +180,14 @@ Ignition: {self.simulator_state.ignition} Engaged: {self.simulator_state.is_enga
 
         self.past_startup_engaged = True
       elif not self.past_startup_engaged and self.simulated_car.sm['selfdriveState'].engageable:
-        self.simulator_state.cruise_button = CruiseButtons.DECEL_SET if self.startup_button_prev else CruiseButtons.MAIN # force engagement on startup
-        self.startup_button_prev = not self.startup_button_prev
+        # Pre-AP double-pull MAIN: rising edges ~100ms apart, inside the 400ms window.
+        if not self.startup_engage_done and self.simulator_state.cruise_button == CruiseButtons.IDLE:
+          tick = self.startup_engage_tick
+          if tick <= 1 or 12 <= tick <= 13:
+            self.simulator_state.cruise_button = CruiseButtons.MAIN
+          if tick >= 14:
+            self.startup_engage_done = True
+          self.startup_engage_tick += 1
 
       throttle_out = throttle_op if self.simulator_state.is_engaged else throttle_manual
       brake_out = brake_op if self.simulator_state.is_engaged else brake_manual
