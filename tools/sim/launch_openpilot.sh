@@ -13,10 +13,11 @@ if [[ "$CI" ]] || [[ -z "${DISPLAY:-}" ]]; then
   export BLOCK="${BLOCK},ui"
 fi
 
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
+OPENPILOT_DIR="$( cd "$SCRIPT_DIR/../.." >/dev/null && pwd )"
+export BASEDIR="${BASEDIR:-$OPENPILOT_DIR}"
+export PYTHONPATH="${BASEDIR}${PYTHONPATH:+:$PYTHONPATH}"
+
 python3 -c "from openpilot.tools.sim.lib.preap_params import configure_preap_sim; configure_preap_sim()"
 
-SCRIPT_DIR=$(dirname "$0")
-OPENPILOT_DIR=$SCRIPT_DIR/../../
-
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
-cd $OPENPILOT_DIR/system/manager && exec ./manager.py
+cd "$BASEDIR/system/manager" && exec ./manager.py
