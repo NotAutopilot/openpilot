@@ -11,14 +11,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from openpilot.cereal import custom
+from openpilot.cereal import custom, log
+from opendbc.car.structs import car
 from opendbc.car.tesla.preap.boot import is_preap_platform
 from opendbc.car.tesla.preap.constants import PEDAL_FEEDBACK_TIMEOUT_STATE
 from opendbc.car.tesla.preap.carcontroller import PedalAuthorityState
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
+from openpilot.sunnypilot.selfdrive.selfdrived.events_base import Alert, EngagementAlert, Priority
 from openpilot.system.ui.lib.multilang import tr_noop
 
 EventNameSP = custom.OnroadEventSP.EventName
+AlertSize = log.SelfdriveState.AlertSize
+AlertStatus = log.SelfdriveState.AlertStatus
+VisualAlert = car.CarControl.HUDControl.VisualAlert
+AudibleAlert = log.SelfdriveState.AudibleAlert
 
 # Extracted via existing tr()/tr_noop PO conventions. Display strings are the
 # registered EventsSP texts for the mapped EventNameSP entries, and the stock
@@ -145,6 +151,26 @@ def select_preap_alerts(inputs: PreAPAlertInputs) -> tuple[int, ...]:
   return tuple(events)
 
 
+def preap_lkas_enable_alert(CP, CS, sm, metric, soft_disable_time, personality) -> Alert:
+  if is_preap_platform(CP):
+    return Alert(
+      "Steering Engaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.MID, VisualAlert.none, AudibleAlert.engage, 0.8)
+  return EngagementAlert(AudibleAlert.engage)
+
+
+def preap_lkas_disable_alert(CP, CS, sm, metric, soft_disable_time, personality) -> Alert:
+  if is_preap_platform(CP):
+    return Alert(
+      "Steering Disengaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.MID, VisualAlert.none, AudibleAlert.disengage, 0.8)
+  return EngagementAlert(AudibleAlert.disengage)
+
+
 def radar_state_has_fault(radar_state) -> bool:
   """True when production RadarState.radarErrors reports a radar/config fault.
 
@@ -184,3 +210,6 @@ def register_preap_alerts() -> None:
   from openpilot.sunnypilot.selfdrive.selfdrived.events_base import ET
   EVENTS_SP.setdefault(EventNameSP.pedalUnavailable, {ET.WARNING: PREAP_PEDAL_UNAVAILABLE_ALERT})
   register_preap_regen_alerts()
+  # Pre-AP lat prompts on native MADS events. Other cars keep stock sounds.
+  EVENTS_SP[EventNameSP.lkasEnable] = {ET.ENABLE: preap_lkas_enable_alert}
+  EVENTS_SP[EventNameSP.lkasDisable] = {ET.USER_DISABLE: preap_lkas_disable_alert}

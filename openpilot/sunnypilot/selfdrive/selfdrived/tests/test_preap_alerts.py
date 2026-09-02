@@ -6,6 +6,8 @@ from openpilot.sunnypilot.selfdrive.selfdrived.events_base import ET, Priority
 from openpilot.selfdrive.selfdrived.events import EVENTS as STOCK_EVENTS
 from openpilot.selfdrive.selfdrived.preap_regen import PREAP_PEDAL_UNAVAILABLE_ALERT, PREAP_REGEN_ALERT
 from openpilot.sunnypilot.selfdrive.selfdrived.preap_alerts import (
+  preap_lkas_disable_alert,
+  preap_lkas_enable_alert,
   ALERT_PEDAL_UNAVAILABLE,
   ALERT_PEDAL_UNAVAILABLE_SUB,
   ALERT_RADAR_FAULT,
@@ -119,6 +121,43 @@ def test_mapped_alert_severity_and_text():
   assert regen.alert_text_2 == ALERT_REGEN_SUB
   assert regen.priority == Priority.HIGH
 
+
+def test_preap_pedal_cruise_alerts_fire_while_disabled():
+  register_preap_alerts()
+  from openpilot.cereal import log as cereal_log
+  AudibleAlert = cereal_log.SelfdriveState.AudibleAlert
+  for name, text, sound in (
+    (EventNameSP.pedalCruiseEnabled, "Pedal Cruise Engaged", AudibleAlert.engage),
+    (EventNameSP.pedalCruiseDisabled, "Pedal Cruise Disengaged", AudibleAlert.disengage),
+  ):
+    event_types = EVENTS_SP[name]
+    assert set(event_types) == {ET.PERMANENT}
+    alert = event_types[ET.PERMANENT]
+    assert alert.alert_text_1 == text
+    assert alert.audible_alert == sound
+
+
+def test_preap_lkas_alerts_show_steering_prompt():
+  register_preap_alerts()
+  from types import SimpleNamespace
+  from openpilot.cereal import log as cereal_log
+  AudibleAlert = cereal_log.SelfdriveState.AudibleAlert
+  cp = SimpleNamespace(carFingerprint="TESLA_MODEL_S_PREAP")
+  args = (cp, None, None, False, 100, None)
+
+  enable = preap_lkas_enable_alert(*args)
+  assert enable.alert_text_1 == "Steering Engaged"
+  assert enable.audible_alert == AudibleAlert.engage
+
+  disable = preap_lkas_disable_alert(*args)
+  assert disable.alert_text_1 == "Steering Disengaged"
+  assert disable.audible_alert == AudibleAlert.disengage
+
+  stock = SimpleNamespace(carFingerprint="TESLA_MODEL_Y")
+  stock_enable = preap_lkas_enable_alert(stock, *args[1:])
+  assert stock_enable.alert_text_1 == ""
+  assert stock_enable.audible_alert == AudibleAlert.engage
+
 def test_established_authority_loss_alerts_during_reacquisition():
   mapper = PedalAuthorityLossMapper()
   assert mapper.update(int(PedalAuthorityState.INACTIVE)) is False
@@ -219,6 +258,15 @@ def test_selfdrived_uses_radar_state_helper():
   text = src.read_text()
   assert "radar_state_has_fault" in text
   assert "getattr(rs, 'radarFault'" not in text
+
+
+def test_selfdrived_chimes_on_enable_long_control_not_authority():
+  src = Path(__file__).resolve().parents[4] / "selfdrive" / "selfdrived" / "selfdrived.py"
+  text = src.read_text()
+  assert "chimes, self.prev_preap_chimes = update_preap_chimes(" in text
+  assert 'long_engaged=bool(getattr(self.CS_SP, "enableLongControl", False))' in text
+  assert "prev_pedal_long_active" not in text
+  assert "gas_pressed=" not in text
 
 
 

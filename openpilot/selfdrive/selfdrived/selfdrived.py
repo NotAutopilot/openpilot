@@ -32,7 +32,9 @@ from openpilot.sunnypilot.selfdrive.car.cruise_helpers import CruiseHelper
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
 from openpilot.sunnypilot.selfdrive.selfdrived.button_state_tracker import ButtonStateTracker
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
-from openpilot.selfdrive.selfdrived.preap_regen import RegenDemandCheck, register_preap_regen_alerts
+from openpilot.selfdrive.selfdrived.preap_regen import (
+  PreAPChimeState, RegenDemandCheck, register_preap_regen_alerts, update_preap_chimes,
+)
 from openpilot.sunnypilot.selfdrive.selfdrived.preap_alerts import radar_state_has_fault
 from opendbc.car.tesla.preap.boot import pedal_pipeline_enabled, preap_radar_present
 
@@ -184,7 +186,7 @@ class SelfdriveD(CruiseHelper):
     self._pedal_preap = pedal_pipeline_enabled(self.CP, self.CP_SP)
     self._preap_radar_present = preap_radar_present(self.CP, self.CP_SP)
     self.preap_regen_demand = RegenDemandCheck()
-    self.prev_pedal_long_active = False
+    self.prev_preap_chimes = PreAPChimeState()
 
     self.mads = ModularAssistiveDrivingSystem(self)
     self.icbm = IntelligentCruiseButtonManagement(self.CP, self.CP_SP)
@@ -290,14 +292,21 @@ class SelfdriveD(CruiseHelper):
 
       if self._pedal_preap:
         EventNameSP = custom.OnroadEventSP.EventName
-        pedal_long_active = self.prev_pedal_long_active
+        pedal_long_active = bool(self.cs_sp_fresh and getattr(self.CS_SP, "pedalLongActive", False))
+        # Tesla Pre-AP lat/long engage and disengage prompts. Long follows
+        # enableLongControl (stalk/brake intent), not interceptor handshake
+        # and not gas override. Override keeps enableLongControl true.
+        # Lat chimes stay on native MADS lkasEnable/lkasDisable.
         if self.cs_sp_fresh:
-          pedal_long_active = bool(getattr(self.CS_SP, "pedalLongActive", False))
-          if pedal_long_active and not self.prev_pedal_long_active:
+          chimes, self.prev_preap_chimes = update_preap_chimes(
+            lat_engaged=bool(self.mads.enabled),
+            long_engaged=bool(getattr(self.CS_SP, "enableLongControl", False)),
+            prev=self.prev_preap_chimes,
+          )
+          if chimes.long_engage:
             self.events_sp.add(EventNameSP.pedalCruiseEnabled)
-          elif self.prev_pedal_long_active and not pedal_long_active:
+          elif chimes.long_disengage:
             self.events_sp.add(EventNameSP.pedalCruiseDisabled)
-          self.prev_pedal_long_active = pedal_long_active
         regen_demand_overflow = self.preap_regen_demand.update(
           plan_valid=self.sm.valid['longitudinalPlan'],
           pedal_long_active=pedal_long_active,
@@ -309,7 +318,7 @@ class SelfdriveD(CruiseHelper):
           self.events_sp.add(EventNameSP.pedalMaxRegen)
         # Authority-loss and calibration/radar health are owned by CarSpecificEventsSP.
       else:
-        self.prev_pedal_long_active = False
+        self.prev_preap_chimes = PreAPChimeState()
 
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:

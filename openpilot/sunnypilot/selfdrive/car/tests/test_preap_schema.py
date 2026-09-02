@@ -74,6 +74,7 @@ class TestPreAPSchemaContract(unittest.TestCase):
     self.assertEqual(cs["preapStockCcBoundCounter"], 6)
     self.assertEqual(cs["preapStockCcHostDiConfirmed"], 7)
     self.assertEqual(cs["preapStockCcEnablePending"], 8)
+    self.assertEqual(cs["enableLongControl"], 20)
 
     car_state = _ordinals(structs.CarState.schema)
     self.assertEqual(car_state["turnSignalStalkState"], 61)

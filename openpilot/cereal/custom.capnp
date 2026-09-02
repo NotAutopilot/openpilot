@@ -498,6 +498,7 @@ struct CarStateSP @0xb86e6369214c01c8 {
   pedalCommandDi @17 :Float32;
   pedalAuthorityFailed @18 :Bool;
   vdasLimitedAccel @19 :Float32;
+  enableLongControl @20 :Bool;  # Pre-AP: FSM longitudinal intent; survives gas override
 
   enum PreapLateralIntent {
     none @0;
