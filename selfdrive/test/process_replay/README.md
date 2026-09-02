@@ -90,3 +90,15 @@ output_logs = replay_process_with_name(['ubloxd', 'locationd'], lr)
 Supported processes include `controlsd`, `radard`, `plannerd`, `calibrationd`, `dmonitoringd`, `locationd`, `paramsd`, `ubloxd`, `torqued`, `card`, `lagd`, `selfdrived`, `modeld`, and `dmonitoringmodeld`.
 
 Use `custom_params` to seed `Params` with typed values. `get_custom_params_from_lr` can recover meaningful values from a previous segment. VisionIPC processes need an `frs` map of camera state names to `FrameReader` objects. Pass `captured_output_store` to collect stdout/stderr per process.
+
+## Pre-AP off-car harness
+
+Invariant checks on Jack's Tesla Pre-AP routes (chime edges, gas override must not chime, `enableLongControl`, Bosch radar if the log has it) live in `preap_offcar.py`. That runner calls `replay_process_with_name` and does not compare against process-replay reference logs.
+
+```bash
+python -m openpilot.selfdrive.test.process_replay.preap_offcar --list
+python -m openpilot.selfdrive.test.process_replay.preap_offcar --fixture
+python -m openpilot.selfdrive.test.process_replay.preap_offcar <route-or-rlog>
+```
+
+See `docs-nap/off-car-replay.md`.
