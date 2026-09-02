@@ -2,6 +2,7 @@
 """Pack tesla_preap SimulatedCar CAN and parse it through the Pre-AP interface."""
 import time
 
+from opendbc.can.parser import CANParser
 from opendbc.car import CanData
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.structs import CarState
@@ -92,6 +93,13 @@ class TestSimulatedCarPreap:
     state = _state(radar_points=[(40.0, 0.5, -2.0)])
     msgs = self.car.build_can_messages(state)
     assert _by_addr(msgs, 0x310)
+    cp = CANParser("tesla_radar_bosch_generated", [("RadarPoint0_A", 0), ("RadarPoint0_B", 0)], 1)
+    cp.update([(0, [(addr, dat, bus) for addr, dat, bus in msgs])])
+    point = cp.vl["RadarPoint0_A"]
+    assert point["Tracked"] == 1
+    assert abs(point["LongDist"] - 40.0) < 0.5
+    assert abs(point["LatDist"] - 0.5) < 0.2
+    assert abs(point["LongSpeed"] - (-2.0)) < 0.2
 
   def test_carstate_update_drive_closed_doors(self):
     CarInterface = interfaces[PREAP_FINGERPRINT]

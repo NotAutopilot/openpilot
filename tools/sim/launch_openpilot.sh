@@ -18,6 +18,13 @@ OPENPILOT_DIR="$( cd "$SCRIPT_DIR/../.." >/dev/null && pwd )"
 export BASEDIR="${BASEDIR:-$OPENPILOT_DIR}"
 export PYTHONPATH="${BASEDIR}${PYTHONPATH:+:$PYTHONPATH}"
 
-python3 -c "from openpilot.tools.sim.lib.preap_params import configure_preap_sim; configure_preap_sim()"
+# System python3 has no metadrive (ModuleNotFoundError). Use the worktree venv.
+if [[ -x "$BASEDIR/.venv/bin/python" ]]; then
+  PYTHON="$BASEDIR/.venv/bin/python"
+else
+  PYTHON="python3"
+fi
 
-cd "$BASEDIR/system/manager" && exec ./manager.py
+"$PYTHON" -c "from openpilot.tools.sim.lib.preap_params import configure_preap_sim; configure_preap_sim()"
+
+cd "$BASEDIR/system/manager" && exec "$PYTHON" ./manager.py

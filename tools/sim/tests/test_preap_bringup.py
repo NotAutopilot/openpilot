@@ -3,6 +3,8 @@ import os
 import subprocess
 import time
 
+import pytest
+
 from cereal import messaging
 from openpilot.common.basedir import BASEDIR
 from openpilot.tools.sim.lib.preap_params import PREAP_FINGERPRINT, PREAP_VIN
@@ -79,7 +81,9 @@ def test_launch_brings_up_selfdrived():
 
 
 def test_metadrive_bridge_starts():
-  """Physics MetaDrive (no cameras) from this worktree."""
+  """Live MetaDrive needs a GPU desktop. This VPS is PlantBridge-only."""
+  if not os.environ.get("DISPLAY"):
+    pytest.skip("this VPS is PlantBridge-only; MetaDrive needs a GPU desktop")
   assert os.path.isfile(PLANT)
   queue, proc, bridge = create_bridge(False, False, plant=False)
   try:

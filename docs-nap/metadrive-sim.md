@@ -15,16 +15,9 @@ From the repo root, venv active:
 
 `--plant` is the Pre-AP CAN plant without MetaDrive. `run_bridge.py` falls back to plant if `metadrive` is not installed.
 
-On this VPS MetaDrive physics runs (`create_bridge(plant=False)`). RGB cameras do not: forked panda3d dies in simplepbr (`AttributeError: 'NoneType' object has no attribute 'set_shader'`, EGL DRI3 / `/dev/dri/card1` permission denied). Cameras need `METADRIVE_CAMERAS=1` and a working GL context in the same process (e.g. `xvfb-run` of a single-process smoke test). comma-minimal traffic spawn also lacks `render_vehicle`, so density stays 0; SimulatedCar packs one ego-relative Bosch lead at 40 m.
+This VPS is PlantBridge-only. `DISPLAY` is unset (headless). MetaDrive needs a GPU desktop. The worktree `.venv` imports `metadrive` after `uv pip install --python .venv/bin/python "metadrive-simulator @ git+https://github.com/commaai/metadrive.git@minimal"`; system `python3` raises `ModuleNotFoundError: No module named 'metadrive'`. `launch_openpilot.sh` must use that venv python. Do not retry live `create_bridge(plant=False)` here. Use `./tools/sim/run_bridge.py --plant --no-keyboard`.
 
 Headless boxes have no DISPLAY, so `launch_openpilot.sh` blocks `ui`.
-
-With MetaDrive installed and a display:
-
-```bash
-./tools/sim/launch_openpilot.sh
-./tools/sim/run_bridge.py
-```
 
 `launch_openpilot.sh` sets `FINGERPRINT=TESLA_MODEL_S_PREAP`, `SKIP_FW_QUERY=1`, `NOBOARD=1`, `SIMULATION=1`, and writes:
 
@@ -32,7 +25,7 @@ With MetaDrive installed and a display:
 - `NAPPedalEnabled=True` with Jack's pedal calib (not the defaults that chatter `gasPressed`)
 - `NAPRadarEnabled=True`
 
-First milestone is process bring-up. Radar tracks from MetaDrive objects come after `selfdrived` is alive.
+First milestone is process bring-up. Radar tracks from MetaDrive objects wait for a GPU desktop.
 
 ## What SimulatedCar packs
 
@@ -51,7 +44,7 @@ First milestone is process bring-up. Radar tracks from MetaDrive objects come af
 | `0x045` | `STW_ACTN_RQ` | Tesla stalk (`SpdCtrlLvr_Stat`) |
 | `0x552` | `GAS_SENSOR` | pedal feedback; rest raw 470 so panda `gas_pressed` stays false |
 | `0x301` | `TeslaRadarSguInfo` | HWFail/SGUFail/dirty = 0 |
-| `0x310+` | `RadarPointN_A/B` | empty tracks until sim objects are wired |
+| `0x310+` | `RadarPointN_A/B` | empty tracks until a GPU desktop can spawn sim objects |
 
 `0x551` is openpilot TX (`GAS_COMMAND`), not plant TX. `enableLongControl` is FSM state from a MAIN double-pull, not a CAN field.
 
@@ -82,6 +75,6 @@ The full MetaDrive loop (`tools/sim/tests/test_metadrive_bridge.py`) is slow and
 
 ## Later
 
-- Fill `SimulatorState.radar_points` from MetaDrive objects (`d_rel`, `y_rel`, `v_rel`) into Bosch slots
-- Optional traffic (`traffic_density` is 0 today because it is expensive)
+- Live MetaDrive on a GPU desktop (not this VPS)
+- Fill `SimulatorState.radar_points` from MetaDrive objects into Bosch slots
 - Card/0x551 decode on the replay harness is still a separate path
