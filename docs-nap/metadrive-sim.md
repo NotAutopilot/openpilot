@@ -13,7 +13,11 @@ From the repo root, venv active:
 ./tools/sim/run_bridge.py --plant --no-keyboard
 ```
 
-`--plant` is the Pre-AP CAN plant without MetaDrive (no GPU). `run_bridge.py` also falls back to plant if `metadrive` is not installed. Headless boxes have no DISPLAY, so `launch_openpilot.sh` blocks `ui`.
+`--plant` is the Pre-AP CAN plant without MetaDrive. `run_bridge.py` falls back to plant if `metadrive` is not installed.
+
+On this VPS MetaDrive physics runs (`create_bridge(plant=False)`). RGB cameras do not: forked panda3d dies in simplepbr (`AttributeError: 'NoneType' object has no attribute 'set_shader'`, EGL DRI3 / `/dev/dri/card1` permission denied). Cameras need `METADRIVE_CAMERAS=1` and a working GL context in the same process (e.g. `xvfb-run` of a single-process smoke test). comma-minimal traffic spawn also lacks `render_vehicle`, so density stays 0; SimulatedCar packs one ego-relative Bosch lead at 40 m.
+
+Headless boxes have no DISPLAY, so `launch_openpilot.sh` blocks `ui`.
 
 With MetaDrive installed and a display:
 

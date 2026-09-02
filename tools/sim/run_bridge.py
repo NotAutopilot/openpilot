@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import os
 import sys
 
 from typing import Any
@@ -11,6 +12,9 @@ def create_bridge(dual_camera, high_quality, plant=False):
 
   if not plant:
     try:
+      if os.environ.get("METADRIVE_CAMERAS") == "1":
+        from openpilot.tools.sim.bridge.metadrive.metadrive_process import ensure_display
+        ensure_display()
       from openpilot.tools.sim.bridge.metadrive.metadrive_bridge import MetaDriveBridge
       simulator_bridge = MetaDriveBridge(dual_camera, high_quality)
     except ImportError:

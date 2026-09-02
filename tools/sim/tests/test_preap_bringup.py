@@ -76,3 +76,24 @@ def test_launch_brings_up_selfdrived():
       manager.kill()
     if queue is not None:
       queue.close()
+
+
+def test_metadrive_bridge_starts():
+  """Physics MetaDrive (no cameras) from this worktree."""
+  assert os.path.isfile(PLANT)
+  queue, proc, bridge = create_bridge(False, False, plant=False)
+  try:
+    assert type(bridge).__name__ == "MetaDriveBridge"
+    deadline = time.monotonic() + 25
+    while not bridge.started.value and time.monotonic() < deadline:
+      if proc.exitcode is not None:
+        break
+      time.sleep(0.1)
+    assert proc.exitcode is None
+    assert bridge.started.value
+  finally:
+    bridge.shutdown()
+    proc.join(timeout=8)
+    if proc.is_alive():
+      proc.terminate()
+    queue.close()

@@ -1,4 +1,6 @@
 import math
+import os
+import subprocess
 import time
 import numpy as np
 
@@ -21,7 +23,31 @@ C3_HPR = Vec3(0, 0,0)
 
 
 metadrive_simulation_state = namedtuple("metadrive_simulation_state", ["running", "done", "done_info"])
-metadrive_vehicle_state = namedtuple("metadrive_vehicle_state", ["velocity", "position", "bearing", "steering_angle"])
+metadrive_vehicle_state = namedtuple(
+  "metadrive_vehicle_state",
+  ["velocity", "position", "bearing", "steering_angle", "radar_points"],
+)
+
+
+def ensure_display():
+  """Headless boxes have no DISPLAY; panda3d cameras need an X server."""
+  if os.environ.get("DISPLAY"):
+    return None
+  for n in range(110, 140):
+    lock = f"/tmp/.X{n}-lock"
+    if os.path.exists(lock):
+      continue
+    proc = subprocess.Popen(
+      ["Xvfb", f":{n}", "-screen", "0", "1920x1080x24", "-ac", "+extension", "GLX"],
+      stdout=subprocess.DEVNULL,
+      stderr=subprocess.DEVNULL,
+    )
+    time.sleep(0.4)
+    if proc.poll() is None:
+      os.environ["DISPLAY"] = f":{n}"
+      return proc
+    proc.kill()
+  raise RuntimeError("could not start Xvfb for MetaDrive")
 
 def apply_metadrive_patches(arrive_dest_done=True):
   # By default, metadrive won't try to use cuda images unless it's used as a sensor for vehicles, so patch that in
@@ -48,9 +74,40 @@ def apply_metadrive_patches(arrive_dest_done=True):
   if not arrive_dest_done:
     MetaDriveEnv._is_arrive_destination = arrive_destination_patch
 
+def radar_points_from_env(env):
+  ego = env.vehicle
+  heading = float(ego.heading_theta)
+  cos_h, sin_h = math.cos(heading), math.sin(heading)
+  ego_vx, ego_vy = float(ego.velocity[0]), float(ego.velocity[1])
+  traffic = getattr(env.engine, "traffic_manager", None)
+  others = []
+  if traffic is not None:
+    others = list(getattr(traffic, "_traffic_vehicles", None) or [])
+  points = []
+  for other in others:
+    if other is ego:
+      continue
+    dx = float(other.position[0] - ego.position[0])
+    dy = float(other.position[1] - ego.position[1])
+    d_rel = dx * cos_h + dy * sin_h
+    y_rel = -dx * sin_h + dy * cos_h
+    if d_rel <= 1.0 or d_rel > 200.0:
+      continue
+    ovx, ovy = float(other.velocity[0]), float(other.velocity[1])
+    v_rel = (ovx - ego_vx) * cos_h + (ovy - ego_vy) * sin_h
+    points.append((d_rel, y_rel, v_rel))
+  points.sort(key=lambda p: p[0])
+  # comma-minimal cannot spawn traffic (render_vehicle missing). Keep one
+  # ego-relative lead so Bosch packing has a track while physics runs.
+  if not points:
+    points = [(40.0, 0.0, 0.0)]
+  return points[:8]
+
+
 def metadrive_process(dual_camera: bool, config: dict, camera_array, wide_camera_array, image_lock,
                       controls_recv: Connection, simulation_state_send: Connection, vehicle_state_send: Connection,
                       exit_event, op_engaged, test_duration, test_run):
+  xvfb = ensure_display()
   arrive_dest_done = config.pop("arrive_dest_done", True)
   apply_metadrive_patches(arrive_dest_done)
 
@@ -60,7 +117,24 @@ def metadrive_process(dual_camera: bool, config: dict, camera_array, wide_camera
     wide_road_image = np.frombuffer(wide_camera_array.get_obj(), dtype=np.uint8).reshape((H, W, 3))
 
   env = MetaDriveEnv(config)
+  try:
+    _metadrive_loop(dual_camera, env, camera_array, wide_camera_array, image_lock,
+                    controls_recv, simulation_state_send, vehicle_state_send,
+                    exit_event, op_engaged, test_duration, test_run, road_image,
+                    wide_road_image if dual_camera else None)
+  finally:
+    try:
+      env.close()
+    except Exception:
+      pass
+    if xvfb is not None:
+      xvfb.terminate()
 
+
+def _metadrive_loop(dual_camera, env, camera_array, wide_camera_array, image_lock,
+                    controls_recv, simulation_state_send, vehicle_state_send,
+                    exit_event, op_engaged, test_duration, test_run, road_image,
+                    wide_road_image):
   def get_current_lane_info(vehicle):
     _, lane_info, on_lane = vehicle.navigation._get_current_lane(vehicle)
     lane_idx = lane_info[2] if lane_info is not None else None
@@ -103,7 +177,8 @@ def metadrive_process(dual_camera: bool, config: dict, camera_array, wide_camera
       velocity=vec3(x=float(env.vehicle.velocity[0]), y=float(env.vehicle.velocity[1]), z=0),
       position=env.vehicle.position,
       bearing=float(math.degrees(env.vehicle.heading_theta)),
-      steering_angle=env.vehicle.steering * env.vehicle.MAX_STEERING
+      steering_angle=env.vehicle.steering * env.vehicle.MAX_STEERING,
+      radar_points=radar_points_from_env(env),
     )
     vehicle_state_send.send(vehicle_state)
 
@@ -146,9 +221,10 @@ def metadrive_process(dual_camera: bool, config: dict, camera_array, wide_camera
         )
         simulation_state_send.send(simulation_state)
 
-      if dual_camera:
-        wide_road_image[...] = get_cam_as_rgb("rgb_wide")
-      road_image[...] = get_cam_as_rgb("rgb_road")
+      if "rgb_road" in env.engine.sensors:
+        if dual_camera:
+          wide_road_image[...] = get_cam_as_rgb("rgb_wide")
+        road_image[...] = get_cam_as_rgb("rgb_road")
       image_lock.release()
 
     rk.keep_time()

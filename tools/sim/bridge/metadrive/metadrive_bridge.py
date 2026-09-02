@@ -1,4 +1,5 @@
 import math
+import os
 from multiprocessing import Queue
 
 from metadrive.component.sensors.base_camera import _cuda_enable
@@ -58,30 +59,31 @@ class MetaDriveBridge(SimulatorBridge):
     self.test_duration = test_duration if self.test_run else math.inf
 
   def spawn_world(self, queue: Queue):
-    sensors = {
-      "rgb_road": (RGBCameraRoad, W, H, )
-    }
-
-    if self.dual_camera:
-      sensors["rgb_wide"] = (RGBCameraWide, W, H)
+    # Cameras need a GL context in the same process as panda3d init.
+    # Forked children on this VPS die in simplepbr (EGL DRI3 / set_shader None).
+    use_cameras = os.environ.get("METADRIVE_CAMERAS") == "1"
+    sensors = {}
+    vehicle_config = dict(enable_reverse=False, render_vehicle=False)
+    if use_cameras:
+      sensors["rgb_road"] = (RGBCameraRoad, W, H)
+      if self.dual_camera:
+        sensors["rgb_wide"] = (RGBCameraWide, W, H)
+      vehicle_config["image_source"] = "rgb_road"
 
     config = dict(
       use_render=self.should_render,
-      vehicle_config=dict(
-        enable_reverse=False,
-        render_vehicle=False,
-        image_source="rgb_road",
-      ),
+      vehicle_config=vehicle_config,
       sensors=sensors,
-      image_on_cuda=_cuda_enable,
-      image_observation=True,
+      image_on_cuda=_cuda_enable if use_cameras else False,
+      image_observation=use_cameras,
       interface_panel=[],
       out_of_route_done=False,
       on_continuous_line_done=False,
       crash_vehicle_done=False,
       crash_object_done=False,
       arrive_dest_done=False,
-      traffic_density=0.0, # traffic is incredibly expensive
+      # comma-minimal traffic spawn omits render_vehicle and crashes BaseVehicle
+      traffic_density=0.0,
       map_config=create_map(),
       decision_repeat=1,
       physics_world_step_size=self.TICKS_PER_FRAME/100,

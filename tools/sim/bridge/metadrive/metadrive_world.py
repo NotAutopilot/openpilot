@@ -50,7 +50,9 @@ class MetaDriveWorld(World):
     print("---- Spawning Metadrive world, this might take awhile ----")
     print("----------------------------------------------------------")
 
-    self.vehicle_last_pos = self.vehicle_state_recv.recv().position # wait for a state message to ensure metadrive is launched
+    if not self.vehicle_state_recv.poll(60):
+      raise RuntimeError("MetaDrive process did not send vehicle state")
+    self.vehicle_last_pos = self.vehicle_state_recv.recv().position
     self.status_q.put(QueueMessage(QueueMessageType.START_STATUS, "started"))
 
     self.steer_ratio = 15
@@ -89,6 +91,7 @@ class MetaDriveWorld(World):
       state.bearing = md_vehicle.bearing
       state.steering_angle = md_vehicle.steering_angle
       state.gps.from_xy(curr_pos)
+      state.radar_points = list(md_vehicle.radar_points or [])
       state.valid = True
 
       is_engaged = state.is_engaged
