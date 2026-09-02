@@ -10,6 +10,15 @@ From the repo root, venv active:
 
 ```bash
 ./tools/sim/launch_openpilot.sh
+./tools/sim/run_bridge.py --plant --no-keyboard
+```
+
+`--plant` is the Pre-AP CAN plant without MetaDrive (no GPU). `run_bridge.py` also falls back to plant if `metadrive` is not installed. Headless boxes have no DISPLAY, so `launch_openpilot.sh` blocks `ui`.
+
+With MetaDrive installed and a display:
+
+```bash
+./tools/sim/launch_openpilot.sh
 ./tools/sim/run_bridge.py
 ```
 

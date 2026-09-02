@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Pack tesla_preap SimulatedCar CAN and parse it through the Pre-AP interface."""
+import time
+
 from opendbc.car import CanData
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.structs import CarState
 from opendbc.car.tesla.values import CruiseButtons
 from openpilot.tools.sim.lib.common import SimulatorState, vec3
+from openpilot.tools.sim.lib.plant_world import CRUISE_SPEED_MS, PlantWorld
 from openpilot.tools.sim.lib.preap_params import PREAP_FINGERPRINT, PREAP_VIN, configure_preap_sim
 from openpilot.tools.sim.lib.simulated_car import GAS_SENSOR_ADDR, PEDAL_REST_RAW, SimulatedCar
 
@@ -106,3 +109,29 @@ class TestSimulatedCarPreap:
     assert abs(CS.steeringAngleDeg - 7.0) < 0.2
     assert CS.gasPressed is False
     assert CS.enableLongControl is False
+
+  def test_plant_world_makes_can_valid(self):
+    world = PlantWorld()
+    state = SimulatorState()
+    world.read_sensors(state)
+    assert state.valid
+    assert abs(state.speed - CRUISE_SPEED_MS) < 1e-6
+    msgs = self.car.build_can_messages(state)
+    assert msgs
+    assert 0x155 in {addr for addr, _dat, _bus in msgs}
+
+  def test_create_bridge_plant_skips_metadrive(self):
+    from openpilot.tools.sim.run_bridge import create_bridge
+    queue, proc, bridge = create_bridge(False, False, plant=True)
+    try:
+      assert type(bridge).__name__ == "PlantBridge"
+      deadline = time.monotonic() + 10
+      while not bridge.started.value and time.monotonic() < deadline:
+        time.sleep(0.05)
+      assert bridge.started.value
+    finally:
+      bridge.shutdown()
+      proc.join(timeout=5)
+      if proc.is_alive():
+        proc.terminate()
+      queue.close()

@@ -24,6 +24,10 @@ def configure_preap_sim():
   os.environ["VIN"] = PREAP_VIN
 
   params = Params()
+  # Fresh OPENPILOT_PREFIX params have no DongleId; manager_init would hang in
+  # register() talking to comma. Sim is not a registered device.
+  if not params.get("DongleId"):
+    params.put("DongleId", "UnregisteredDevice", block=True)
   params.put_bool("DisengageOnAccelerator", False, block=True)
   params.put_bool("NAPForcePreAP", True, block=True)
   params.put_bool("NAPPedalEnabled", True, block=True)

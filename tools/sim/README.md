@@ -14,6 +14,12 @@ First, start openpilot.
 ./tools/sim/launch_openpilot.sh
 ```
 
+If MetaDrive is not installed (or you only need selfdrived), the bridge falls back to a CAN plant:
+
+``` bash
+./run_bridge.py --plant --no-keyboard
+```
+
 ## Bridge usage
 ```
 $ ./run_bridge.py -h

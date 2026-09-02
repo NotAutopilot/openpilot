@@ -93,8 +93,15 @@ def manager_init() -> None:
                        dirty=build_metadata.openpilot.is_dirty,
                        device=HARDWARE.get_device_type())
 
-  # preimport all processes
+  # preimport processes that this launch will actually run. BLOCK'd names
+  # (sim/CI often include ui) still get imported here otherwise, and raylib
+  # aborts the whole manager when DISPLAY is unset.
+  blocked = {x for x in os.getenv("BLOCK", "").split(",") if x}
+  if os.getenv("NOBOARD") is not None:
+    blocked.add("pandad")
   for p in managed_processes.values():
+    if p.name in blocked:
+      continue
     p.prepare()
 
 

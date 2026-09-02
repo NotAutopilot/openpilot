@@ -197,6 +197,7 @@ class SimulatedCar:
     dat.pandaStates[0] = {
       'ignitionLine': simulator_state.ignition,
       'pandaType': "blackPanda",
+      'harnessStatus': 'normal',
       'controlsAllowed': True,
       'safetyModel': 'teslaPreap',
       'alternativeExperience': self.sm["carParams"].alternativeExperience,

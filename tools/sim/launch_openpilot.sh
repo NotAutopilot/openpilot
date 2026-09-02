@@ -8,7 +8,7 @@ export FINGERPRINT="TESLA_MODEL_S_PREAP"
 export VIN="5YJSA1H13EFP20460"
 
 export BLOCK="${BLOCK},camerad,loggerd,encoderd,micd,logmessaged,manage_athenad"
-if [[ "$CI" ]]; then
+if [[ "$CI" ]] || [[ -z "${DISPLAY:-}" ]]; then
   # TODO: offscreen UI should work
   export BLOCK="${BLOCK},ui"
 fi

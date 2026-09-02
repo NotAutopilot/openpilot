@@ -99,6 +99,9 @@ class Car:
           cached_params = _cached_params
 
       self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, cached_params)
+      env_vin = os.environ.get("VIN", "")
+      if len(env_vin) == 17:
+        self.CI.CP.carVin = env_vin
       self.RI = interfaces[self.CI.CP.carFingerprint].RadarInterface(self.CI.CP)
       self.CP = self.CI.CP
 

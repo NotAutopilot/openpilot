@@ -101,6 +101,7 @@ Ignition: {self.simulator_state.ignition} Engaged: {self.simulator_state.is_enga
 
   def _run(self, q: Queue):
     self.world = self.spawn_world(q)
+    self.world.read_sensors(self.simulator_state)
 
     self.simulated_car = SimulatedCar()
     self.simulated_sensors = SimulatedSensors(self.dual_camera)
