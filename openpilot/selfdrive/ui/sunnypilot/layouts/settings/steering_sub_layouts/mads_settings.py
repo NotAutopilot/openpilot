@@ -26,7 +26,8 @@ MADS_STEERING_MODE_OPTIONS = [
 
 MADS_ENGAGEMENT_MODE_OPTIONS = [
   (tr("Independent"), tr_noop("Independent: The first stalk pull requests ALC. The second pull requests cruise. ALC can remain active if cruise exits.")),
-  (tr("Cruise Coupled"), tr_noop("Cruise Coupled: The first stalk pull is ignored. The second pull requests ALC and cruise together. Cancel or brake disengages both.")),
+  (tr("Cruise Coupled"), tr_noop(
+    "Cruise Coupled: The first stalk pull is ignored. The second pull requests ALC and cruise together. Cancel or brake disengages both.")),
   (tr("Longitudinal Only"), tr_noop("Longitudinal Only: Stalk pulls request cruise only. ALC stays off.")),
 ]
 

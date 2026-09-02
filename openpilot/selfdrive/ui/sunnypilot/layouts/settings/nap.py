@@ -1,4 +1,6 @@
 """NAP sidebar for sunnypilot. Same groups as nap-dev, native Sunny widgets."""
+from collections.abc import Callable
+
 import pyray as rl
 
 from openpilot.common.params import Params
@@ -309,16 +311,21 @@ class NAPLayout(Widget):
     )
     self._radar_items.extend([self._tool_calibrate_radar, self._tool_diagnose_radar, self._tool_test_radar])
 
-  def _add_toggle(self, param_key, title, description, enabled=None, needs_reboot=False, dest=None):
+  def _add_toggle(self, param_key, title, description, enabled: bool | Callable[[], bool] | None = None,
+                  needs_reboot=False, dest=None):
     def on_toggle(state, k=param_key):
       self._params.put_bool(k, state)
       if needs_reboot:
         self._show_reboot_modal()
 
-    kwargs = {"param": param_key, "callback": on_toggle}
-    if enabled is not None:
-      kwargs["enabled"] = enabled
-    item = toggle_item_sp(title, description, initial_state=self._params.get_bool(param_key), **kwargs)
+    item = toggle_item_sp(
+      title,
+      description,
+      initial_state=self._params.get_bool(param_key),
+      callback=on_toggle,
+      enabled=True if enabled is None else enabled,
+      param=param_key,
+    )
     self._toggle_map[param_key] = item
     (dest if dest is not None else self._main_items).append(item)
 

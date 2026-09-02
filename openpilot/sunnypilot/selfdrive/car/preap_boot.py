@@ -135,7 +135,6 @@ def snapshot_param_list(params) -> list[dict[str, Any]]:
     "NAPRadarDonorVin",
     "NAPRadarPosition",
     "NAPRadarEpasType",
-    "NAPAdaptiveAccel",
     "NAPRadarHud",
     "NAPRadarIgnoreHwFail",
     "NAPFollowDistance",
