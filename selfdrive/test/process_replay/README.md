@@ -93,12 +93,13 @@ Use `custom_params` to seed `Params` with typed values. `get_custom_params_from_
 
 ## Pre-AP off-car harness
 
-Invariant checks on Jack's Tesla Pre-AP routes (chime edges, gas override must not chime, `enableLongControl`, Bosch radar if the log has it) live in `preap_offcar.py`. That runner calls `replay_process_with_name` and does not compare against process-replay reference logs.
+Invariant checks on Jack's Tesla Pre-AP routes live in `selfdrive/selfdrived/tests/test_preap_chimes.py`. That test replays `selfdrived` and `radard` with `TESLA_MODEL_S_PREAP` and `DisengageOnAccelerator=False`. It is not the upstream TESLA process_replay whitelist (Model Y; skips selfdrived/radard).
 
 ```bash
+python -m pytest selfdrive/selfdrived/tests/test_preap_chimes.py -q
 python -m openpilot.selfdrive.test.process_replay.preap_offcar --list
 python -m openpilot.selfdrive.test.process_replay.preap_offcar --fixture
 python -m openpilot.selfdrive.test.process_replay.preap_offcar <route-or-rlog>
 ```
 
-See `docs-nap/off-car-replay.md`.
+See `docs-nap/off-car-replay.md`. Pinned rlogs are in `selfdrive/selfdrived/tests/preap_routes.py`.

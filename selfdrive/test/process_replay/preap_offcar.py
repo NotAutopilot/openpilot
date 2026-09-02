@@ -13,6 +13,13 @@ import argparse
 import sys
 from pathlib import Path
 
+from openpilot.selfdrive.selfdrived.tests.preap_routes import (
+  CUSTOM_PARAMS,
+  FINGERPRINT,
+  REPLAY_PROCS,
+  assert_replay_contract,
+  load_rlog,
+)
 from openpilot.selfdrive.test.process_replay.preap_log_contracts import (
   OffcarReport,
   evaluate_contracts,
@@ -28,27 +35,19 @@ from openpilot.selfdrive.test.process_replay.preap_route_index import (
   resolve_source,
 )
 from openpilot.selfdrive.test.process_replay.process_replay import replay_process_with_name
-from openpilot.selfdrive.test.process_replay.test_processes import NAP_PREAP_NO_PEDAL_PARAMS, NAP_PREAP_PEDAL_PARAMS
-from openpilot.tools.lib.logreader import LogReader
-
-DEFAULT_PROCS = ("card", "selfdrived", "radard")
-FULL_PROCS = ("card", "controlsd", "selfdrived", "radard", "plannerd", "lagd")
-FINGERPRINT = "TESLA_MODEL_S_PREAP"
 
 
 def main(argv: list[str] | None = None) -> int:
   parser = argparse.ArgumentParser(
     description="Replay Jack Pre-AP logs off-car and assert pedal/chime/radar contracts.",
   )
-  parser.add_argument("query", nargs="?", help="route, segment, log id, or path to rlog/qlog")
-  parser.add_argument("--list", action="store_true", help=f"list indexed {JACK_DONGLE} segments and exit")
+  parser.add_argument("query", nargs="?", help="route, segment, log id, or path to rlog")
+  parser.add_argument("--list", action="store_true", help=f"list indexed {JACK_DONGLE} rlog segments and exit")
   parser.add_argument("--fixture", action="store_true", help="run assertions on the synthetic CI fixture")
   parser.add_argument("--scan-only", action="store_true", help="evaluate the recorded log without process_replay")
-  parser.add_argument("--full", action="store_true", help=f"replay {', '.join(FULL_PROCS)}")
-  parser.add_argument("--procs", default=None, help="comma-separated process_replay names (default: card,selfdrived,radard)")
+  parser.add_argument("--procs", default=None, help=f"comma-separated process names (default: {','.join(REPLAY_PROCS)})")
   parser.add_argument("--data-dir", action="append", default=[], help="extra search root (repeatable)")
   parser.add_argument("--dongle", default=JACK_DONGLE, help="dongle filter for --list / resolve")
-  parser.add_argument("--qlog", action="store_true", help="prefer qlogs when both exist")
   args = parser.parse_args(argv)
 
   extra_roots = [Path(p).expanduser() for p in args.data_dir]
@@ -69,19 +68,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.error("provide a route/path, or use --list / --fixture")
 
   try:
-    segments = resolve_source(args.query, roots=roots, dongle=args.dongle, prefer="qlog" if args.qlog else "rlog")
+    segments = resolve_source(args.query, roots=roots, dongle=args.dongle, prefer="rlog")
   except RouteIndexError as exc:
     sys.stderr.write(f"{exc}\n")
     _print_drop_paths(roots)
     return 2
 
-  paths = [str(s.path) for s in segments]
-  source = segments[0].segment_name if len(segments) == 1 else f"{segments[0].route_name} ({len(segments)} segs)"
-  msgs = list(LogReader(paths if len(paths) > 1 else paths[0], sort_by_time=True))
+  rlogs = [s for s in segments if s.kind == "rlog"]
+  if not rlogs:
+    sys.stderr.write("rlogs only; qlogs drop 100Hz carState edges.\n")
+    return 2
+  source = rlogs[0].segment_name if len(rlogs) == 1 else f"{rlogs[0].route_name} ({len(rlogs)} segs)"
+  msgs = load_rlog(rlogs[0].path) if len(rlogs) == 1 else [m for s in rlogs for m in load_rlog(s.path)]
   if args.procs:
     procs = tuple(p.strip() for p in args.procs.split(",") if p.strip())
   else:
-    procs = FULL_PROCS if args.full else DEFAULT_PROCS
+    procs = REPLAY_PROCS
+  segments = rlogs
 
   report: OffcarReport
   if args.scan_only:
@@ -100,19 +103,14 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _replay_and_evaluate(msgs: list, *, source: str, procs: tuple[str, ...]) -> OffcarReport:
-  pedal_present = any(
-    int(frame.address) in (0x551, 0x552)
-    for msg in msgs if msg.which() == "can"
-    for frame in msg.can
-  )
-  custom_params = NAP_PREAP_PEDAL_PARAMS if pedal_present else NAP_PREAP_NO_PEDAL_PARAMS
+  assert_replay_contract()
   captured: dict[str, dict[str, str]] = {}
   try:
     outputs = replay_process_with_name(
       list(procs),
       msgs,
       fingerprint=FINGERPRINT,
-      custom_params=custom_params,
+      custom_params=CUSTOM_PARAMS,
       return_all_logs=True,
       captured_output_store=captured,
       disable_progress=False,
@@ -153,7 +151,7 @@ def _subs_hint(proc: str) -> tuple[str, ...]:
 
 
 def _print_index(roots, dongle: str) -> int:
-  segments = index_segments(roots, dongle=dongle)
+  segments = [s for s in index_segments(roots, dongle=dongle) if s.kind == "rlog"]
   sys.stdout.write(f"dongle {dongle}\n")
   sys.stdout.write("search roots:\n")
   for root in (roots if roots is not None else default_search_roots()):

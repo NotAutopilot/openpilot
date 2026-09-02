@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Literal
 
-from cereal import log as capnp_log
+from cereal import car, log as capnp_log
 
 from openpilot.selfdrive.selfdrived.preap_regen import PreAPChimeState, update_preap_chimes
 from openpilot.selfdrive.ui.radar.bosch_status import (
@@ -43,6 +43,8 @@ LONG_DISENGAGE = "pedalCruiseDisabled"
 LAT_ENGAGE = "pcmEnable"
 LAT_DISENGAGE = "pcmDisable"
 GAS_OVERRIDE = "gasPressedOverride"
+SOUND_DISENGAGE = "sound:disengage"
+AudibleAlert = car.CarControl.HUDControl.AudibleAlert
 
 
 @dataclass(frozen=True)
@@ -166,9 +168,15 @@ def evaluate_contracts(msgs: Iterable, *, source: str = "") -> OffcarReport:
       names = frozenset(str(e.name) for e in msg.onroadEvents)
       events.append((t, names))
     elif which == "selfdriveState":
+      names: set[str] = set()
       alert = str(msg.selfdriveState.alertType or "")
       if alert:
-        events.append((t, frozenset({alert.split("/", 1)[0]})))
+        names.add(alert.split("/", 1)[0])
+      sound = _enum_name(msg.selfdriveState.alertSound)
+      if sound and sound != "none":
+        names.add(f"sound:{sound}")
+      if names:
+        events.append((t, frozenset(names)))
     elif which == "liveTracks":
       live_track_frames += 1
       live_track_points += len(msg.liveTracks.points)
@@ -285,6 +293,14 @@ def synthetic_drive(*, override_emits_disengage: bool = False,
       for i, name in enumerate(event_names):
         packed[i].name = getattr(capnp_log.OnroadEvent.EventName, name)
       msgs.append(stamp(ev))
+      hud = _hud_for(event_names)
+      if hud is not None:
+        alert_type, sound_name = hud
+        ss_event = capnp_log.Event.new_message()
+        ss = ss_event.init("selfdriveState")
+        ss.alertType = alert_type
+        ss.alertSound = getattr(AudibleAlert, sound_name)
+        msgs.append(stamp(ss_event))
     if include_radar:
       tracks = capnp_log.Event.new_message()
       live = tracks.init("liveTracks")
@@ -304,6 +320,24 @@ def _signal(name: str, addr: int, counts: dict[int, int], buses: dict[int, set[i
 
 def _sgu_extra(hw_fail: int, sgu_fail: int, dirty: int) -> str:
   return f"HWFail={hw_fail} SGUFail={sgu_fail} dirty={dirty}"
+
+
+def _enum_name(value) -> str:
+  return str(value).rsplit(".", 1)[-1]
+
+
+def _hud_for(event_names: tuple[str, ...]) -> tuple[str, str] | None:
+  if LONG_DISENGAGE in event_names:
+    return f"{LONG_DISENGAGE}/permanent", "disengage"
+  if LONG_ENGAGE in event_names:
+    return f"{LONG_ENGAGE}/permanent", "engage"
+  if LAT_DISENGAGE in event_names:
+    return f"{LAT_DISENGAGE}/permanent", "disengage"
+  if LAT_ENGAGE in event_names:
+    return f"{LAT_ENGAGE}/permanent", "engage"
+  if GAS_OVERRIDE in event_names:
+    return f"{GAS_OVERRIDE}/override", "none"
+  return None
 
 
 def _le_bit(dat: bytes, index: int) -> bool:
@@ -350,8 +384,8 @@ def _lat_long_chime_checks(samples, events, expected, saw_long_field: bool) -> l
       f"{len(lat_eng)} cruise rising edges; no onroadEvents to compare (scan reconstructed via update_preap_chimes)",
     ))
   else:
-    checks.append(_edge_event_check("lat_engage_chime", lat_eng, events, LAT_ENGAGE, "cruiseState.enabled rising"))
-    checks.append(_edge_event_check("lat_disengage_chime", lat_dis, events, LAT_DISENGAGE, "cruiseState.enabled falling"))
+    checks.append(_edge_event_check("lat_engage_chime", lat_eng, events, LAT_ENGAGE, "cruiseState.enabled rising", sound="engage"))
+    checks.append(_edge_event_check("lat_disengage_chime", lat_dis, events, LAT_DISENGAGE, "cruiseState.enabled falling", sound="disengage"))
 
   if not saw_long_field:
     checks.append(CheckResult("long_engage_chime", "skip", "enableLongControl not on CarState"))
@@ -369,21 +403,32 @@ def _lat_long_chime_checks(samples, events, expected, saw_long_field: bool) -> l
     ))
     return checks
 
-  checks.append(_edge_event_check("long_engage_chime", long_eng, events, LONG_ENGAGE, "enableLongControl rising"))
-  checks.append(_edge_event_check("long_disengage_chime", long_dis, events, LONG_DISENGAGE, "enableLongControl falling"))
+  checks.append(_edge_event_check("long_engage_chime", long_eng, events, LONG_ENGAGE, "enableLongControl rising", sound="engage"))
+  checks.append(_edge_event_check("long_disengage_chime", long_dis, events, LONG_DISENGAGE, "enableLongControl falling", sound="disengage"))
   return checks
 
 
-def _edge_event_check(name: str, edges, events, event_name: str, label: str) -> CheckResult:
+def _edge_event_check(name: str, edges, events, event_name: str, label: str, sound: str | None = None) -> CheckResult:
   if not edges:
     return CheckResult(name, "skip", f"no {label} in this log")
   missing = []
+  wrong_sound = []
+  heard = []
+  opposite = "disengage" if sound == "engage" else "engage"
   for t, _ in edges:
-    if event_name not in _events_near(events, t):
+    near = _events_near(events, t)
+    if event_name not in near:
       missing.append(t)
+    if sound and f"sound:{opposite}" in near:
+      wrong_sound.append(t)
+    if sound and f"sound:{sound}" in near:
+      heard.append(t)
   if missing:
     return CheckResult(name, "fail", f"{len(edges)} {label}; {len(missing)} without {event_name}")
-  return CheckResult(name, "pass", f"{len(edges)} {label} with {event_name}")
+  if wrong_sound:
+    return CheckResult(name, "fail", f"{len(edges)} {label}; alertSound={opposite} on {len(wrong_sound)}")
+  extra = f" and alertSound={sound}" if heard else ""
+  return CheckResult(name, "pass", f"{len(edges)} {label} with {event_name}{extra}")
 
 
 def _gas_override_check(samples, events, expected, saw_long_field: bool) -> CheckResult:
@@ -399,7 +444,8 @@ def _gas_override_check(samples, events, expected, saw_long_field: bool) -> Chec
     started = gas and not prev_gas and prev_long and prev_lat
     if started:
       observed = _events_near(events, t) if events else frozenset()
-      overrides.append((t, long_on, exp[4], LONG_DISENGAGE in observed))
+      chimed = LONG_DISENGAGE in observed or SOUND_DISENGAGE in observed
+      overrides.append((t, long_on, exp[4], chimed))
     prev_gas, prev_long, prev_lat = gas, long_on, lat
   if not overrides:
     return CheckResult("gas_override_no_chime", "skip", "no gas press while lat+long engaged")
@@ -415,7 +461,7 @@ def _gas_override_check(samples, events, expected, saw_long_field: bool) -> Chec
   return CheckResult(
     "gas_override_no_chime",
     "pass",
-    f"{len(overrides)} gas presses while engaged; enableLongControl held; no {LONG_DISENGAGE}",
+    f"{len(overrides)} gas presses while engaged; enableLongControl held; no {LONG_DISENGAGE} / alertSound=disengage",
   )
 
 
