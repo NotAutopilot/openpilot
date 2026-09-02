@@ -31,6 +31,21 @@ source .venv/bin/activate
 scons -j$(sysctl -n hw.ncpu)
 ```
 
+## Device build
+
+On Comma hardware, scons defaults to `--minimal` (`TICI`, extras off). That
+build must still generate Tesla radar DBCs; they are not in git:
+
+- `opendbc_repo/opendbc/dbc/tesla_radar_bosch_generated.dbc`
+- `opendbc_repo/opendbc/dbc/tesla_radar_continental_generated.dbc`
+
+Source is `opendbc_repo/opendbc/dbc/generator/`. Do not turn on extras on
+device just to get these files (extras builds tests/tools/cabana). Check:
+
+```bash
+scons --minimal opendbc_generated_dbcs
+```
+
 ## CI build (Linux x86_64)
 
 Reproduces the GitHub Actions build locally:

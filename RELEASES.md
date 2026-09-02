@@ -1,3 +1,7 @@
+NAP 2026-09-02
+========================
+* Fix card crash on clean Comma install (Tesla radar DBC)
+
 Version 0.11.1 (2026-05-18)
 ========================
 * New driver monitoring model

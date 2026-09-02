@@ -231,19 +231,33 @@ Export('messaging')
 # Build other submodules
 SConscript(['panda/SConscript'])
 
-# Pytest collection loads libsafety and generated DBCs from the opendbc
-# tree. openpilot scons does not otherwise enter that repo.
+# Tesla radar DBCs are generated, not in git. TICI/device scons defaults
+# extras=False (--minimal), so this cannot live only behind extras.
+# extras still builds libsafety.so for pytest; do not enable extras on TICI.
+opendbc_generated_dbcs = env.Command(
+  target=[
+    File('#opendbc_repo/opendbc/dbc/tesla_radar_bosch_generated.dbc'),
+    File('#opendbc_repo/opendbc/dbc/tesla_radar_continental_generated.dbc'),
+  ],
+  source=[
+    File('#opendbc_repo/opendbc/dbc/generator/generator.py'),
+    File('#opendbc_repo/opendbc/dbc/generator/tesla/tesla_radar_bosch.py'),
+    File('#opendbc_repo/opendbc/dbc/generator/tesla/tesla_radar_continental.py'),
+    File('#opendbc_repo/opendbc/dbc/generator/tesla/_radar_common.py'),
+  ],
+  action='python3 ${SOURCES[0]}',
+)
+env.Alias('opendbc_generated_dbcs', opendbc_generated_dbcs)
+
 if GetOption('extras'):
   env.Command(
     target=[
       File('#opendbc_repo/opendbc/safety/tests/libsafety/libsafety.so'),
-      File('#opendbc_repo/opendbc/dbc/honda_bosch_radarless_generated.dbc'),
     ],
     source=[
       File('#opendbc_repo/SConstruct'),
       File('#opendbc_repo/opendbc/safety/tests/libsafety/safety.c'),
-      File('#opendbc_repo/opendbc/dbc/generator/generator.py'),
-    ],
+    ] + list(opendbc_generated_dbcs),
     action='scons -C opendbc_repo',
   )
 

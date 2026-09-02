@@ -39,6 +39,8 @@ All actual safety checks are active (steering angle/rate limits, hands-on diseng
 
 Bosch radar with GTW (GateWay ECU) emulation. The panda forwards chassis-bus traffic with a radar-position rewrite when `RADAR_BEHIND_NOSECONE` is set. The emulation hook is `rx_all` (not `rx`) because it must see every CAN frame, not just whitelisted ones.
 
+`tesla_radar_bosch_generated.dbc` and `tesla_radar_continental_generated.dbc` are produced by device scons from `opendbc_repo/opendbc/dbc/generator/` and are not in git. See [contributing.md](contributing.md).
+
 ### Comma Pedal (optional)
 
 Pedal interceptor on bus 0 or bus 2 (wiring varies). Interface flag `ENABLE_PEDAL` gates both TX whitelist (`0x551` GAS_COMMAND) and RX route (`0x552` GAS_SENSOR). Without the pedal, pre-AP uses stock Tesla CC via stalk-spoof engage/cancel — see [engagement.md](engagement.md).
