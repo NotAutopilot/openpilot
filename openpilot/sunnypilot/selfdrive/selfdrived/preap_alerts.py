@@ -14,7 +14,11 @@ from dataclasses import dataclass
 from openpilot.cereal import custom, log
 from opendbc.car.structs import car
 from opendbc.car.tesla.preap.boot import is_preap_platform
-from opendbc.car.tesla.preap.constants import PEDAL_FEEDBACK_TIMEOUT_STATE
+from opendbc.car.tesla.preap.constants import (
+  PEDAL_FEEDBACK_TIMEOUT_STATE,
+  PEDAL_RECOVERABLE_IDLE_STATES,
+  PEDAL_STATE_NO_FAULT,
+)
 from opendbc.car.tesla.preap.carcontroller import PedalAuthorityState
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 from openpilot.sunnypilot.selfdrive.selfdrived.events_base import Alert, EngagementAlert, Priority
@@ -34,6 +38,11 @@ ALERT_PEDAL_UNAVAILABLE_SUB = tr_noop("Stock cruise required")
 ALERT_REGEN = tr_noop("Regen Limit Reached")
 ALERT_REGEN_SUB = tr_noop("Press Brake to Slow Down")
 ALERT_RADAR_FAULT = tr_noop("Radar Error: Restart the Car")
+
+# Firmware STARTUP/TIMEOUT are the interceptor's command watchdog at rest, not
+# faults: the pedal sits there whenever 0x551 is not streaming and a disabled
+# zero command clears it back to NO_FAULT.
+_PEDAL_USABLE_STATES = frozenset((PEDAL_STATE_NO_FAULT, *PEDAL_RECOVERABLE_IDLE_STATES))
 
 
 @dataclass(frozen=True)
@@ -116,7 +125,7 @@ def preap_alert_inputs_from_snapshot(CP, CP_SP, CS_SP=None, *, radar_fault: bool
     pedal_present=pedal_present,
     pedal_calib_available=pedal_calib_available,
     pedal_calib_done=bool(pedal_calib_done),
-    pedal_available=not pedal_timeout and interceptor_state == 0,
+    pedal_available=not pedal_timeout and interceptor_state in _PEDAL_USABLE_STATES,
     pedal_timeout=bool(pedal_timeout),
     pedal_authority_state=int(authority_state),
     pedal_authority_failed=authority_failed,
@@ -137,7 +146,7 @@ def _pedal_unusable(inputs: PreAPAlertInputs) -> bool:
     or inputs.established_authority_lost
     or inputs.pedal_timeout
     or not inputs.pedal_available
-    or inputs.interceptor_state != 0
+    or inputs.interceptor_state not in _PEDAL_USABLE_STATES
   )
 
 

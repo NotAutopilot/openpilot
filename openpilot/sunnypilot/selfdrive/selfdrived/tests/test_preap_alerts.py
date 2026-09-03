@@ -78,6 +78,22 @@ def test_invalid_calibration_persists_until_healthy():
   assert select_preap_alerts(_inputs()) == ()
 
 
+def test_recoverable_idle_states_are_not_pedal_unavailable():
+  # Firmware STARTUP/TIMEOUT are the interceptor's command watchdog at rest
+  # (0x551 not streaming), cleared by a disabled zero command. Not faults.
+  from opendbc.car.tesla.preap.constants import (
+    PEDAL_STATE_FAULT_BAD_CHECKSUM, PEDAL_STATE_FAULT_INVALID, PEDAL_STATE_FAULT_SCE,
+    PEDAL_STATE_FAULT_SEND, PEDAL_STATE_FAULT_STARTUP, PEDAL_STATE_FAULT_TIMEOUT,
+  )
+
+  for state in (PEDAL_STATE_FAULT_STARTUP, PEDAL_STATE_FAULT_TIMEOUT):
+    assert select_preap_alerts(_inputs(interceptor_state=state)) == ()
+
+  for state in (PEDAL_STATE_FAULT_BAD_CHECKSUM, PEDAL_STATE_FAULT_SEND,
+                PEDAL_STATE_FAULT_SCE, PEDAL_STATE_FAULT_INVALID):
+    assert select_preap_alerts(_inputs(interceptor_state=state)) == (EventNameSP.pedalUnavailable,)
+
+
 def test_authority_loss_persists_while_failed():
   failed = _inputs(pedal_authority_failed=True, pedal_authority_state=int(PedalAuthorityState.FAILED))
   assert select_preap_alerts(failed) == (EventNameSP.pedalUnavailable,)
@@ -294,6 +310,29 @@ def test_from_snapshot_uses_published_feedback_timeout():
   assert timeout_inputs.pedal_timeout is True
   assert timeout_inputs.pedal_available is False
   assert select_preap_alerts(timeout_inputs) == (EventNameSP.pedalUnavailable,)
+
+
+def test_from_snapshot_idle_fault_timeout_is_available():
+  # Route 00000007--e81a6178d7: interceptor idles at STATE=5 (FAULT_TIMEOUT)
+  # with a rolling counter whenever 0x551 is not streaming. That is the normal
+  # rest state, not an unavailable pedal.
+  from types import SimpleNamespace
+  from opendbc.car.tesla.preap.constants import PEDAL_STATE_FAULT_TIMEOUT
+  from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
+  from openpilot.sunnypilot.selfdrive.selfdrived.preap_alerts import preap_alert_inputs_from_snapshot
+
+  CP = SimpleNamespace(carFingerprint="TESLA_MODEL_S_PREAP", radarUnavailable=False)
+  flags = int(TeslaFlagsSP.PREAP_PEDAL_PRESENT | TeslaFlagsSP.PREAP_PEDAL_CALIB_AVAILABLE)
+  CP_SP = SimpleNamespace(flags=flags)
+  cs_sp = SimpleNamespace(
+    pedalFeedbackState=PEDAL_STATE_FAULT_TIMEOUT, pedalFeedbackCounter=3,
+    pedalAuthorityState=int(PedalAuthorityState.INACTIVE), pedalAuthorityFailed=False,
+  )
+  inputs = preap_alert_inputs_from_snapshot(CP, CP_SP, cs_sp)
+  assert inputs.pedal_timeout is False
+  assert inputs.pedal_available is True
+  assert inputs.interceptor_state == PEDAL_STATE_FAULT_TIMEOUT
+  assert select_preap_alerts(inputs) == ()
 
 
 def test_from_snapshot_inactive_configured_pedal_timeout_alerts():
