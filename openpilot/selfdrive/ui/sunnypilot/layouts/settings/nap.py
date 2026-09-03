@@ -13,7 +13,7 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
 from openpilot.selfdrive.ui.radar.radar_view import RadarMonitorDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools import instructions as preap_instructions
-from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.runner import start_tool
+from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.runner import launch_on_device_runner
 from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.safety import ToolSafetyError
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.multilang import tr
@@ -459,7 +459,7 @@ class NAPLayout(Widget):
       if result != DialogResult.CONFIRM:
         return
       try:
-        start_tool(tool, confirmed=True)
+        launch_on_device_runner(tr(tool), tool, instructions[tool])
       except (ToolSafetyError, ValueError) as exc:
         gui_app.push_widget(alert_dialog(str(exc)))
 

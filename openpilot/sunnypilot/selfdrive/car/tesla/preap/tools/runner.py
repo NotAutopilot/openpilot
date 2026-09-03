@@ -1,8 +1,7 @@
 """Pre-AP production tool runner seam.
 
-Launches an approved tool module as a separate process after the user
-confirms on the instruction screen. Sets NAPScriptRunning so manager
-releases pandad. Development-only utilities are not registered here.
+UI launch opens run_script on the device display. Offroad is required.
+There is no exclusive NAPScriptRunning lock.
 """
 from __future__ import annotations
 
@@ -16,7 +15,6 @@ from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.safety import (
   DESTRUCTIVE_TOOLS,
-  ToolSafetyError,
   require_preap_tool_start,
   require_runtime_path,
 )
@@ -57,9 +55,6 @@ def start_tool(tool: str, *, confirmed: bool, params: Params | None = None) -> s
   require_preap_tool_start(params, tool=tool, confirmed=confirmed)
   module = approved_module(tool)
   params = params or Params()
-  if params.get_bool("NAPScriptRunning"):
-    raise ToolSafetyError("another Pre-AP tool is already running")
-  params.put_bool("NAPScriptRunning", True, block=True)
   if tool in ("flash_epas", "restore_epas") and confirmed:
     params.put_bool("NAPEpasRiskAccepted", True, block=True)
   env = os.environ.copy()
@@ -79,6 +74,27 @@ def start_tool(tool: str, *, confirmed: bool, params: Params | None = None) -> s
     raise
   threading.Thread(target=_reap_tool, args=(process, params), daemon=True).start()
   return process
+
+
+def launch_on_device_runner(title: str, tool: str, instructions: str,
+                            params: Params | None = None) -> subprocess.Popen:
+  """Take over the Comma screen with run_script. Do not spawn the tool on a pts."""
+  require_runtime_path()
+  params = params or Params()
+  require_preap_tool_start(params, tool=tool, confirmed=True)
+  module = approved_module(tool)
+  env = os.environ.copy()
+  env["PYTHONPATH"] = env.get("PYTHONPATH", BASEDIR)
+  log_path = "/tmp/nap_script_runner.log"
+  with open(log_path, "w") as log_file:
+    return subprocess.Popen(
+      [sys.executable, "-m", RUN_SCRIPT_MODULE, title, module, instructions],
+      cwd=BASEDIR,
+      start_new_session=True,
+      stdout=log_file,
+      stderr=log_file,
+      env=env,
+    )
 
 
 def stop_tool(process: subprocess.Popen, params: Params | None = None) -> None:

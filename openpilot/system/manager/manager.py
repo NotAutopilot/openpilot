@@ -160,14 +160,7 @@ def manager_thread() -> None:
     started_prev = started
     ignition_prev = ignition
 
-    # Production Pre-AP tools take exclusive panda/UDS access. Do not add the
-    # tools themselves as managed processes.
-    script_ignore = []
-    if params.get_bool("NAPScriptRunning"):
-      script_ignore = ["pandad", "card", "controlsd", "selfdrived", "plannerd", "radard",
-                       "calibrationd", "torqued", "locationd", "modeld", "dmonitoringmodeld"]
-
-    ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore + script_ignore)
+    ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore)
 
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)

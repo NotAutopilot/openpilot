@@ -19,7 +19,9 @@ from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.epas_integrity import 
   BootloaderIntegrityError,
   verify_bootloader,
 )
-from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.runner import APPROVED_TOOLS, approved_module, start_tool
+from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.runner import (
+  APPROVED_TOOLS, RUN_SCRIPT_MODULE, approved_module, launch_on_device_runner, start_tool,
+)
 from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.safety import (
   ToolSafetyError,
   require_confirmation,
@@ -166,12 +168,12 @@ def test_start_tool_flash_sets_risk_ack(monkeypatch):
     lambda **_kwargs: MagicMock(),
   )
   start_tool("flash_epas", confirmed=True, params=params)
-  assert params.get_bool("NAPScriptRunning") is True
+  assert params.get_bool("NAPScriptRunning") is False
   assert params.get_bool("NAPEpasRiskAccepted") is True
 
   params = FakeParams()
   start_tool("diagnose_radar", confirmed=True, params=params)
-  assert params.get_bool("NAPScriptRunning") is True
+  assert params.get_bool("NAPScriptRunning") is False
   assert params.get_bool("NAPEpasRiskAccepted") is False
 
 
@@ -209,13 +211,10 @@ def test_diagnose_radar_does_not_change_safety():
   panda.set_safety_mode.assert_not_called()
 
 
-def test_manager_ignore_list_stops_required_daemons():
+def test_manager_does_not_stop_daemons_for_script_flag():
   src = Path(__file__).resolve().parents[7] / "system" / "manager" / "manager.py"
   text = src.read_text()
-  assert 'params.get_bool("NAPScriptRunning")' in text
-  ignore_block = text.split('params.get_bool("NAPScriptRunning")', 1)[1].split("ensure_running", 1)[0]
-  for name in ("pandad", "card", "selfdrived", "plannerd", "radard"):
-    assert name in ignore_block
+  assert 'params.get_bool("NAPScriptRunning")' not in text
 
 
 def test_approved_tools_include_diagnose_radar():
@@ -233,7 +232,7 @@ def test_native_panel_keyboard_and_diagnose():
   assert "Diagnose Radar" in nap_text
   assert "Emergency Disable" in nap_text
   assert "NAPBrakeFactor" in nap_text or "BRAKE_FACTOR" in nap_text
-  assert "start_tool" in nap_text
+  assert "launch_on_device_runner" in nap_text
   assert "RadarMonitorDialog" in nap_text
 
 
@@ -481,7 +480,7 @@ def test_start_tool_clears_runtime_flags_when_child_exits(monkeypatch):
   monkeypatch.setattr(runner.threading, "Thread", FakeThread)
 
   assert runner.start_tool("flash_epas", confirmed=True, params=params) is process
-  assert params.get_bool("NAPScriptRunning") is True
+  assert params.get_bool("NAPScriptRunning") is False
   assert params.get_bool("NAPEpasRiskAccepted") is True
   assert captured["started"] is True
   assert captured["daemon"] is True
@@ -492,17 +491,16 @@ def test_start_tool_clears_runtime_flags_when_child_exits(monkeypatch):
   assert params.get_bool("NAPEpasRiskAccepted") is False
 
 
-def test_start_tool_rejects_concurrent_owner(monkeypatch):
+def test_start_tool_allows_second_launch_without_exclusive_lock(monkeypatch):
   from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools import runner
 
   params = FakeParams()
   params.put_bool("NAPScriptRunning", True)
-  monkeypatch.setattr(runner.subprocess, "Popen", MagicMock())
+  monkeypatch.setattr(runner.subprocess, "Popen", MagicMock(return_value=MagicMock()))
+  monkeypatch.setattr(runner.threading, "Thread", lambda **_kwargs: MagicMock())
 
-  with pytest.raises(ToolSafetyError, match="already running"):
-    runner.start_tool("diagnose_radar", confirmed=True, params=params)
-  runner.subprocess.Popen.assert_not_called()
-  assert params.get_bool("NAPScriptRunning") is True
+  assert runner.start_tool("diagnose_radar", confirmed=True, params=params) is not None
+  runner.subprocess.Popen.assert_called_once()
 
 
 def test_start_tool_constructs_default_params_for_native_ui(monkeypatch):
@@ -516,7 +514,44 @@ def test_start_tool_constructs_default_params_for_native_ui(monkeypatch):
   monkeypatch.setattr(runner.threading, "Thread", lambda **_kwargs: MagicMock())
 
   assert runner.start_tool("diagnose_radar", confirmed=True) is process
-  assert params.get_bool("NAPScriptRunning") is True
+  assert params.get_bool("NAPScriptRunning") is False
+
+
+def test_launch_on_device_runner_spawns_run_script_not_the_tool(monkeypatch):
+  captured = {}
+
+  def fake_popen(cmd, **kwargs):
+    captured["cmd"] = cmd
+    return MagicMock()
+
+  monkeypatch.setattr(
+    "openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.runner.subprocess.Popen",
+    fake_popen,
+  )
+  launch_on_device_runner("Pedal Calibration", "calibrate_pedal", "hold brake", params=FakeParams())
+  assert captured["cmd"][1:3] == ["-m", RUN_SCRIPT_MODULE]
+  assert captured["cmd"][3] == "Pedal Calibration"
+  assert captured["cmd"][4] == APPROVED_TOOLS["calibrate_pedal"]
+  assert "calibrate_pedal --confirm" not in " ".join(captured["cmd"])
+
+
+def test_spawn_approved_module_confirms_destructive_without_script_lock(monkeypatch):
+  from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.run_script import spawn_approved_module
+
+  captured = {}
+
+  def fake_popen(cmd, **kwargs):
+    captured["cmd"] = cmd
+    return MagicMock()
+
+  monkeypatch.setattr(
+    "openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.run_script.subprocess.Popen",
+    fake_popen,
+  )
+  params = FakeParams()
+  spawn_approved_module(APPROVED_TOOLS["calibrate_pedal"], params)
+  assert "--confirm" in captured["cmd"]
+  assert params.get_bool("NAPScriptRunning") is False
 
 
 def test_flash_parser_accepts_runner_confirmation_flag():

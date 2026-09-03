@@ -2,9 +2,8 @@
 """Production Pre-AP script runner.
 
 Launches an approved tool module after offroad + runtime-path checks.
-Sets NAPScriptRunning so manager releases pandad. Development-only
-utilities are rejected. Native Tesla settings use ConfirmDialog/start_tool;
-this runner remains the CLI/display process for the same approved tools.
+Takes over the Comma screen. Native Tesla settings spawn this runner
+instead of the tool on a pts. Development-only utilities are rejected.
 
 Usage:
     python -m openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.run_script \\
@@ -23,6 +22,7 @@ from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.runner import APPROVED_TOOLS
 from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.safety import (
+  DESTRUCTIVE_TOOLS,
   ToolSafetyError,
   require_offroad,
   require_runtime_path,
@@ -51,12 +51,17 @@ def prepare_run(module: str, params: Params | None = None) -> str:
 def spawn_approved_module(module: str, params: Params | None = None) -> subprocess.Popen:
   module = prepare_run(module, params)
   params = params or Params()
-  params.put_bool("NAPScriptRunning", True, block=True)
+  tool = next(name for name, path in APPROVED_TOOLS.items() if path == module)
+  if tool in ("flash_epas", "restore_epas"):
+    params.put_bool("NAPEpasRiskAccepted", True, block=True)
   env = os.environ.copy()
   env["PYTHONPATH"] = env.get("PYTHONPATH", BASEDIR)
+  cmd = [sys.executable, "-m", module]
+  if tool in DESTRUCTIVE_TOOLS:
+    cmd.append("--confirm")
   try:
     return subprocess.Popen(
-      [sys.executable, "-m", module],
+      cmd,
       stdout=subprocess.PIPE,
       stderr=subprocess.STDOUT,
       cwd=str(Path(BASEDIR)),
@@ -66,7 +71,7 @@ def spawn_approved_module(module: str, params: Params | None = None) -> subproce
       bufsize=1,
     )
   except Exception:
-    params.put_bool("NAPScriptRunning", False, block=True)
+    params.put_bool("NAPEpasRiskAccepted", False, block=True)
     raise
 
 
@@ -160,7 +165,6 @@ def main(argv: list[str] | None = None) -> int:
           self._process.wait(timeout=2)
         except subprocess.TimeoutExpired:
           self._process.kill()
-      self._params.put_bool("NAPScriptRunning", False, block=True)
       self._params.put_bool("NAPEpasRiskAccepted", False, block=True)
       gui_app.request_close()
       if not PC:
