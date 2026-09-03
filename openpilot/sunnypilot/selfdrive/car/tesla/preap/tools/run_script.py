@@ -12,10 +12,11 @@ Usage:
 from __future__ import annotations
 
 import os
+import queue
+import signal
 import subprocess
 import sys
 import threading
-import queue
 from pathlib import Path
 
 from openpilot.common.basedir import BASEDIR
@@ -29,6 +30,11 @@ from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.safety import (
 )
 
 APPROVED_MODULES = frozenset(APPROVED_TOOLS.values())
+
+
+def follow_scroll_offset(line_count: int, line_height: float, bounds_height: float) -> float:
+  overflow = line_count * line_height - bounds_height
+  return -overflow if overflow > 0 else 0.0
 
 
 class ScriptState:
@@ -91,7 +97,6 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
   import pyray as rl
-  from openpilot.common.hardware import HARDWARE, PC
   from openpilot.system.ui.lib.application import gui_app, FontWeight
   from openpilot.system.ui.lib.scroll_panel import GuiScrollPanel
   from openpilot.system.ui.widgets.button import Button, ButtonStyle
@@ -115,7 +120,6 @@ def main(argv: list[str] | None = None) -> int:
       self._output_queue: queue.Queue[str] = queue.Queue()
       self._process: subprocess.Popen | None = None
       self._scroll_panel = GuiScrollPanel()
-      self._instruction_lines: list[str] = []
       self._params = Params()
       self._font = None
       self._title_font = None
@@ -160,39 +164,59 @@ def main(argv: list[str] | None = None) -> int:
 
     def _on_exit(self):
       if self._process and self._process.poll() is None:
-        self._process.terminate()
+        self._process.send_signal(signal.SIGINT)
         try:
           self._process.wait(timeout=2)
         except subprocess.TimeoutExpired:
-          self._process.kill()
+          self._process.terminate()
+          try:
+            self._process.wait(timeout=2)
+          except subprocess.TimeoutExpired:
+            self._process.kill()
       self._params.put_bool("NAPEpasRiskAccepted", False, block=True)
       gui_app.request_close()
-      if not PC:
-        HARDWARE.reboot()
 
     def render(self):
       rect = rl.Rectangle(0, 0, gui_app.width, gui_app.height)
       rl.draw_rectangle_rec(rect, rl.Color(20, 20, 20, 255))
+      got_new = False
       while True:
         try:
           self._output_lines.append(self._output_queue.get_nowait())
+          got_new = True
         except queue.Empty:
           break
       content_x = rect.x + margin
       current_y = rect.y + margin
       rl.draw_text_ex(self._title_font, self._title, rl.Vector2(content_x, current_y), title_font_size, 0, rl.WHITE)
       current_y += title_font_size + margin
-      if self._state == ScriptState.READY:
-        for i, line in enumerate(self._instructions.split("\n")):
-          rl.draw_text_ex(self._font, line, rl.Vector2(content_x, current_y + i * line_height), text_font_size, 0, rl.Color(200, 200, 200, 255))
-      else:
-        for i, line in enumerate(self._output_lines[-40:]):
-          rl.draw_text_ex(self._font, line, rl.Vector2(content_x, current_y + i * line_height), output_font_size, 0, rl.WHITE)
       button_y = rect.y + rect.height - margin - button_height
+      body_rect = rl.Rectangle(content_x, current_y, rect.width - margin * 2,
+                               max(0.0, button_y - current_y - margin))
       if self._state == ScriptState.READY:
-        self._start_button.render(rl.Rectangle(rect.x + rect.width - margin - button_width * 2 - button_spacing, button_y, button_width, button_height))
-      self._exit_button.set_enabled(self._state != ScriptState.RUNNING)
-      self._exit_button.render(rl.Rectangle(rect.x + rect.width - margin - button_width, button_y, button_width, button_height))
+        lines = self._instructions.split("\n")
+        font_size = text_font_size
+        color = rl.Color(200, 200, 200, 255)
+      else:
+        lines = self._output_lines
+        font_size = output_font_size
+        color = rl.WHITE
+      content_rect = rl.Rectangle(0, 0, body_rect.width, len(lines) * line_height)
+      if got_new and self._state != ScriptState.READY:
+        self._scroll_panel.set_offset(follow_scroll_offset(len(lines), line_height, body_rect.height))
+      scroll = self._scroll_panel.update(body_rect, content_rect)
+      rl.begin_scissor_mode(int(body_rect.x), int(body_rect.y), int(body_rect.width), int(body_rect.height))
+      for i, line in enumerate(lines):
+        line_y = body_rect.y + scroll + i * line_height
+        if line_y + line_height < body_rect.y or line_y > body_rect.y + body_rect.height:
+          continue
+        rl.draw_text_ex(self._font, line, rl.Vector2(body_rect.x, line_y), font_size, 0, color)
+      rl.end_scissor_mode()
+      if self._state == ScriptState.READY:
+        self._start_button.render(rl.Rectangle(rect.x + rect.width - margin - button_width * 2 - button_spacing,
+                                               button_y, button_width, button_height))
+      self._exit_button.render(rl.Rectangle(rect.x + rect.width - margin - button_width,
+                                            button_y, button_width, button_height))
 
   subprocess.run(["tmux", "kill-session", "-t", "comma"], capture_output=True)
   gui_app.init_window("Pre-AP Script Runner")

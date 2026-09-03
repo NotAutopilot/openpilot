@@ -405,6 +405,21 @@ def test_negative_response_fail_closed():
   assert isinstance(wrapped, TransportError)
   assert "fail closed" in str(wrapped)
 
+def test_follow_scroll_offset_pins_overflow_to_bottom():
+  from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.run_script import follow_scroll_offset
+  assert follow_scroll_offset(2, 45, 200) == 0.0
+  assert follow_scroll_offset(10, 45, 200) == -(10 * 45 - 200)
+
+
+def test_run_script_scrolls_live_output_and_does_not_reboot():
+  src = (Path(__file__).resolve().parents[1] / "run_script.py").read_text()
+  assert "_scroll_panel.update" in src
+  assert "begin_scissor_mode" in src
+  assert "follow_scroll_offset" in src
+  assert "HARDWARE.reboot" not in src
+  assert "set_enabled(self._state != ScriptState.RUNNING)" not in src
+
+
 def test_run_script_not_in_yaml():
   src = Path(__file__).resolve().parents[6] / "sunnylink" / "settings_ui_src" / "pages" / "vehicle.yaml"
   text = src.read_text()
