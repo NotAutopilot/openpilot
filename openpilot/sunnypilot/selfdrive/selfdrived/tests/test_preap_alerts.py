@@ -82,15 +82,16 @@ def test_recoverable_idle_states_are_not_pedal_unavailable():
   # Firmware STARTUP/TIMEOUT are the interceptor's command watchdog at rest
   # (0x551 not streaming), cleared by a disabled zero command. Not faults.
   from opendbc.car.tesla.preap.constants import (
-    PEDAL_STATE_FAULT_BAD_CHECKSUM, PEDAL_STATE_FAULT_INVALID, PEDAL_STATE_FAULT_SCE,
+    PEDAL_STATE_FAULT_BAD_CHECKSUM, PEDAL_STATE_FAULT_SCE,
     PEDAL_STATE_FAULT_SEND, PEDAL_STATE_FAULT_STARTUP, PEDAL_STATE_FAULT_TIMEOUT,
   )
 
   for state in (PEDAL_STATE_FAULT_STARTUP, PEDAL_STATE_FAULT_TIMEOUT):
     assert select_preap_alerts(_inputs(interceptor_state=state)) == ()
 
+  # 6 is not in tesla_preap.dbc VAL_ 1362; unnamed nibbles stay unavailable.
   for state in (PEDAL_STATE_FAULT_BAD_CHECKSUM, PEDAL_STATE_FAULT_SEND,
-                PEDAL_STATE_FAULT_SCE, PEDAL_STATE_FAULT_INVALID):
+                PEDAL_STATE_FAULT_SCE, 6):
     assert select_preap_alerts(_inputs(interceptor_state=state)) == (EventNameSP.pedalUnavailable,)
 
 
