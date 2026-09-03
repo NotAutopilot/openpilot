@@ -175,6 +175,20 @@ def test_preap_lkas_alerts_show_steering_prompt():
   assert stock_enable.alert_text_1 == ""
   assert stock_enable.audible_alert == AudibleAlert.engage
 
+def test_recoverable_idle_rereset_is_not_pedal_unavailable():
+  from opendbc.car.tesla.preap.constants import PEDAL_STATE_FAULT_TIMEOUT
+
+  mapper = PedalAuthorityLossMapper()
+  assert mapper.update(int(PedalAuthorityState.INACTIVE)) is False
+  assert mapper.update(int(PedalAuthorityState.ACTIVE)) is False
+  # ACTIVE holds through STARTUP/TIMEOUT RESET. Do not flap to ACQUIRING.
+  assert mapper.update(int(PedalAuthorityState.ACTIVE)) is False
+  assert select_preap_alerts(_inputs(
+    interceptor_state=PEDAL_STATE_FAULT_TIMEOUT,
+    pedal_authority_state=int(PedalAuthorityState.ACTIVE),
+  )) == ()
+
+
 def test_established_authority_loss_alerts_during_reacquisition():
   mapper = PedalAuthorityLossMapper()
   assert mapper.update(int(PedalAuthorityState.INACTIVE)) is False
