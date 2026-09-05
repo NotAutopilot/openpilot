@@ -1,48 +1,24 @@
-"""Pre-AP alert policy for EventsSP.
+"""MADS lat-prompt wrappers and leftover CarSpecificEventsSP helpers.
 
-custom.capnp is frozen: EventNameSP ends at @28. Pre-AP alert states map onto
-those existing enumerants instead of adding schema.
-
-  pedalUnavailable: uncalibrated/timeout/authority-loss/interceptor faults
-  pedalMaxRegen: regen demand (registered in preap_regen)
-  radarFault: stock EventName.radarFault for Pre-AP radar failures
+NAP's EventName alert texts now live in selfdrive/selfdrived/events.py.
+This file keeps the MADS-only mapping (lkasEnable/lkasDisable) because NAP
+has no MADS, plus the symbols CarSpecificEventsSP still imports.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from openpilot.cereal import custom, log
+from openpilot.cereal import log
 from opendbc.car.structs import car
-from opendbc.car.tesla.preap.boot import is_preap_platform
-from opendbc.car.tesla.preap.constants import (
-  PEDAL_FEEDBACK_TIMEOUT_STATE,
-  PEDAL_RECOVERABLE_IDLE_STATES,
-  PEDAL_STATE_NO_FAULT,
-)
 from opendbc.car.tesla.preap.carcontroller import PedalAuthorityState
+from opendbc.car.tesla.preap.sp.platform import is_preap_platform
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 from openpilot.sunnypilot.selfdrive.selfdrived.events_base import Alert, EngagementAlert, Priority
-from openpilot.system.ui.lib.multilang import tr_noop
 
-EventNameSP = custom.OnroadEventSP.EventName
 AlertSize = log.SelfdriveState.AlertSize
 AlertStatus = log.SelfdriveState.AlertStatus
 VisualAlert = car.CarControl.HUDControl.VisualAlert
 AudibleAlert = log.SelfdriveState.AudibleAlert
-
-# Extracted via existing tr()/tr_noop PO conventions. Display strings are the
-# registered EventsSP texts for the mapped EventNameSP entries, and the stock
-# radarFault text dispatched for Pre-AP radar failures.
-ALERT_PEDAL_UNAVAILABLE = tr_noop("Pedal Unavailable")
-ALERT_PEDAL_UNAVAILABLE_SUB = tr_noop("Stock cruise required")
-ALERT_REGEN = tr_noop("Regen Limit Reached")
-ALERT_REGEN_SUB = tr_noop("Press Brake to Slow Down")
-ALERT_RADAR_FAULT = tr_noop("Radar Error: Restart the Car")
-
-# Firmware STARTUP/TIMEOUT are the interceptor's command watchdog at rest, not
-# faults: the pedal sits there whenever 0x551 is not streaming and a disabled
-# zero command clears it back to NO_FAULT.
-_PEDAL_USABLE_STATES = frozenset((PEDAL_STATE_NO_FAULT, *PEDAL_RECOVERABLE_IDLE_STATES))
 
 
 @dataclass(frozen=True)
@@ -108,28 +84,21 @@ def preap_alert_inputs_from_snapshot(CP, CP_SP, CS_SP=None, *, radar_fault: bool
   pedal_calib_available = bool(flags & TeslaFlagsSP.PREAP_PEDAL_CALIB_AVAILABLE)
   radar_present = bool(flags & TeslaFlagsSP.PREAP_RADAR_PRESENT)
   radar_config_invalid = bool(getattr(CP, "radarUnavailable", False)) if CP is not None else False
-  pedal_calib_done = pedal_calib_available
-  pedal_timeout = False
-  interceptor_state = 0
   authority_state = int(PedalAuthorityState.INACTIVE)
   authority_failed = False
   if CS_SP is not None:
     authority_state = int(getattr(CS_SP, "pedalAuthorityState", 0) or 0)
     authority_failed = bool(getattr(CS_SP, "pedalAuthorityFailed", False))
-    interceptor_state = int(getattr(CS_SP, "pedalFeedbackState", 0) or 0)
-    pedal_timeout = interceptor_state == PEDAL_FEEDBACK_TIMEOUT_STATE
-    if pedal_timeout:
-      interceptor_state = 0
   return PreAPAlertInputs(
     is_preap=is_preap,
     pedal_present=pedal_present,
     pedal_calib_available=pedal_calib_available,
-    pedal_calib_done=bool(pedal_calib_done),
-    pedal_available=not pedal_timeout and interceptor_state in _PEDAL_USABLE_STATES,
-    pedal_timeout=bool(pedal_timeout),
+    pedal_calib_done=pedal_calib_available,
+    pedal_available=True,
+    pedal_timeout=False,
     pedal_authority_state=int(authority_state),
     pedal_authority_failed=authority_failed,
-    interceptor_state=int(interceptor_state),
+    interceptor_state=0,
     radar_present=radar_present,
     radar_config_invalid=radar_config_invalid,
     radar_fault=bool(radar_fault),
@@ -137,27 +106,10 @@ def preap_alert_inputs_from_snapshot(CP, CP_SP, CS_SP=None, *, radar_fault: bool
   )
 
 
-def _pedal_unusable(inputs: PreAPAlertInputs) -> bool:
-  return bool(
-    not inputs.pedal_calib_done
-    or not inputs.pedal_calib_available
-    or inputs.pedal_authority_failed
-    or inputs.pedal_authority_state == int(PedalAuthorityState.FAILED)
-    or inputs.established_authority_lost
-    or inputs.pedal_timeout
-    or not inputs.pedal_available
-    or inputs.interceptor_state not in _PEDAL_USABLE_STATES
-  )
-
-
 def select_preap_alerts(inputs: PreAPAlertInputs) -> tuple[int, ...]:
-  if not inputs.is_preap:
-    return ()
-
-  events: list[int] = []
-  if inputs.pedal_present and _pedal_unusable(inputs):
-    events.append(EventNameSP.pedalUnavailable)
-  return tuple(events)
+  # Pedal unavailable / not-calibrated now fire as EventName from NAP's
+  # CarSpecificEvents hunk. Do not also map them through EventNameSP.
+  return ()
 
 
 def preap_lkas_enable_alert(CP, CS, sm, metric, soft_disable_time, personality) -> Alert:
@@ -205,20 +157,10 @@ def preap_radar_fault(inputs: PreAPAlertInputs) -> bool:
 
 
 def register_preap_alerts() -> None:
-  """Register mapped EventNameSP alerts before EventsSP snapshots EVENTS_SP keys.
-
-  Extra Pre-AP pedal states (invalid calibration, timeout, authority loss,
-  interceptor faults) reuse frozen EventNameSP.pedalUnavailable @28. Regen
-  registration also setdefaults that enumerant plus pedalMaxRegen.
-  """
-  from openpilot.selfdrive.selfdrived.preap_regen import (
-    PREAP_PEDAL_UNAVAILABLE_ALERT,
-    register_preap_regen_alerts,
-  )
+  """Register MADS lat prompts. Pedal EventName texts live in events.py."""
+  from openpilot.cereal import custom
   from openpilot.sunnypilot.selfdrive.selfdrived.events import EVENTS_SP
   from openpilot.sunnypilot.selfdrive.selfdrived.events_base import ET
-  EVENTS_SP.setdefault(EventNameSP.pedalUnavailable, {ET.WARNING: PREAP_PEDAL_UNAVAILABLE_ALERT})
-  register_preap_regen_alerts()
-  # Pre-AP lat prompts on native MADS events. Other cars keep stock sounds.
+  EventNameSP = custom.OnroadEventSP.EventName
   EVENTS_SP[EventNameSP.lkasEnable] = {ET.ENABLE: preap_lkas_enable_alert}
   EVENTS_SP[EventNameSP.lkasDisable] = {ET.USER_DISABLE: preap_lkas_disable_alert}

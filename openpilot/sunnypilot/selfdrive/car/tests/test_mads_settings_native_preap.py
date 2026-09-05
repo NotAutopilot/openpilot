@@ -2,30 +2,28 @@
 import unittest
 from pathlib import Path
 
-MADS_PY = (
-  Path(__file__).resolve().parents[4]
-  / "selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py"
-)
 STEERING_PY = (
   Path(__file__).resolve().parents[4]
   / "selfdrive/ui/sunnypilot/layouts/settings/steering.py"
 )
+MADS_SETTINGS_PY = (
+  Path(__file__).resolve().parents[4]
+  / "selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/mads_settings.py"
+)
 
 
 class TestNativeMadsPreapSettings(unittest.TestCase):
-  def test_engagement_mode_lives_in_mads_settings(self):
-    src = MADS_PY.read_text()
-    assert 'param="NAPLateralEngagementMode"' in src
-    assert 'title=lambda: tr("Lateral Engagement Mode")' in src
-    assert 'tr("Independent")' in src
-    assert 'tr("Cruise Coupled")' in src
-    assert 'tr("Longitudinal Only")' in src
-    assert "self._engagement_mode.set_visible(is_preap)" in src
-
   def test_required_mads_copy_on_steering(self):
     src = STEERING_PY.read_text()
     assert "This platform requires MADS." in src
     assert "Customize MADS" in src
+
+  def test_preap_mads_settings_copy(self):
+    src = MADS_SETTINGS_PY.read_text()
+    assert "This platform requires MADS." in src
+    assert "Stalk pull engages steering" in src
+    assert "Cruise Coupled" not in src
+    assert "Longitudinal Only" not in src
 
 
 if __name__ == "__main__":

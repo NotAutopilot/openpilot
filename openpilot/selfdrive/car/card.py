@@ -25,7 +25,6 @@ from openpilot.selfdrive.car.helpers import convert_carControlSP, convert_to_cap
 
 from openpilot.sunnypilot.mads.helpers import set_alternative_experience, set_car_specific_params
 from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfaces
-from openpilot.sunnypilot.selfdrive.car import preap_boot
 
 REPLAY = "REPLAY" in os.environ
 
@@ -108,12 +107,10 @@ class Car:
         with car.CarParams.from_bytes(cached_params_raw) as _cached_params:
           cached_params = _cached_params
 
-      selection, fixed_fingerprint = preap_boot.resolve_card_boot(self.params)
       init_params_list_sp = sunnypilot_interfaces.initialize_params(self.params)
-      init_params_list_sp.extend(preap_boot.snapshot_param_list(self.params))
 
       self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, cached_params,
-                        fixed_fingerprint, init_params_list_sp, is_release_sp, selection.skip_fw_query)
+                        None, init_params_list_sp, is_release_sp)
       sunnypilot_interfaces.setup_interfaces(self.CI, self.params)
       self.RI = interfaces[self.CI.CP.carFingerprint].RadarInterface(self.CI.CP, self.CI.CP_SP)
       self.CP = self.CI.CP
@@ -182,8 +179,6 @@ class Car:
     self.params.put("CarParamsSPPersistent", cp_sp_bytes)
 
     self.v_cruise_helper = VCruiseHelper(self.CP, self.CP_SP)
-    self.preap_intent_epoch = preap_boot.new_preap_intent_epoch() if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP" else 0
-    self.preap_intent_seed_pending = self.preap_intent_epoch != 0
 
     self.is_metric = self.params.get_bool("IsMetric")
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
@@ -195,53 +190,19 @@ class Car:
     self.radar_donor_vin = None
     tesla_preap = any(cfg.safetyModel == car.CarParams.SafetyModel.teslaPreap for cfg in self.CP.safetyConfigs)
     if tesla_preap:
-      from opendbc.car.tesla.preap.radar_donor_vin import (
-        RadarDonorVinCommissioner, radar_donor_live, seed_radar_donor_live,
-      )
+      from opendbc.car.tesla.preap.nap_conf import nap_conf
+      from opendbc.car.tesla.preap.radar_donor_vin import RadarDonorVinCommissioner
 
       def store_donor_vin(vin: str) -> None:
-        self.params.put("NAPRadarDonorVin", vin)
-        seed_radar_donor_live(vin, radar_donor_live.position, radar_donor_live.epas_type)
+        nap_conf.radar_donor_vin = vin
         self.params.put("NAPRadarVinReadStatus", f"saved {vin}")
         cloudlog.info("preap radar donor vin stored")
 
+      self._nap_conf = nap_conf
       self.radar_donor_vin = RadarDonorVinCommissioner(store_donor_vin)
-      self._sync_radar_donor_live()
 
     # log fingerprint in sentry
     sunnypilot_interfaces.log_fingerprint(self.CP)
-
-  def _parse_radar_int(self, key: str, default: int, lo: int, hi: int) -> int:
-    raw = self.params.get(key)
-    try:
-      value = int(raw)
-    except (TypeError, ValueError):
-      return default
-    return value if lo <= value <= hi else default
-
-  def _sync_radar_donor_live(self) -> None:
-    from opendbc.car.tesla.preap.radar_donor_vin import seed_radar_donor_live
-    seed_radar_donor_live(
-      self.params.get("NAPRadarDonorVin"),
-      self._parse_radar_int("NAPRadarPosition", 0, 0, 3),
-      self._parse_radar_int("NAPRadarEpasType", 0, 0, 7),
-    )
-
-  def stamp_preap_intent_epoch(self, CS_SP: structs.CarStateSP) -> None:
-    if not self.preap_intent_epoch:
-      return
-    if self.preap_intent_seed_pending:
-      CS_SP.preapLateralIntent = structs.CarStateSP.PreapLateralIntent.none
-      CS_SP.preapLongitudinalIntent = structs.CarStateSP.PreapLongitudinalIntent.none
-      CS_SP.preapIntentSequence = 0
-      # Neutralize the first epoch record's StockCC projection only. Live
-      # producer state is retained so sequence 1 can expose the initial-batch edge.
-      CS_SP.preapStockCcState = structs.CarStateSP.PreapStockCcTransactionState.idle
-      CS_SP.preapStockCcEnablePending = False
-      CS_SP.preapStockCcHostDiConfirmed = False
-      CS_SP.preapStockCcBoundCounter = 0
-      self.preap_intent_seed_pending = False
-    CS_SP.preapIntentEpoch = self.preap_intent_epoch
 
   def state_update(self) -> tuple[car.CarState, custom.CarStateSP, structs.RadarDataT | None]:
     """carState update loop, driven by can"""
@@ -257,25 +218,7 @@ class Car:
     RD: structs.RadarDataT | None = self.RI.update(can_list)
 
     self.sm.update(0)
-    if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP" and hasattr(self.CI, "CS"):
-      # pandaStates is 10 Hz. A healthy cached payload remains usable between
-      # 100 Hz Card cycles; dead or invalid service data is missing.
-      panda = None
-      if self.sm.all_alive(['pandaStates']) and self.sm.all_valid(['pandaStates']):
-        pandas = self.sm["pandaStates"]
-        panda = pandas[0] if len(pandas) else None
-      if hasattr(self.CI.CS, "update_stock_cc_panda"):
-        self.CI.CS.update_stock_cc_panda(panda)
-      if self.preap_intent_epoch:
-        CS_SP.preapIntentEpoch = self.preap_intent_epoch
-      if hasattr(self.CI.CS, "stock_cc"):
-        self.CI.CS.stock_cc.bind_epoch(CS_SP.preapIntentEpoch, CS_SP.preapIntentSequence)
-        self.CI.CS.stock_cc.publish(CS_SP)
-    # First epoch record is built after every producer, then the seed projection
-    # is neutralized without erasing live internal producer state.
-    self.stamp_preap_intent_epoch(CS_SP)
-    if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP" and hasattr(self.CI, "CS") and hasattr(self.CI.CS, "stock_cc"):
-      self.CI.CS.stock_cc.acknowledge_publication(CS_SP)
+
     CS_SP = convert_to_capnp(CS_SP)
 
     can_rcv_valid = len(can_strs) > 0
@@ -287,12 +230,14 @@ class Car:
     if can_rcv_valid and REPLAY:
       self.can_log_mono_time = messaging.log_from_bytes(can_strs[0]).logMonoTime
 
-    preap_software_cruise = (
-      self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
-      and self.CP.openpilotLongitudinalControl
-      and not self.CP.pcmCruise
-    )
     try:
+      preap_software_cruise = (
+        self.CP.brand == "tesla"
+        and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+        and self.CP.openpilotLongitudinalControl
+        and not self.CP.pcmCruise
+      )
+
       if not preap_software_cruise:
         self.v_cruise_helper.update_speed_limit_assist(self.is_metric, self.sm['longitudinalPlanSP'])
         self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric)
@@ -300,12 +245,14 @@ class Car:
           # Use CarState w/ buttons from the step selfdrived enables on
           self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.experimental_mode, self.dynamic_experimental_control)
       else:
-        # Pedal-long owns set-speed in carstate via pedal_speed_kph. No buttonEvents.
+        # Pre-AP pedal mode owns set-speed in carstate via pedal_speed_kph.
+        # Keep planner target aligned to that software-managed target.
         preap_v_cruise_kph = float(CS.cruiseState.speed * CV.MS_TO_KPH)
         self.v_cruise_helper.v_cruise_kph_last = self.v_cruise_helper.v_cruise_kph
         self.v_cruise_helper.v_cruise_kph = preap_v_cruise_kph
         self.v_cruise_helper.v_cruise_cluster_kph = preap_v_cruise_kph
     except Exception:
+      # Fail-safe: never crash card due cruise-target selection logic.
       cloudlog.exception("Pre-AP software cruise target update failed, falling back to VCruiseHelper default")
       self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric)
       if self.sm['carControl'].enabled and not self.CC_prev.enabled:
@@ -375,22 +322,19 @@ class Car:
       self.last_actuators_output, can_sends = self.CI.apply(CC, convert_carControlSP(CC_SP), now_nanos)
       can_sends = list(can_sends)
       if self.radar_donor_vin is not None:
-        from opendbc.car.tesla.preap.boot import preap_radar_present
-        self._sync_radar_donor_live()
         controls_allowed = False
         if self.sm.valid['pandaStates']:
           controls_allowed = any(ps.controlsAllowed for ps in self.sm['pandaStates'])
         force_read = self.params.get_bool("NAPRadarReadVin")
-        radar_enabled = preap_radar_present(self.CP, self.CP_SP)
-        if force_read and not radar_enabled:
+        if force_read and not self._nap_conf.radar_enabled:
           self.params.put("NAPRadarVinReadStatus", "enable radar first")
           self.params.put_bool("NAPRadarReadVin", False)
         else:
           can_sends.extend(self.radar_donor_vin.update(
             self._can_packets,
             time.monotonic(),
-            radar_enabled=radar_enabled,
-            stored_vin=self.params.get("NAPRadarDonorVin") or "",
+            radar_enabled=self._nap_conf.radar_enabled,
+            stored_vin=self._nap_conf.radar_donor_vin,
             controls_allowed=controls_allowed,
             enabled=bool(CC.enabled),
             force_read=force_read,

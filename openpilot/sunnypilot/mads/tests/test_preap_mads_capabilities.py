@@ -168,5 +168,44 @@ class TestPreAPMadsCapabilities(unittest.TestCase):
     self.assertFalse(sd.events_sp.has(EventNameSP.lkasEnable))
 
 
+  def test_preap_unified_engagement_stays_off_when_param_true(self):
+    from openpilot.sunnypilot.mads.mads import ModularAssistiveDrivingSystem
+    from openpilot.selfdrive.selfdrived.events import Events
+    from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+
+    CP = structs.CarParams()
+    CP.brand = "tesla"
+    CP.carFingerprint = "TESLA_MODEL_S_PREAP"
+    CP_SP = structs.CarParamsSP()
+    CP_SP.madsCapabilityContractVersion = 1
+    CP_SP.madsRequired = True
+    CP_SP.madsMainCruiseInputKind = structs.CarParamsSP.MadsMainCruiseInputKind.momentary
+    CP_SP.madsUnifiedEngagementMode = False
+
+    params = MagicMock()
+    params.get_bool.side_effect = lambda k: True
+    sd = MagicMock()
+    sd.CP = CP
+    sd.CP_SP = CP_SP
+    sd.params = params
+    sd.events = Events()
+    sd.events_sp = EventsSP()
+    sd.enabled = False
+    sd.enabled_prev = False
+    sd.initialized = True
+    prev = structs.CarState()
+    prev.cruiseState.available = False
+    sd.CS_prev = prev
+    sd.sm = {"pandaStates": []}
+
+    mads = ModularAssistiveDrivingSystem(sd)
+    self.assertFalse(mads.unified_engagement_mode)
+
+    # Live param path: freeze off, MadsUnifiedEngagementMode still True.
+    mads._freeze_mads_snapshot = False
+    mads.read_params()
+    self.assertFalse(mads.unified_engagement_mode)
+
+
 if __name__ == "__main__":
   unittest.main()

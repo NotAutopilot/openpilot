@@ -5,6 +5,7 @@ vocabulary used on the comma 4. Phase 1 stub: three controls (pedal
 interceptor toggle, radar enabled toggle, flash EPAS button).
 Subsequent phases add the rest.
 """
+from opendbc.car.tesla.preap.nap_params import NAPParamKeys
 from openpilot.common.params import Params
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets.scroller import NavScroller
@@ -23,7 +24,6 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
 )
 from openpilot.selfdrive.ui.radar.radar_view import RadarMonitorDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.selfdrive.ui.layouts.settings.nap_content import NAPParamKeys
 
 
 def _reboot_dialog() -> None:

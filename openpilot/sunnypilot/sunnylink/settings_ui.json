@@ -49,34 +49,6 @@
               },
               "items": [
                 {
-                  "key": "NAPLateralEngagementMode",
-                  "widget": "multiple_button",
-                  "needs_onroad_cycle": true,
-                  "title": "Lateral Engagement Mode",
-                  "description": "Choose how Pre-AP stalk pulls request Automatic Lane Centering (ALC) and cruise in sunnypilot. Onroad writes apply on the next drive.",
-                  "options": [
-                    {
-                      "value": 0,
-                      "label": "Independent"
-                    },
-                    {
-                      "value": 1,
-                      "label": "Cruise Coupled"
-                    },
-                    {
-                      "value": 2,
-                      "label": "Longitudinal Only"
-                    }
-                  ],
-                  "visibility": [
-                    {
-                      "type": "capability",
-                      "field": "tesla_preap",
-                      "equals": true
-                    }
-                  ]
-                },
-                {
                   "key": "MadsMainCruiseAllowed",
                   "widget": "toggle",
                   "title": "Toggle with Main Cruise",

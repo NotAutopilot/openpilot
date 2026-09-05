@@ -10,18 +10,12 @@ from __future__ import annotations
 import time
 
 from openpilot.common.params import Params
-from opendbc.car.tesla.preap.boot import hardware_snapshot_from_values
-from opendbc.car.tesla.preap.constants import (
-  GAS_COMMAND_ID,
-  GAS_SENSOR_ID,
-  PEDAL_D,
-  PEDAL_M1,
-  PEDAL_TIMEOUT_MS,
-)
-from opendbc.car.tesla.preap.teslacan import TeslaCANPreAP
+from opendbc.car.tesla.preap.pedal_feedback import PEDAL_TIMEOUT_MS
+from opendbc.car.tesla.preap.teslacan import GAS_COMMAND_ID, PEDAL_D, PEDAL_M1, TeslaCANPreAP
 from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.safety import parse_explicit_confirmation, require_preap_tool_start
 from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.transport import DiagnosticTransport, TransportError
 
+GAS_SENSOR_ID = 0x552
 GTW_STATUS_ID = 0x348
 BRAKE_MESSAGE_ID = 0x20A
 DI_TORQUE1_ID = 0x108
@@ -87,17 +81,6 @@ def validate_calibration(min_v: float, max_v: float, factor: float, zero: float)
 
 def persist_calibration(params: Params, *, min_v: float, max_v: float, factor: float, zero: float) -> None:
   validate_calibration(min_v, max_v, factor, zero)
-  snapshot = hardware_snapshot_from_values(
-    pedal_enabled=True,
-    pedal_bus=params.get("NAPPedalCanBus"),
-    pedal_calib_done=True,
-    pedal_calib_factor=factor,
-    pedal_calib_zero=zero,
-    pedal_calib_min=min_v,
-    pedal_calib_max=max_v,
-  )
-  if not snapshot.pedal_calib_available:
-    raise PedalCalibrationError("calibration rejected by boot snapshot")
   params.put("NAPPedalCalibMin", float(min_v), block=True)
   params.put("NAPPedalCalibMax", float(max_v), block=True)
   params.put("NAPPedalCalibFactor", float(factor), block=True)

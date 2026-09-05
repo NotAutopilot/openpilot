@@ -19,6 +19,7 @@ from openpilot.selfdrive.car.car_specific import CarSpecificEvents
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.selfdrive.selfdrived.events import Events, ET
 from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
+from openpilot.selfdrive.selfdrived.preap_regen import PreAPChimeState, RegenDemandCheck, update_preap_chimes
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
 
@@ -32,11 +33,8 @@ from openpilot.sunnypilot.selfdrive.car.cruise_helpers import CruiseHelper
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
 from openpilot.sunnypilot.selfdrive.selfdrived.button_state_tracker import ButtonStateTracker
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
-from openpilot.selfdrive.selfdrived.preap_regen import (
-  PreAPChimeState, RegenDemandCheck, register_preap_regen_alerts, update_preap_chimes,
-)
 from openpilot.sunnypilot.selfdrive.selfdrived.preap_alerts import radar_state_has_fault
-from opendbc.car.tesla.preap.boot import pedal_pipeline_enabled, preap_radar_present
+from opendbc.car.tesla.preap.sp.platform import preap_radar_present
 
 REPLAY = "REPLAY" in os.environ
 SIMULATION = "SIMULATION" in os.environ
@@ -108,7 +106,8 @@ class SelfdriveD(CruiseHelper):
       ignore += ['driverCameraState', 'managerState']
     if REPLAY:
       # no vipc in replay will make them ignored anyways
-      ignore += ['roadCameraState', 'wideRoadCameraState']
+      # sanitized fixtures omit driverCameraState/managerState; ignore them in replay
+      ignore += ['roadCameraState', 'wideRoadCameraState', 'driverCameraState', 'managerState']
     self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'liveCalibration',
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'livePose', 'liveDelay',
                                    'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters',
@@ -159,6 +158,8 @@ class SelfdriveD(CruiseHelper):
     self.dm_uncertain_alerted = False
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
+    self.prev_preap_chimes = PreAPChimeState()
+    self.preap_regen_demand = RegenDemandCheck()
 
     self.ignored_processes = {'mapd', }
 
@@ -180,18 +181,14 @@ class SelfdriveD(CruiseHelper):
     elif self.CP.passive:
       self.events.add(EventName.dashcamMode, static=True)
 
-    register_preap_regen_alerts()
     self.events_sp = EventsSP()
     self.events_sp_prev = []
-    self._pedal_preap = pedal_pipeline_enabled(self.CP, self.CP_SP)
-    self._preap_radar_present = preap_radar_present(self.CP, self.CP_SP)
-    self.preap_regen_demand = RegenDemandCheck()
-    self.prev_preap_chimes = PreAPChimeState()
 
     self.mads = ModularAssistiveDrivingSystem(self)
     self.icbm = IntelligentCruiseButtonManagement(self.CP, self.CP_SP)
 
     self.car_events_sp = CarSpecificEventsSP(self.CP, self.CP_SP)
+    self._preap_radar_present = preap_radar_present(self.CP, self.CP_SP)
 
     CruiseHelper.__init__(self, self.CP)
     self.button_state_tracker = ButtonStateTracker()
@@ -270,13 +267,45 @@ class SelfdriveD(CruiseHelper):
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
       self.events.add_from_msg(car_events)
 
-      radar_fault = False
-      if self.sm.valid.get('radarState', False) if hasattr(self.sm, 'valid') else self.sm.seen.get('radarState', False):
-        radar_fault = radar_state_has_fault(self.sm['radarState'])
+      radar_fault = radar_state_has_fault(self.sm['radarState']) if self._preap_radar_present else False
       car_events_sp = self.car_events_sp.update(
-        CS, self.events, self.CS_SP if self.cs_sp_fresh else None, radar_fault=radar_fault,
+        CS, self.events, self.CS_SP if self.cs_sp_fresh else None,
+        radar_fault=radar_fault,
       ).to_msg()
       self.events_sp.add_from_msg(car_events_sp)
+
+      # Tesla Pre-AP lat/long engage and disengage prompts. Long follows
+      # enableLongControl (stalk/brake intent), not interceptor handshake
+      # and not gas override. Override keeps enableLongControl true.
+      if (self.CP.brand == "tesla"
+          and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+          and self.CP.openpilotLongitudinalControl
+          and not self.CP.pcmCruise):
+        pedal_long_active = bool(CS.cruiseState.enabled and getattr(CS, 'pedalLongActive', False))
+        chimes, self.prev_preap_chimes = update_preap_chimes(
+          lat_engaged=bool(CS.cruiseState.enabled),
+          long_engaged=bool(getattr(CS, 'enableLongControl', False)),
+          prev=self.prev_preap_chimes,
+        )
+        if chimes.long_engage:
+          self.events.add(EventName.pedalCruiseEnabled)
+        elif chimes.long_disengage:
+          self.events.add(EventName.pedalCruiseDisabled)
+
+        # Two shapes of "regen is not enough, add friction brake": the carstate
+        # flag covers weak regen under-delivering an in-envelope request; the
+        # demand check covers a planned deceleration the envelope cannot cover,
+        # which the clamped actuator request hides from the car entirely.
+        regen_demand_overflow = self.preap_regen_demand.update(
+          pedal_long_active=pedal_long_active,
+          brake_pressed=CS.brakePressed,
+          a_target=float(self.sm['longitudinalPlan'].aTarget),
+          v_ego=CS.vEgo,
+        )
+        if getattr(CS, 'pedalMaxRegen', False) or regen_demand_overflow:
+          self.events.add(EventName.pedalMaxRegen)
+      else:
+        self.prev_preap_chimes = PreAPChimeState()
 
       if self.CP.notCar:
         # wait for everything to init first
@@ -289,36 +318,6 @@ class SelfdriveD(CruiseHelper):
         (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or \
         (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
         self.events.add(EventName.pedalPressed)
-
-      if self._pedal_preap:
-        EventNameSP = custom.OnroadEventSP.EventName
-        pedal_long_active = bool(self.cs_sp_fresh and getattr(self.CS_SP, "pedalLongActive", False))
-        # Tesla Pre-AP lat/long engage and disengage prompts. Long follows
-        # enableLongControl (stalk/brake intent), not interceptor handshake
-        # and not gas override. Override keeps enableLongControl true.
-        # Lat chimes stay on native MADS lkasEnable/lkasDisable.
-        if self.cs_sp_fresh:
-          chimes, self.prev_preap_chimes = update_preap_chimes(
-            lat_engaged=bool(self.mads.enabled),
-            long_engaged=bool(getattr(self.CS_SP, "enableLongControl", False)),
-            prev=self.prev_preap_chimes,
-          )
-          if chimes.long_engage:
-            self.events_sp.add(EventNameSP.pedalCruiseEnabled)
-          elif chimes.long_disengage:
-            self.events_sp.add(EventNameSP.pedalCruiseDisabled)
-        regen_demand_overflow = self.preap_regen_demand.update(
-          plan_valid=self.sm.valid['longitudinalPlan'],
-          pedal_long_active=pedal_long_active,
-          brake_pressed=CS.brakePressed,
-          a_target=float(self.sm['longitudinalPlan'].aTarget),
-          v_ego=CS.vEgo,
-        )
-        if (self.cs_sp_fresh and bool(getattr(self.CS_SP, "pedalMaxRegen", False))) or regen_demand_overflow:
-          self.events_sp.add(EventNameSP.pedalMaxRegen)
-        # Authority-loss and calibration/radar health are owned by CarSpecificEventsSP.
-      else:
-        self.prev_preap_chimes = PreAPChimeState()
 
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:
@@ -489,8 +488,13 @@ class SelfdriveD(CruiseHelper):
       self.events.add(EventName.sensorDataInvalid)
 
     if not REPLAY:
-      # Check for mismatch between openpilot and car's PCM
-      cruise_mismatch = CS.cruiseState.enabled and (not self.enabled or not self.CP.pcmCruise)
+      # Check for mismatch between openpilot and car's PCM.
+      # Pre-AP Tesla manages cruiseState.enabled via software FSM (not hardware PCM),
+      # so treat it the same as pcmCruise for this check.
+      preap_sw_cruise = (self.CP.brand == "tesla" and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+                         and self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise)
+      effective_pcm_cruise = self.CP.pcmCruise or preap_sw_cruise
+      cruise_mismatch = CS.cruiseState.enabled and (not self.enabled or not effective_pcm_cruise)
       self.cruise_mismatch_counter = self.cruise_mismatch_counter + 1 if cruise_mismatch else 0
       if self.cruise_mismatch_counter > int(6. / DT_CTRL):
         self.events.add(EventName.cruiseMismatch)

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from opendbc.car.tesla.preap.boot import PREAP_PLATFORM
+from opendbc.car.tesla.preap.sp.platform import PREAP_PLATFORM
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 from openpilot.sunnypilot.sunnylink.capabilities import (
   CAPABILITY_FIELDS,
@@ -8,7 +8,7 @@ from openpilot.sunnypilot.sunnylink.capabilities import (
   _is_tesla_preap,
   _resolve_tesla_preap_capabilities,
 )
-from openpilot.sunnypilot.selfdrive.car.preap_boot import is_preap_ui_platform
+from opendbc.car.tesla.preap.sp.platform import is_preap_ui_platform
 
 
 def _caps(**overrides):
@@ -72,12 +72,12 @@ def test_pedal_capabilities():
   cp = SimpleNamespace(openpilotLongitudinalControl=True, pcmCruise=False, radarUnavailable=True)
   cp_sp = SimpleNamespace(
     flags=TeslaFlagsSP.PREAP_PEDAL_PRESENT | TeslaFlagsSP.PREAP_PEDAL_CALIB_AVAILABLE,
-    preapLateralEngagementMode=0,
   )
   _resolve_tesla_preap_capabilities(caps, cp, cp_sp)
   assert caps["tesla_preap_pedal"] is True
   assert caps["tesla_preap_pedal_calib"] is True
   assert caps["tesla_preap_independent_brake"] is True
+  assert caps["tesla_preap_active_mode"] == "independent"
   assert caps["tesla_preap_longitudinal_path"] == "pedal"
   assert caps["tesla_preap_pedal_health"] == "ok"
 
@@ -85,11 +85,11 @@ def test_pedal_capabilities():
 def test_no_pedal_capabilities():
   caps = _caps()
   cp = SimpleNamespace(openpilotLongitudinalControl=False, pcmCruise=True, radarUnavailable=True)
-  cp_sp = SimpleNamespace(flags=0, preapLateralEngagementMode=1)
+  cp_sp = SimpleNamespace(flags=0)
   _resolve_tesla_preap_capabilities(caps, cp, cp_sp)
   assert caps["tesla_preap_pedal"] is False
-  assert caps["tesla_preap_independent_brake"] is False
-  assert caps["tesla_preap_active_mode"] == "cruiseCoupled"
+  assert caps["tesla_preap_independent_brake"] is True
+  assert caps["tesla_preap_active_mode"] == "independent"
   assert caps["tesla_preap_longitudinal_path"] == "stock_di"
   assert caps["tesla_preap_pedal_health"] == "none"
 
@@ -101,33 +101,23 @@ def test_modern_skips_preap_fields():
   assert caps["tesla_preap_radar"] is False
 
 
-class _FakeParams:
-  def __init__(self, store=None):
-    self.store = dict(store or {})
-
-  def get(self, key, return_default=False):
-    return self.store.get(key)
-
-
-def test_brake_follows_active_cp_sp_not_staged_param():
+def test_brake_mode_always_applicable_on_preap():
   caps = _caps()
   cp = SimpleNamespace(openpilotLongitudinalControl=True, pcmCruise=False, radarUnavailable=False)
-  cp_sp = SimpleNamespace(flags=TeslaFlagsSP.PREAP_PEDAL_PRESENT, preapLateralEngagementMode=0)
-  params = _FakeParams({"NAPLateralEngagementMode": 1})
-  _resolve_tesla_preap_capabilities(caps, cp, cp_sp, params)
+  cp_sp = SimpleNamespace(flags=TeslaFlagsSP.PREAP_PEDAL_PRESENT)
+  _resolve_tesla_preap_capabilities(caps, cp, cp_sp)
   assert caps["tesla_preap_active_mode"] == "independent"
   assert caps["tesla_preap_independent_brake"] is True
 
-  cp_sp.preapLateralEngagementMode = 1
-  _resolve_tesla_preap_capabilities(caps, cp, cp_sp, params)
-  assert caps["tesla_preap_active_mode"] == "cruiseCoupled"
-  assert caps["tesla_preap_independent_brake"] is False
+  _resolve_tesla_preap_capabilities(caps, cp, cp_sp)
+  assert caps["tesla_preap_active_mode"] == "independent"
+  assert caps["tesla_preap_independent_brake"] is True
 
 
 def test_radar_health_matrix():
   caps = _caps()
   cp = SimpleNamespace(openpilotLongitudinalControl=False, pcmCruise=True, radarUnavailable=True)
-  cp_sp = SimpleNamespace(flags=TeslaFlagsSP.PREAP_RADAR_PRESENT, preapLateralEngagementMode=0)
+  cp_sp = SimpleNamespace(flags=TeslaFlagsSP.PREAP_RADAR_PRESENT)
   _resolve_tesla_preap_capabilities(caps, cp, cp_sp)
   assert caps["tesla_preap_radar"] is True
   assert caps["tesla_preap_radar_health"] == "unconfigured"

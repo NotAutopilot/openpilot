@@ -29,6 +29,9 @@ from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.safety import (
   require_preap_tool_start,
 )
 from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.transport import (
+  PREAP_FLAG_ENABLE_PEDAL,
+  PREAP_FLAG_PEDAL_BUS_ZERO,
+  PREAP_FLAG_PEDAL_CALIBRATION,
   SAFETY_ALLOUTPUT,
   SAFETY_ELM327,
   SAFETY_SILENT,
@@ -36,7 +39,6 @@ from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.transport import (
   DiagnosticTransport,
   TransportError,
 )
-from opendbc.car.tesla.preap.constants import PREAP_FLAG_ENABLE_PEDAL, PREAP_FLAG_PEDAL_BUS_ZERO, PREAP_FLAG_PEDAL_CALIBRATION, PREAP_MODE_INVALID
 
 
 class FakeParams:
@@ -168,12 +170,12 @@ def test_start_tool_flash_sets_risk_ack(monkeypatch):
     lambda **_kwargs: MagicMock(),
   )
   start_tool("flash_epas", confirmed=True, params=params)
-  assert params.get_bool("NAPScriptRunning") is False
+  assert params.get_bool("NAPScriptRunning") is True
   assert params.get_bool("NAPEpasRiskAccepted") is True
 
   params = FakeParams()
   start_tool("diagnose_radar", confirmed=True, params=params)
-  assert params.get_bool("NAPScriptRunning") is False
+  assert params.get_bool("NAPScriptRunning") is True
   assert params.get_bool("NAPEpasRiskAccepted") is False
 
 
@@ -211,10 +213,13 @@ def test_diagnose_radar_does_not_change_safety():
   panda.set_safety_mode.assert_not_called()
 
 
-def test_manager_does_not_stop_daemons_for_script_flag():
+def test_manager_stops_daemons_while_script_running():
   src = Path(__file__).resolve().parents[7] / "system" / "manager" / "manager.py"
   text = src.read_text()
-  assert 'params.get_bool("NAPScriptRunning")' not in text
+  assert 'params.get_bool("NAPScriptRunning")' in text
+  assert 'nap_ignore = ["pandad", "card", "controlsd", "selfdrived", "plannerd", "radard",' in text
+  assert '"calibrationd", "torqued", "locationd", "modeld", "dmonitoringmodeld"]' in text
+  assert "not_run=ignore + nap_ignore" in text
 
 
 def test_approved_tools_include_diagnose_radar():
@@ -411,13 +416,13 @@ def test_follow_scroll_offset_pins_overflow_to_bottom():
   assert follow_scroll_offset(10, 45, 200) == -(10 * 45 - 200)
 
 
-def test_run_script_scrolls_live_output_and_does_not_reboot():
+def test_run_script_scrolls_live_output_and_reboots_on_exit():
   src = (Path(__file__).resolve().parents[1] / "run_script.py").read_text()
   assert "_scroll_panel.update" in src
   assert "begin_scissor_mode" in src
   assert "follow_scroll_offset" in src
-  assert "HARDWARE.reboot" not in src
-  assert "set_enabled(self._state != ScriptState.RUNNING)" not in src
+  assert "HARDWARE.reboot" in src
+  assert "set_enabled(self._state != ScriptState.RUNNING)" in src
 
 
 def test_run_script_not_in_yaml():
@@ -495,7 +500,7 @@ def test_start_tool_clears_runtime_flags_when_child_exits(monkeypatch):
   monkeypatch.setattr(runner.threading, "Thread", FakeThread)
 
   assert runner.start_tool("flash_epas", confirmed=True, params=params) is process
-  assert params.get_bool("NAPScriptRunning") is False
+  assert params.get_bool("NAPScriptRunning") is True
   assert params.get_bool("NAPEpasRiskAccepted") is True
   assert captured["started"] is True
   assert captured["daemon"] is True
@@ -518,6 +523,25 @@ def test_start_tool_allows_second_launch_without_exclusive_lock(monkeypatch):
   runner.subprocess.Popen.assert_called_once()
 
 
+def test_stop_tool_fail_closed_leaves_script_running(monkeypatch):
+  import subprocess
+  from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools import runner
+
+  params = FakeParams()
+  params.put_bool("NAPScriptRunning", True)
+  process = MagicMock()
+  process.poll.return_value = None
+  process.wait.side_effect = subprocess.TimeoutExpired(cmd="tool", timeout=1)
+  runner.stop_tool(process, params)
+  assert params.get_bool("NAPScriptRunning") is True
+
+
+def test_epas_firmware_image_present():
+  path = Path(__file__).resolve().parents[1] / "firmware" / "epas-firmware-0x7000-0x45fff.bin"
+  assert path.is_file()
+  assert path.stat().st_size == 258048
+
+
 def test_start_tool_constructs_default_params_for_native_ui(monkeypatch):
   from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools import runner
 
@@ -529,7 +553,7 @@ def test_start_tool_constructs_default_params_for_native_ui(monkeypatch):
   monkeypatch.setattr(runner.threading, "Thread", lambda **_kwargs: MagicMock())
 
   assert runner.start_tool("diagnose_radar", confirmed=True) is process
-  assert params.get_bool("NAPScriptRunning") is False
+  assert params.get_bool("NAPScriptRunning") is True
 
 
 def test_launch_on_device_runner_spawns_run_script_not_the_tool(monkeypatch):
@@ -550,7 +574,7 @@ def test_launch_on_device_runner_spawns_run_script_not_the_tool(monkeypatch):
   assert "calibrate_pedal --confirm" not in " ".join(captured["cmd"])
 
 
-def test_spawn_approved_module_confirms_destructive_without_script_lock(monkeypatch):
+def test_spawn_approved_module_confirms_destructive_and_sets_script_lock(monkeypatch):
   from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.run_script import spawn_approved_module
 
   captured = {}
@@ -566,7 +590,7 @@ def test_spawn_approved_module_confirms_destructive_without_script_lock(monkeypa
   params = FakeParams()
   spawn_approved_module(APPROVED_TOOLS["calibrate_pedal"], params)
   assert "--confirm" in captured["cmd"]
-  assert params.get_bool("NAPScriptRunning") is False
+  assert params.get_bool("NAPScriptRunning") is True
 
 
 def test_flash_parser_accepts_runner_confirmation_flag():
@@ -602,60 +626,21 @@ def test_parse_configured_pedal_bus_preserves_zero_and_defaults_empty():
   assert parse_configured_pedal_bus(2) == 2
 
 
-class FirmwareShapedPanda:
-  """Replica of panda 0xdc/0xdf: 0xdf is ignored while in a car safety mode."""
-
-  def __init__(self, mode=SAFETY_TESLA_PREAP, param_sp=0):
-    self.current_safety_mode = mode
-    self.current_safety_param_sp = param_sp
-    self.calls = []
-
-  @staticmethod
-  def _is_car_safety_mode(mode):
-    # panda/board/main.c is_car_safety_mode
-    return mode not in (SAFETY_SILENT, SAFETY_ALLOUTPUT, SAFETY_ELM327) and mode != int(structs.CarParams.SafetyModel.noOutput)
-
-  def set_safety_mode(self, mode, param=0):
-    self.calls.append(("0xdc", int(mode), int(param)))
-    self.current_safety_mode = int(mode)
-
-  def set_alternative_experience(self, alternative_experience, safety_param_sp=0):
-    self.calls.append(("0xdf", int(alternative_experience), int(safety_param_sp)))
-    if not self._is_car_safety_mode(self.current_safety_mode):
-      self.current_safety_param_sp = int(safety_param_sp)
-
-
-def test_transport_pedal_calibration_uses_tesla_preap_not_elm327():
+def test_transport_pedal_calibration_programs_legal_params():
   panda = MagicMock()
   transport = DiagnosticTransport(panda=panda)
   transport.set_pedal_calibration_session(2)
   panda.set_safety_mode.assert_any_call(SAFETY_SILENT, 0)
   panda.set_safety_mode.assert_any_call(SAFETY_TESLA_PREAP, PREAP_FLAG_PEDAL_CALIBRATION)
-  panda.set_alternative_experience.assert_called_with(0, PREAP_MODE_INVALID)
   transport.set_pedal_calibration_session(0)
   panda.set_safety_mode.assert_called_with(
     SAFETY_TESLA_PREAP, PREAP_FLAG_PEDAL_CALIBRATION | PREAP_FLAG_PEDAL_BUS_ZERO,
   )
+  with pytest.raises(TransportError, match="invalid pedal bus"):
+    transport.set_pedal_calibration_session(1)
 
 
-def test_pedal_calibration_session_0xdf_before_car_safety():
-  panda = FirmwareShapedPanda(mode=SAFETY_TESLA_PREAP, param_sp=0)
-  transport = DiagnosticTransport(panda=panda)
-  transport.set_pedal_calibration_session(2)
-  assert panda.calls == [
-    ("0xdc", SAFETY_SILENT, 0),
-    ("0xdf", 0, PREAP_MODE_INVALID),
-    ("0xdc", SAFETY_TESLA_PREAP, PREAP_FLAG_PEDAL_CALIBRATION),
-  ]
-  assert panda.current_safety_param_sp == PREAP_MODE_INVALID
-  # Car-first ordering would ignore 0xdf and leave Independent (0).
-  ignored = FirmwareShapedPanda(mode=SAFETY_TESLA_PREAP, param_sp=0)
-  ignored.set_safety_mode(SAFETY_TESLA_PREAP, PREAP_FLAG_PEDAL_CALIBRATION)
-  ignored.set_alternative_experience(0, PREAP_MODE_INVALID)
-  assert ignored.current_safety_param_sp == 0
-
-
-def test_transport_rejects_elm327_and_alloutput_for_pedal_frames():
+def test_transport_rejects_elm327_alloutput_and_mixed_preap():
   panda = MagicMock()
   transport = DiagnosticTransport(panda=panda)
   transport.set_diagnostic_session()
@@ -664,10 +649,9 @@ def test_transport_rejects_elm327_and_alloutput_for_pedal_frames():
   panda.can_send.assert_not_called()
   with pytest.raises(TransportError, match="bypass"):
     transport._set_safety_mode(SAFETY_ALLOUTPUT)
+  transport._set_safety_mode(SAFETY_TESLA_PREAP, PREAP_FLAG_PEDAL_CALIBRATION)
   with pytest.raises(TransportError, match="longitudinal"):
     transport._set_safety_mode(SAFETY_TESLA_PREAP, PREAP_FLAG_PEDAL_CALIBRATION | PREAP_FLAG_ENABLE_PEDAL)
-  with pytest.raises(TransportError, match="calibration flag"):
-    transport._set_safety_mode(SAFETY_TESLA_PREAP, 0)
 
 
 def test_calibrate_pedal_run_selects_preap_calibration_session(monkeypatch):

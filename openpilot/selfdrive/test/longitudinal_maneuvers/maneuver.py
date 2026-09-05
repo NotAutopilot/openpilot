@@ -23,6 +23,7 @@ class Maneuver:
     self.enabled = kwargs.get("enabled", True)
     self.e2e = kwargs.get("e2e", False)
     self.personality = kwargs.get("personality", 0)
+    self.nap_follow_dist = kwargs.get("nap_follow_dist")
     self.force_decel = kwargs.get("force_decel", False)
 
     self.duration = duration
@@ -38,6 +39,7 @@ class Maneuver:
       only_radar=self.only_radar,
       e2e=self.e2e,
       personality=self.personality,
+      nap_follow_dist=self.nap_follow_dist,
       force_decel=self.force_decel,
     )
 

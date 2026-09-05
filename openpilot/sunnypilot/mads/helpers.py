@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from openpilot.common.params import Params
 from opendbc.car import structs
+from opendbc.car.tesla.preap.sp.platform import is_preap_platform
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP, HyundaiSafetyFlagsSP
 from opendbc.sunnypilot.car.tesla.values import MadsScreenButtonType, TeslaFlagsSP
@@ -78,6 +79,13 @@ def persist_required_mads(params: Params, CP_SP=None) -> bool:
   return True
 
 
+def unified_engagement_locked_off(CP: structs.CarParams, CP_SP: structs.CarParamsSP) -> bool:
+  # Pre-AP stalk pull already raises pcmEnable and lkasEnable. UEM would chime twice.
+  if bool(getattr(CP_SP, "madsRequired", False)):
+    return True
+  return is_preap_platform(CP)
+
+
 def coerce_mads_write(params: Params, key: str, value, CP_SP=None):
   """Reject runtime false writes of Mads on required platforms."""
   if key != "Mads":
@@ -110,13 +118,14 @@ def get_mads_limited_brands(CP: structs.CarParams, CP_SP: structs.CarParamsSP, p
 def resolve_mads_capabilities(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params | None = None) -> MadsCapabilities:
   if getattr(CP_SP, "madsCapabilityContractVersion", 0) >= 1:
     kind = CP_SP.madsMainCruiseInputKind
+    uem = False if unified_engagement_locked_off(CP, CP_SP) else bool(CP_SP.madsUnifiedEngagementMode)
     return MadsCapabilities(
       full_settings_available=bool(CP_SP.madsFullSettingsAvailable),
       main_cruise_input_kind=kind,
       main_cruise_allowed=bool(CP_SP.madsMainCruiseAllowed),
       mads_required=bool(CP_SP.madsRequired),
       tesla_coop_steering_available=bool(CP_SP.teslaCoopSteeringAvailable),
-      unified_engagement_mode=bool(CP_SP.madsUnifiedEngagementMode),
+      unified_engagement_mode=uem,
       steering_mode=STEERING_MODE_TO_INT.get(CP_SP.madsSteeringMode, MadsSteeringModeOnBrake.REMAIN_ACTIVE),
       hands_on_pause_available=bool(CP_SP.madsHandsOnPauseAvailable),
       no_main_cruise=kind in (MadsMainCruiseInputKind.none, MadsMainCruiseInputKind.momentary),
@@ -127,13 +136,14 @@ def resolve_mads_capabilities(CP: structs.CarParams, CP_SP: structs.CarParamsSP,
   limited = CP.brand == "rivian" or _version0_limited_tesla(CP, CP_SP, params)
   kind = MadsMainCruiseInputKind.none if CP.brand in MADS_NO_ACC_MAIN_BUTTON else MadsMainCruiseInputKind.stateful
   steering = MadsSteeringModeOnBrake.DISENGAGE if limited else int(params.get("MadsSteeringMode", return_default=True) or 0)
+  uem = False if unified_engagement_locked_off(CP, CP_SP) else bool(params.get_bool("MadsUnifiedEngagementMode"))
   return MadsCapabilities(
     full_settings_available=not limited,
     main_cruise_input_kind=kind,
     main_cruise_allowed=bool(params.get_bool("MadsMainCruiseAllowed")) if kind == MadsMainCruiseInputKind.stateful else False,
     mads_required=False,
     tesla_coop_steering_available=CP.brand == "tesla",
-    unified_engagement_mode=bool(params.get_bool("MadsUnifiedEngagementMode")),
+    unified_engagement_mode=uem,
     steering_mode=steering,
     hands_on_pause_available=False,
     no_main_cruise=kind in (MadsMainCruiseInputKind.none, MadsMainCruiseInputKind.momentary),

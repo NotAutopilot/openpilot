@@ -89,6 +89,15 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     stockAeb @52;
     stockLkas @98;
     lateralManeuver @99;
+    # NAP events. @98/@99 are comma 0.11.1 (stockLkas, lateralManeuver).
+    pedalCruiseEnabled @100;
+    pedalCruiseDisabled @101;
+    pedalMaxRegen @102;
+    teslaCCEngaged @103;
+    teslaCCDisengaged @104;
+    teslaCCNotArmed @105;
+    pedalNotCalibrated @106;
+    pedalUnavailable @107;
     ldw @53;
     carUnrecognized @54;
     invalidLkasSetting @55;
@@ -1094,6 +1103,8 @@ struct ModelDataV2 {
     hardBrakePredicted @7 :Bool;
     laneChangeState @8 :LaneChangeState;
     laneChangeDirection @9 :LaneChangeDirection;
+    laneChangeSignalsRemaining @10 :UInt8;
+    laneChangeRemaining @11 :UInt8;
 
 
     deprecated :group {
@@ -1213,6 +1224,8 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   shouldStop @37: Bool;
   allowThrottle @38: Bool;
   allowBrake @39: Bool;
+  napFollowDistance @40 :UInt8;
+  tFollow @41 :Float32;
 
 
   solverExecutionTime @35 :Float32;

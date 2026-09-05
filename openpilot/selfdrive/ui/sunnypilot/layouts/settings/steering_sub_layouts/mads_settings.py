@@ -7,16 +7,15 @@ See the LICENSE.md file in the root directory for more details.
 from collections.abc import Callable
 import pyray as rl
 
-from opendbc.car.tesla.preap.boot import PREAP_PLATFORM
+from opendbc.car.tesla.preap.sp.platform import PREAP_PLATFORM, is_preap_platform
 from opendbc.sunnypilot.car.tesla.values import MadsScreenButtonType, TeslaFlagsSP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.sunnypilot.mads.helpers import MadsSteeringModeOnBrake
-from openpilot.sunnypilot.selfdrive.car.preap_boot import is_preap_ui_platform
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.network import NavButton
 from openpilot.system.ui.widgets.scroller_tici import Scroller
-from openpilot.system.ui.sunnypilot.widgets.list_view import multiple_button_item_sp, toggle_item_sp
+from openpilot.system.ui.sunnypilot.widgets.list_view import multiple_button_item_sp, text_item_sp, toggle_item_sp
 
 MADS_STEERING_MODE_OPTIONS = [
   (tr("Remain Active"), tr_noop("Remain Active: ALC will remain active when the brake pedal is pressed.")),
@@ -24,12 +23,7 @@ MADS_STEERING_MODE_OPTIONS = [
   (tr("Disengage"), tr_noop("Disengage: ALC will disengage when the brake pedal is pressed.")),
 ]
 
-MADS_ENGAGEMENT_MODE_OPTIONS = [
-  (tr("Independent"), tr_noop("Independent: The first stalk pull requests ALC. The second pull requests cruise. ALC can remain active if cruise exits.")),
-  (tr("Cruise Coupled"), tr_noop(
-    "Cruise Coupled: The first stalk pull is ignored. The second pull requests ALC and cruise together. Cancel or brake disengages both.")),
-  (tr("Longitudinal Only"), tr_noop("Longitudinal Only: Stalk pulls request cruise only. ALC stays off.")),
-]
+PREAP_LATERAL_ENGAGEMENT_DESC = tr("This platform requires MADS. Stalk pull engages steering.")
 
 MADS_MAIN_CRUISE_BASE_DESC = tr("Note: For vehicles without LFA/LKAS button, disabling this will prevent lateral control engagement.")
 MADS_UNIFIED_ENGAGEMENT_MODE_BASE_DESC = "{engage}<br><h4>{note}</h4>".format(
@@ -41,7 +35,6 @@ STATUS_CHECK_COMPATIBILITY = tr("Start the vehicle to check vehicle compatibilit
 DEFAULT_TO_OFF = tr("This feature defaults to OFF, and does not allow selection due to vehicle limitations.")
 DEFAULT_TO_ON = tr("This feature defaults to ON, and does not allow selection due to vehicle limitations.")
 STATUS_DISENGAGE_ONLY = tr("This platform only supports Disengage mode due to vehicle limitations.")
-PREAP_ENGAGEMENT_INDEPENDENT = 0
 
 
 class MadsSettingsLayout(Widget):
@@ -53,14 +46,10 @@ class MadsSettingsLayout(Widget):
     self._scroller = Scroller(self.items, line_separator=True, spacing=0)
 
   def _initialize_items(self):
-    self._engagement_mode = multiple_button_item_sp(
-      param="NAPLateralEngagementMode",
-      title=lambda: tr("Lateral Engagement Mode"),
-      description="",
-      buttons=[opt[0] for opt in MADS_ENGAGEMENT_MODE_OPTIONS],
-      inline=False,
-      button_width=350,
-      callback=self._update_engagement_mode_description,
+    self._preap_engagement = text_item_sp(
+      title=lambda: tr("Lateral Engagement"),
+      value=lambda: tr("Stalk pull engages steering"),
+      description=PREAP_LATERAL_ENGAGEMENT_DESC,
     )
     self._main_cruise_toggle = toggle_item_sp(
       title=lambda: tr("Toggle with Main Cruise"),
@@ -83,7 +72,7 @@ class MadsSettingsLayout(Widget):
     )
 
     self.items = [
-      self._engagement_mode,
+      self._preap_engagement,
       self._main_cruise_toggle,
       self._unified_engagement_toggle,
       self._steering_mode,
@@ -107,26 +96,16 @@ class MadsSettingsLayout(Widget):
   def _is_preap() -> bool:
     bundle = ui_state.params.get("CarPlatformBundle")
     bundle_platform = bundle.get("platform", "") if isinstance(bundle, dict) else ""
-    return bundle_platform == PREAP_PLATFORM or is_preap_ui_platform(bundle_platform, ui_state.CP)
-
-  @staticmethod
-  def _active_engagement_mode() -> int:
-    if ui_state.CP_SP is not None:
-      try:
-        return int(ui_state.CP_SP.preapLateralEngagementMode)
-      except Exception:
-        pass
-    try:
-      return int(ui_state.params.get("NAPLateralEngagementMode") or 0)
-    except (TypeError, ValueError):
-      return PREAP_ENGAGEMENT_INDEPENDENT
+    if bundle_platform:
+      return bundle_platform == PREAP_PLATFORM
+    return ui_state.CP is not None and is_preap_platform(ui_state.CP)
 
   @staticmethod
   def _mads_limited_settings() -> bool:
     # PREAP_PLATFORM is full MADS. Tesla !HAS_VEHICLE_BUS is AP-no-bus only.
     bundle = ui_state.params.get("CarPlatformBundle")
     bundle_platform = bundle.get("platform", "") if isinstance(bundle, dict) else ""
-    if bundle_platform == PREAP_PLATFORM or is_preap_ui_platform(bundle_platform, ui_state.CP):
+    if bundle_platform == PREAP_PLATFORM or MadsSettingsLayout._is_preap():
       return False
     if ui_state.CP_SP is not None and bool(getattr(ui_state.CP_SP, "madsRequired", False)):
       return False
@@ -140,7 +119,7 @@ class MadsSettingsLayout(Widget):
     if brand == "rivian":
       return True
     elif brand == "tesla":
-      if bundle_platform == PREAP_PLATFORM or is_preap_ui_platform(bundle_platform, ui_state.CP):
+      if bundle_platform == PREAP_PLATFORM or MadsSettingsLayout._is_preap():
         return False
       if ui_state.CP_SP is None or not ui_state.CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
         return True
@@ -155,12 +134,6 @@ class MadsSettingsLayout(Widget):
       result += desc + "<br>"
     item.set_description(result)
     item.show_description(True)
-
-  def _update_engagement_mode_description(self, button_index: int):
-    base_desc = tr(
-      "Choose how Pre-AP stalk pulls request Automatic Lane Centering (ALC) and cruise in sunnypilot. Onroad writes apply on the next drive."
-    )
-    self._update_option_description(self._engagement_mode, MADS_ENGAGEMENT_MODE_OPTIONS, button_index, base_desc)
 
   def _update_steering_mode_description(self, button_index: int):
     base_desc = tr(
@@ -197,12 +170,10 @@ class MadsSettingsLayout(Widget):
       self._steering_mode.action_item.set_enabled_buttons(None)
 
     is_preap = self._is_preap()
-    mode = self._active_engagement_mode()
-    self._engagement_mode.set_visible(is_preap)
+    self._preap_engagement.set_visible(is_preap)
     self._main_cruise_toggle.set_visible(not is_preap)
     self._unified_engagement_toggle.set_visible(not is_preap)
-    self._steering_mode.set_visible((not is_preap) or mode == PREAP_ENGAGEMENT_INDEPENDENT)
     if is_preap:
-      self._update_engagement_mode_description(self._engagement_mode.action_item.get_selected_button())
       self._main_cruise_toggle.action_item.set_enabled(False)
       self._unified_engagement_toggle.action_item.set_enabled(False)
+      self._unified_engagement_toggle.action_item.set_state(False)

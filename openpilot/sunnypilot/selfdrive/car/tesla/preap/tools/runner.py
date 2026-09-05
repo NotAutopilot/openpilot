@@ -1,7 +1,8 @@
 """Pre-AP production tool runner seam.
 
 UI launch opens run_script on the device display. Offroad is required.
-There is no exclusive NAPScriptRunning lock.
+Sets NAPScriptRunning before spawn so manager stops pandad/card/etc.
+Clears it only after the child is confirmed gone. Stuck child: fail-closed.
 """
 from __future__ import annotations
 
@@ -38,16 +39,51 @@ def approved_module(tool: str) -> str:
   return APPROVED_TOOLS[tool]
 
 
-def _clear_tool_flags(params: Params) -> None:
+def mark_script_running(params: Params) -> None:
+  params.put_bool("NAPScriptRunning", True, block=True)
+
+
+def clear_tool_flags(params: Params) -> None:
   params.put_bool("NAPScriptRunning", False, block=True)
   params.put_bool("NAPEpasRiskAccepted", False, block=True)
+
+
+def stop_child(process: subprocess.Popen) -> bool:
+  """SIGINT (5s) → SIGTERM (2s) → SIGKILL (2s). True if the child is gone.
+
+  False means the child is still alive after SIGKILL. Caller must leave
+  NAPScriptRunning set so manager does not resume pandad while a zombie
+  may still hold Panda USB.
+  """
+  if process.poll() is not None:
+    return True
+
+  # Cooperative cancel: SIGINT raises KeyboardInterrupt in the child,
+  # so its finally blocks run (Panda safety reset, pedal disable, etc.).
+  # Plain SIGTERM bypasses those.
+  process.send_signal(signal.SIGINT)
+  try:
+    process.wait(timeout=5)
+    return True
+  except subprocess.TimeoutExpired:
+    process.terminate()
+    try:
+      process.wait(timeout=2)
+      return True
+    except subprocess.TimeoutExpired:
+      process.kill()
+      try:
+        process.wait(timeout=2)
+        return True
+      except subprocess.TimeoutExpired:
+        return False
 
 
 def _reap_tool(process: subprocess.Popen, params: Params) -> None:
   try:
     process.wait()
   finally:
-    _clear_tool_flags(params)
+    clear_tool_flags(params)
 
 
 def start_tool(tool: str, *, confirmed: bool, params: Params | None = None) -> subprocess.Popen:
@@ -62,6 +98,9 @@ def start_tool(tool: str, *, confirmed: bool, params: Params | None = None) -> s
   cmd = [sys.executable, "-m", module]
   if confirmed and tool in DESTRUCTIVE_TOOLS:
     cmd.append("--confirm")
+  # Set NAPScriptRunning before spawn so manager stops pandad before
+  # the child process tries to open Panda USB.
+  mark_script_running(params)
   try:
     process = subprocess.Popen(
       cmd,
@@ -70,7 +109,7 @@ def start_tool(tool: str, *, confirmed: bool, params: Params | None = None) -> s
       env=env,
     )
   except Exception:
-    _clear_tool_flags(params)
+    clear_tool_flags(params)
     raise
   threading.Thread(target=_reap_tool, args=(process, params), daemon=True).start()
   return process
@@ -78,7 +117,10 @@ def start_tool(tool: str, *, confirmed: bool, params: Params | None = None) -> s
 
 def launch_on_device_runner(title: str, tool: str, instructions: str,
                             params: Params | None = None) -> subprocess.Popen:
-  """Take over the Comma screen with run_script. Do not spawn the tool on a pts."""
+  """Take over the Comma screen with run_script. Do not spawn the tool on a pts.
+
+  NAPScriptRunning is set when the user presses Start in run_script, not here.
+  """
   require_runtime_path()
   params = params or Params()
   require_preap_tool_start(params, tool=tool, confirmed=True)
@@ -99,18 +141,9 @@ def launch_on_device_runner(title: str, tool: str, instructions: str,
 
 def stop_tool(process: subprocess.Popen, params: Params | None = None) -> None:
   params = params or Params()
-  if process.poll() is None:
-    process.send_signal(signal.SIGINT)
-    try:
-      process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-      process.terminate()
-      try:
-        process.wait(timeout=2)
-      except subprocess.TimeoutExpired:
-        process.kill()
-  if process.poll() is not None:
-    _clear_tool_flags(params)
+  if not stop_child(process):
+    return
+  clear_tool_flags(params)
 
 
 def is_destructive(tool: str) -> bool:

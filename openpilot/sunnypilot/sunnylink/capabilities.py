@@ -14,7 +14,7 @@ from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.hardware import HARDWARE
-from openpilot.sunnypilot.selfdrive.car.preap_boot import is_preap_ui_platform
+from opendbc.car.tesla.preap.sp.platform import is_preap_ui_platform
 
 
 # Wire-protocol version for the capabilities payload. Bump on breaking changes
@@ -97,12 +97,6 @@ CAPABILITY_DEFAULTS: dict[str, bool | str | int] = {
   "tesla_preap_radar_health": "none",
 }
 
-PREAP_MODE_NAMES = {
-  0: "independent",
-  1: "cruiseCoupled",
-  2: "longitudinalOnly",
-}
-
 
 def _bundle_field(bundle: dict | None, key: str) -> str:
   return bundle.get(key, "") if isinstance(bundle, dict) else ""
@@ -155,16 +149,9 @@ def _resolve_tesla_preap_capabilities(caps: dict, CP, CP_SP, params=None) -> Non
   caps["tesla_preap_radar"] = bool(flags & TeslaFlagsSP.PREAP_RADAR_PRESENT)
   caps["tesla_preap_pedal_calib"] = bool(flags & TeslaFlagsSP.PREAP_PEDAL_CALIB_AVAILABLE)
 
-  boot_mode = 0
-  if CP_SP is not None:
-    try:
-      boot_mode = int(CP_SP.preapLateralEngagementMode)
-    except Exception:
-      boot_mode = 0
-  caps["tesla_preap_active_mode"] = PREAP_MODE_NAMES.get(boot_mode, "independent")
-  # Brake-mode applicability follows the immutable CP_SP boot snapshot, not
-  # the staged next-drive Param. Onroad writes still persist for next boot.
-  caps["tesla_preap_independent_brake"] = PREAP_MODE_NAMES.get(boot_mode, "independent") == "independent"
+  # Stalk pull is the only Pre-AP lateral request. Brake-mode settings stay applicable.
+  caps["tesla_preap_active_mode"] = "independent"
+  caps["tesla_preap_independent_brake"] = True
 
   if caps["tesla_preap_pedal"] and CP is not None and bool(CP.openpilotLongitudinalControl) and not bool(CP.pcmCruise):
     caps["tesla_preap_longitudinal_path"] = "pedal"

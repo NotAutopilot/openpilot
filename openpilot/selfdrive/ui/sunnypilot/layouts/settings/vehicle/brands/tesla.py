@@ -7,7 +7,7 @@ See the LICENSE.md file in the root directory for more details.
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.vehicle.brands.base import BrandSettings
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.sunnypilot.selfdrive.car.preap_boot import is_preap_ui_platform
+from opendbc.car.tesla.preap.sp.platform import is_preap_ui_platform
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.sunnypilot.widgets.list_view import multiple_button_item_sp, toggle_item_sp
 
@@ -31,6 +31,13 @@ class TeslaSettings(BrandSettings):
   def __init__(self):
     super().__init__()
     self.coop_steering_toggle = toggle_item_sp(tr("Cooperative Steering (Beta)"), "", param="TeslaCoopSteering")
+    self.hands_on_pause_toggle = toggle_item_sp(
+      tr("Hands-On Pause"),
+      tr(
+        "Default off: hands on the wheel fully disengages. On: pause steering and cancel speed control, then resume steering after you release for one second.",
+      ),
+      param="TeslaPreapHandsOnPause",
+    )
     self.mads_screen_button = multiple_button_item_sp(
       title=lambda: tr("MADS Screen Activation"),
       description="",
@@ -38,7 +45,7 @@ class TeslaSettings(BrandSettings):
       param="TeslaMadsScreenButton",
       inline=False,
     )
-    self.items = [self.coop_steering_toggle, self.mads_screen_button]
+    self.items = [self.coop_steering_toggle, self.hands_on_pause_toggle, self.mads_screen_button]
 
   def update_settings(self):
     is_metric = ui_state.is_metric
@@ -63,9 +70,9 @@ class TeslaSettings(BrandSettings):
     self.coop_steering_toggle.set_description(coop_steering_desc)
     self.coop_steering_toggle.action_item.set_enabled(offroad)
     self.coop_steering_toggle.set_visible(not is_preap)
-
-    has_vehicle_bus = ui_state.CP_SP is not None and bool(ui_state.CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS)
-    self.mads_screen_button.set_visible((not is_preap) and has_vehicle_bus)
+    pause_available = ui_state.CP_SP is not None and bool(getattr(ui_state.CP_SP, "madsHandsOnPauseAvailable", False))
+    self.hands_on_pause_toggle.set_visible(is_preap and pause_available)
+    self.hands_on_pause_toggle.action_item.set_enabled(offroad)
 
     mads_screen_button_desc = (
       f"{tr('Use a multi-finger press on the infotainment screen to toggle MADS.')} " +
@@ -77,4 +84,6 @@ class TeslaSettings(BrandSettings):
       mads_screen_button_disabled_msg = tr("Enable \"Always Offroad\" in Device panel, or turn vehicle off to change.")
       mads_screen_button_desc = f"<b>{mads_screen_button_disabled_msg}</b><br><br>{mads_screen_button_desc}"
     self.mads_screen_button.set_description(mads_screen_button_desc)
+    has_vehicle_bus = ui_state.CP_SP is not None and bool(ui_state.CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS)
+    self.mads_screen_button.set_visible((not is_preap) and has_vehicle_bus)
     self.mads_screen_button.action_item.set_enabled(offroad)

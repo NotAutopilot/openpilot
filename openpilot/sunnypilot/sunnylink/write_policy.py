@@ -1,8 +1,8 @@
 """Remote write policy for sunnylink Param updates.
 
 Local UI remains the only writer for hardware/calibration. Sunnylink may write
-follow distance live and stage next-drive engagement/brake values. Conflicting
-or unsupported Pre-AP writes are rejected. The active boot snapshot is not
+follow distance live and stage next-drive brake values. Conflicting or
+unsupported Pre-AP writes are rejected. The active boot snapshot is not
 mutated here; card/interface freeze it at boot.
 """
 from __future__ import annotations
@@ -16,8 +16,6 @@ from openpilot.sunnypilot.mads.helpers import is_mads_required
 
 FOLLOW_DISTANCE_MIN = 1
 FOLLOW_DISTANCE_MAX = 7
-ENGAGEMENT_MODE_MIN = 0
-ENGAGEMENT_MODE_MAX = 2
 STEERING_MODE_MIN = 0
 STEERING_MODE_MAX = 2
 PREAP_MODE_INDEPENDENT = 0
@@ -38,7 +36,6 @@ PREAP_LOCAL_ONLY_KEYS = frozenset({
   "NAPRadarBehindNosecone",
   "NAPRadarOffset",
   "NAPForcePreAP",
-  "NAPLateralEngagementModeMigrated",
   "NAPEpasRiskAccepted",
   "NAPScriptRunning",
   "NAPBrakeFactor",
@@ -73,19 +70,23 @@ PREAP_UNSUPPORTED_KEYS = frozenset({
   "MadsUnifiedEngagementMode",
 })
 
+# Dropped with the three-mode Pre-AP lateral picker. Nothing reads these.
+RETIRED_KEYS = frozenset({
+  "NAPLateralEngagementMode",
+  "NAPLateralEngagementModeMigrated",
+})
+
 PREAP_LIVE_KEYS = frozenset({
   "NAPFollowDistance",
 })
 
 PREAP_NEXT_DRIVE_KEYS = frozenset({
-  "NAPLateralEngagementMode",
   "MadsSteeringMode",
 })
 
 # Pre-AP-only remote keys. MadsSteeringMode remains a modern Tesla setting.
 PREAP_ONLY_REMOTE_KEYS = frozenset({
   "NAPFollowDistance",
-  "NAPLateralEngagementMode",
 })
 
 
@@ -128,6 +129,9 @@ def evaluate_param_write(key: str, value, caps: dict | None = None, *,
   if key in PREAP_LOCAL_ONLY_KEYS:
     return WriteDecision(False, "local_only")
 
+  if key in RETIRED_KEYS:
+    return WriteDecision(False, "retired_key")
+
   if tesla_preap and key in PREAP_UNSUPPORTED_KEYS:
     return WriteDecision(False, "unsupported_on_preap")
 
@@ -144,12 +148,6 @@ def evaluate_param_write(key: str, value, caps: dict | None = None, *,
     parsed = _as_int(value)
     if parsed is None or not (FOLLOW_DISTANCE_MIN <= parsed <= FOLLOW_DISTANCE_MAX):
       return WriteDecision(False, "invalid_follow_distance")
-    return WriteDecision(True)
-
-  if key == "NAPLateralEngagementMode":
-    parsed = _as_int(value)
-    if parsed is None or not (ENGAGEMENT_MODE_MIN <= parsed <= ENGAGEMENT_MODE_MAX):
-      return WriteDecision(False, "invalid_engagement_mode")
     return WriteDecision(True)
 
   if key == "MadsSteeringMode":
@@ -169,27 +167,14 @@ def evaluate_param_write(key: str, value, caps: dict | None = None, *,
 def evaluate_ordered_writes(items: Iterable[tuple[str, Any]], caps: dict | None = None, *,
                             mads_required: bool | None = None,
                             staged_mode: int | None = None) -> list[tuple[str, Any, WriteDecision]]:
-  """Evaluate a batch against its final staged engagement mode.
-
-  Brake-mode authorization is order-independent: a batch cannot write the
-  brake mode before a later coupled-mode write to bypass applicability.
-  Invalid engagement-mode writes do not alter the existing staged mode.
-  """
+  """Evaluate a batch. Brake-mode authorization uses the caller's staged mode."""
   caps = caps or {}
-  items = list(items)
-  final_mode = staged_mode
-  for key, value in items:
-    if key == "NAPLateralEngagementMode":
-      parsed = _as_int(value)
-      if parsed is not None and ENGAGEMENT_MODE_MIN <= parsed <= ENGAGEMENT_MODE_MAX:
-        final_mode = parsed
-
   return [
     (
       key,
       value,
       evaluate_param_write(
-        key, value, caps, mads_required=mads_required, staged_mode=final_mode,
+        key, value, caps, mads_required=mads_required, staged_mode=staged_mode,
       ),
     )
     for key, value in items

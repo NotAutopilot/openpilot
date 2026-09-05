@@ -6,7 +6,7 @@ from openpilot.cereal import messaging
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.tesla.interface import CarInterface
-from opendbc.car.tesla.preap.radar_interface import RadarInterface as PreAPRadarInterface
+from opendbc.car.tesla.preap.sp.radar_interface import RadarInterface as PreAPRadarInterface
 from opendbc.car.tesla.values import CAR
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 from openpilot.selfdrive.controls.radard import RADAR_MEASUREMENT_TIMEOUT, RADAR_TO_CAMERA, RadarD
@@ -169,7 +169,7 @@ class RadarHarness:
         slot.dRel = float(point.dRel)
         slot.yRel = float(point.yRel)
         slot.vRel = float(point.vRel)
-        slot.deprecated.measured = bool(point.deprecated.measured)
+        slot.measured = bool(point.measured)
       messages.append(live)
     self.sm.update_msgs(time_s, [message.as_reader() for message in messages])
     self.radar.update(self.sm, self.sm["liveTracks"])
@@ -276,7 +276,7 @@ class TestRouteDerivedReplay:
           dst.dRel = src["dRel"]
           dst.yRel = src["yRel"]
           dst.vRel = src["vRel"]
-          dst.deprecated.measured = True
+          dst.measured = True
         messages.append(message)
       if not messages:
         continue

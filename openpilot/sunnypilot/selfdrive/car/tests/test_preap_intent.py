@@ -10,9 +10,9 @@ Lat = custom.CarStateSP.PreapLateralIntent
 Long = custom.CarStateSP.PreapLongitudinalIntent
 
 
-def record(epoch, sequence, lateral=Lat.none, longitudinal=Long.none):
+def record(sequence, lateral=Lat.none, longitudinal=Long.none):
   msg = custom.CarStateSP.new_message()
-  msg.preapIntentEpoch = epoch
+  msg.preapIntentEpoch = 0
   msg.preapIntentSequence = sequence
   msg.preapLateralIntent = lateral
   msg.preapLongitudinalIntent = longitudinal
@@ -27,50 +27,36 @@ def apply(consumer, msg):
 
 def test_restart_seeds_without_acting_then_accepts_newer():
   consumer = PreAPIntentConsumer()
-  events, events_sp = apply(consumer, record(1, 4, Lat.mainCruiseRequest, Long.enable))
+  events, events_sp = apply(consumer, record(4, Lat.mainCruiseRequest, Long.enable))
   assert not events.has(EventName.buttonEnable)
   assert not events_sp.has(EventNameSP.lkasEnable)
 
-  events, events_sp = apply(consumer, record(1, 5, Lat.mainCruiseRequest, Long.enable))
+  events, events_sp = apply(consumer, record(5, Lat.mainCruiseRequest, Long.enable))
   assert events.has(EventName.buttonEnable)
   assert events_sp.has(EventNameSP.lkasEnable)
 
 
 def test_duplicate_older_and_reordered_records_are_ignored():
   consumer = PreAPIntentConsumer()
-  apply(consumer, record(1, 10))
-  apply(consumer, record(1, 11))
+  apply(consumer, record(10))
+  apply(consumer, record(11))
   for sequence in (11, 10, 9):
-    events, events_sp = apply(consumer, record(1, sequence, Lat.forceDisable, Long.disable))
+    events, events_sp = apply(consumer, record(sequence, Lat.forceDisable, Long.disable))
     assert not events.has(EventName.buttonCancel)
     assert not events_sp.has(EventNameSP.lkasDisable)
 
 
 def test_rollover_progression_is_newer():
   consumer = PreAPIntentConsumer()
-  apply(consumer, record(1, 0xFFFFFFFF))
-  events, events_sp = apply(consumer, record(1, 0, Lat.mainCruiseRequest, Long.enable))
+  apply(consumer, record(0xFFFFFFFF))
+  events, events_sp = apply(consumer, record(0, Lat.mainCruiseRequest, Long.enable))
   assert events.has(EventName.buttonEnable)
   assert events_sp.has(EventNameSP.lkasEnable)
 
 
-def test_half_range_and_non_neutral_new_epoch_fail_closed():
+def test_half_range_fail_closed():
   consumer = PreAPIntentConsumer()
-  apply(consumer, record(1, 0))
-  events, events_sp = apply(consumer, record(1, 0x80000000, Lat.mainCruiseRequest, Long.enable))
+  apply(consumer, record(0))
+  events, events_sp = apply(consumer, record(0x80000000, Lat.mainCruiseRequest, Long.enable))
   assert events.has(EventName.buttonCancel)
   assert events_sp.has(EventNameSP.lkasDisable)
-
-  events, events_sp = apply(consumer, record(2, 1, Lat.mainCruiseRequest, Long.enable))
-  assert events.has(EventName.buttonCancel)
-  assert events_sp.has(EventNameSP.lkasDisable)
-
-
-def test_new_epoch_neutral_seed_requires_fresh_record():
-  consumer = PreAPIntentConsumer()
-  apply(consumer, record(1, 5))
-  events, events_sp = apply(consumer, record(2, 0))
-  assert not events.has(EventName.buttonCancel)
-  assert not events_sp.has(EventNameSP.lkasDisable)
-  events, events_sp = apply(consumer, record(2, 1, Lat.mainCruiseRequest))
-  assert events_sp.has(EventNameSP.lkasEnable)

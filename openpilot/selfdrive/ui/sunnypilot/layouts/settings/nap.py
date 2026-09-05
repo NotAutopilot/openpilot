@@ -3,10 +3,11 @@ from collections.abc import Callable
 
 import pyray as rl
 
+from opendbc.car.tesla.preap.nap_params import NAPParamKeys
 from openpilot.common.params import Params
 from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   BACKUP_EPAS_INSTRUCTIONS, BRAKE_FACTOR_PRESETS, CALIBRATE_PEDAL_INSTRUCTIONS,
-  DEFAULTS, FLASH_EPAS_INSTRUCTIONS, NAPParamKeys, PEDAL_CAN_BUS_VALUES,
+  DEFAULTS, FLASH_EPAS_INSTRUCTIONS, PEDAL_CAN_BUS_VALUES,
   RADAR_OFFSET_MAX, RADAR_OFFSET_MIN, RESTORE_EPAS_INSTRUCTIONS,
   acknowledgments_html, find_preset_index,
 )

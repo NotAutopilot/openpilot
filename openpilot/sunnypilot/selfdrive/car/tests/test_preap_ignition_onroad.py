@@ -38,8 +38,17 @@ class TestPreAPIgnitionOnroadContract(unittest.TestCase):
     self.packer = CANPackerSafety("tesla_preap")
 
   def _msg(self, counter, drive_rail, bus=0):
+    # The packer leaves the Tesla checksum byte to the sender (teslacan.py does
+    # it on the car); fill it here the way GTW does so ignition.h accepts the frame.
+    def fix_checksum(msg):
+      addr, dat, bus = msg
+      dat = bytearray(dat)
+      dat[7] = (0x4B + sum(dat[:7])) & 0xFF
+      return addr, bytes(dat), bus
+
     return self.packer.make_can_msg_safety(
       "GTW_status", bus, {"GTW_statusCounter": counter, "GTW_driveRailReq": int(drive_rail)},
+      fix_checksum=fix_checksum,
     )
 
   def test_valid_0x348_sets_pandastate_and_starts_card(self):

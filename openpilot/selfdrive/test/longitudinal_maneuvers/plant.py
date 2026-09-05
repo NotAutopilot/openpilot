@@ -11,11 +11,27 @@ from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPl
 from openpilot.selfdrive.controls.radard import _LEAD_ACCEL_TAU
 
 
+class _ManeuverParams:
+  def __init__(self, nap_follow_dist):
+    self.nap_follow_dist = nap_follow_dist
+
+  def get(self, key, return_default=False):
+    assert return_default
+    assert key == "NAPFollowDistance"
+    return self.nap_follow_dist
+
+  @staticmethod
+  def get_bool(key):
+    assert key == "NAPAdaptiveAccel"
+    return False
+
+
 class Plant:
   messaging_initialized = False
 
   def __init__(self, lead_relevancy=False, speed=0.0, distance_lead=2.0,
-               enabled=True, only_lead2=False, only_radar=False, e2e=False, personality=0, force_decel=False):
+               enabled=True, only_lead2=False, only_radar=False, e2e=False, personality=0,
+               nap_follow_dist=None, force_decel=False):
     self.rate = 1. / DT_MDL
 
     if not Plant.messaging_initialized:
@@ -50,10 +66,24 @@ class Plant:
 
     from opendbc.car.honda.values import CAR
     from opendbc.car.honda.interface import CarInterface
+    from opendbc.car import structs
 
-    CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
-    CP_SP = CarInterface.get_non_essential_params_sp(CP, CAR.HONDA_CIVIC)
-    self.planner = LongitudinalPlanner(CP, CP_SP, init_v=self.speed)
+    if nap_follow_dist is None:
+      CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+      CP_SP = CarInterface.get_non_essential_params_sp(CP, CAR.HONDA_CIVIC)
+      params = None
+    else:
+      CP = structs.CarParams()
+      CP.brand = "tesla"
+      CP.carFingerprint = "TESLA_MODEL_S_PREAP"
+      CP.openpilotLongitudinalControl = True
+      CP.pcmCruise = False
+      CP.steerRatio = 15.75
+      CP.wheelbase = 2.959
+      CP_SP = structs.CarParamsSP()
+      params = _ManeuverParams(nap_follow_dist)
+
+    self.planner = LongitudinalPlanner(CP, CP_SP, init_v=self.speed, params=params)
 
   @property
   def current_time(self):

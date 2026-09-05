@@ -1,3 +1,4 @@
+import copy
 import random
 
 from openpilot.selfdrive.selfdrived.events import Alert, EVENTS
@@ -18,6 +19,7 @@ class TestAlertManager:
         event = random.choice([e for e in EVENTS.values() if len(e)])
         alert = random.choice(list(event.values()))
 
+      alert = copy.copy(alert)
       alert.duration = duration
 
       # check two cases:

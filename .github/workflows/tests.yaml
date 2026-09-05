@@ -23,6 +23,41 @@ env:
   PYTEST: pytest --continue-on-collection-errors --durations=0 -n logical
 
 jobs:
+  tesla_preap_regressions:
+    name: Tesla Pre-AP regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+    - run: ./tools/op.sh setup
+    - name: Install raylib headless dependencies
+      if: ${{ !contains(runner.name, 'nsc') }}
+      run: sudo apt-get install -y --no-install-recommends libgles2 libegl1
+    - name: Build openpilot
+      run: scons
+    - name: Run Tesla Pre-AP regressions
+      run: |
+        # opendbc paths run alone so opendbc_repo/pyproject.toml is the rootdir
+        pytest -q -n 0 \
+          opendbc_repo/opendbc/safety/tests/test_tesla_preap.py \
+          opendbc_repo/opendbc/safety/tests/test_tesla_preap_radar_carconfig.py \
+          opendbc_repo/opendbc/safety/tests/test_tesla_preap_radar_donor.py \
+          opendbc_repo/opendbc/safety/tests/test_tesla_preap_radar_f190.py \
+          opendbc_repo/opendbc/car/tesla/preap/tests/
+        pytest -q -n 0 \
+          openpilot/selfdrive/controls/tests/test_tesla_preap_following.py \
+          openpilot/selfdrive/controls/tests/test_tesla_preap_longcontrol.py \
+          openpilot/selfdrive/controls/tests/test_longitudinal_planner_preap.py \
+          openpilot/selfdrive/controls/tests/test_radard.py \
+          openpilot/selfdrive/controls/lib/tests/test_desire_helper.py \
+          openpilot/selfdrive/car/tests/test_car_specific_tesla_preap.py \
+          openpilot/selfdrive/car/tests/test_preap_radar_e2e.py \
+          openpilot/sunnypilot/mads/tests/ \
+          openpilot/sunnypilot/selfdrive/car/tests/ \
+          openpilot/sunnypilot/sunnylink/tests/
+
   build_release:
     name: build release
     runs-on: ${{

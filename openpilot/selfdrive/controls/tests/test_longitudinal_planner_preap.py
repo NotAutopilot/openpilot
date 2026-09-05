@@ -3,40 +3,20 @@ import pytest
 
 from openpilot.cereal import log, messaging
 from opendbc.car import structs
-from opendbc.car.tesla.preap.boot import (
-  apply_preap_hardware_snapshot,
-  hardware_snapshot_from_values,
-  pedal_pipeline_enabled,
-)
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
 from openpilot.selfdrive.modeld.constants import ModelConstants
 
 
-def _pedal_snapshot():
-  return hardware_snapshot_from_values(
-    pedal_enabled=True,
-    pedal_bus=2,
-    pedal_calib_done=True,
-    pedal_calib_factor=0.035,
-    pedal_calib_zero=0.25,
-    pedal_calib_min=-3.0,
-    pedal_calib_max=99.6,
-  )
-
-
-def make_preap_params(pedal=True):
+def make_preap_params():
   CP = structs.CarParams()
   CP.brand = "tesla"
   CP.carFingerprint = "TESLA_MODEL_S_PREAP"
+  CP.openpilotLongitudinalControl = True
+  CP.pcmCruise = False
   CP.steerRatio = 15.75
   CP.wheelbase = 2.959
-  CP.openpilotLongitudinalControl = False
-  CP.pcmCruise = True
-  CP_SP = structs.CarParamsSP()
-  if pedal:
-    apply_preap_hardware_snapshot(CP, CP_SP, _pedal_snapshot())
-  return CP, CP_SP
+  return CP, structs.CarParamsSP()
 
 
 def make_planner_inputs(*, v_ego, v_cruise, pitch, throttle_probability):
@@ -82,23 +62,9 @@ def make_planner_inputs(*, v_ego, v_cruise, pitch, throttle_probability):
   }
 
 
-class _FollowParams:
-  def __init__(self, nap_follow_dist):
-    self.nap_follow_dist = nap_follow_dist
-
-  def get(self, key, return_default=False):
-    assert return_default
-    assert key == "NAPFollowDistance"
-    return self.nap_follow_dist
-
-  def get_bool(self, key):
-    raise AssertionError(f"NAPAdaptiveAccel must not be read; got {key}")
-
-
 def test_preap_cruise_ignores_model_throttle_suppression():
-  CP, CP_SP = make_preap_params(pedal=True)
-  assert pedal_pipeline_enabled(CP, CP_SP)
-  planner = LongitudinalPlanner(CP, CP_SP, init_v=20.9, params=_FollowParams(3))
+  CP, CP_SP = make_preap_params()
+  planner = LongitudinalPlanner(CP, CP_SP, init_v=20.9)
   inputs = make_planner_inputs(
     v_ego=20.9,
     v_cruise=21.0,
@@ -111,7 +77,7 @@ def test_preap_cruise_ignores_model_throttle_suppression():
 
   assert planner.output_a_target > -0.05
   assert planner.allow_throttle
-  assert planner._pedal_preap
+  assert planner._is_preap
 
 
 @pytest.mark.parametrize(("brand", "fingerprint", "openpilot_longitudinal", "pcm_cruise"), [
@@ -121,15 +87,11 @@ def test_preap_cruise_ignores_model_throttle_suppression():
 def test_non_vdas_modes_keep_model_throttle_suppression(
   brand, fingerprint, openpilot_longitudinal, pcm_cruise,
 ):
-  CP = structs.CarParams()
+  CP, CP_SP = make_preap_params()
   CP.brand = brand
   CP.carFingerprint = fingerprint
   CP.openpilotLongitudinalControl = openpilot_longitudinal
   CP.pcmCruise = pcm_cruise
-  CP.steerRatio = 15.75
-  CP.wheelbase = 2.959
-  CP_SP = structs.CarParamsSP()
-  assert not pedal_pipeline_enabled(CP, CP_SP)
   planner = LongitudinalPlanner(CP, CP_SP, init_v=20.9)
   inputs = make_planner_inputs(
     v_ego=20.9,
@@ -141,6 +103,6 @@ def test_non_vdas_modes_keep_model_throttle_suppression(
   for _ in range(60):
     planner.update(inputs)
 
-  assert not planner._pedal_preap
+  assert not planner._is_preap
   assert not planner.allow_throttle
   assert planner.output_a_target < -0.5

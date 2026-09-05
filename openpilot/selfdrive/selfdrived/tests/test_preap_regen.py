@@ -6,18 +6,14 @@ from openpilot.selfdrive.selfdrived.preap_regen import (
   RegenDemandCheck,
   update_preap_chimes,
 )
-from openpilot.cereal import custom
-from openpilot.selfdrive.selfdrived.preap_regen import register_preap_regen_alerts
-from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 
 # get_preap_accel_limits floor is -1.5 m/s²; -2.0 clears the trigger margin.
 OVERFLOW_TARGET = -2.0
 
 
 def _update(check, *, a_target=OVERFLOW_TARGET, v_ego=15.0,
-            plan_valid=True, pedal_long_active=True, brake_pressed=False):
+            pedal_long_active=True, brake_pressed=False):
   return check.update(
-    plan_valid=plan_valid,
     pedal_long_active=pedal_long_active,
     brake_pressed=brake_pressed,
     a_target=a_target,
@@ -89,24 +85,6 @@ def test_demand_prompt_resets_when_pedal_long_inactive():
   assert not _update(check, pedal_long_active=False)
   assert not check.active
 
-def test_demand_prompt_resets_when_plan_is_invalid():
-  check = RegenDemandCheck()
-  for _ in range(REGEN_DEMAND_EVIDENCE_COUNT):
-    _update(check)
-  assert check.active
-
-  assert not _update(check, plan_valid=False)
-  assert not check.active
-
-
-def test_alerts_are_registered_before_event_counters_are_built():
-  register_preap_regen_alerts()
-  events = EventsSP()
-  event_names = custom.OnroadEventSP.EventName
-  for event in (event_names.pedalMaxRegen, event_names.pedalCruiseEnabled,
-                event_names.pedalCruiseDisabled, event_names.pedalUnavailable):
-    assert event in events.event_counters
-
 
 def _chime(prev, *, lat=False, long_on=False):
   return update_preap_chimes(lat_engaged=lat, long_engaged=long_on, prev=prev)
@@ -167,6 +145,7 @@ def test_lat_engage_and_disengage_chime_on_cruise_edges():
 
 
 def test_long_engage_chimes_on_fsm_intent_not_pedal_authority():
+  # Stalk long engage must chime even before interceptor handshake.
   chimes, state = _chime(PreAPChimeState(), lat=True, long_on=True)
   assert chimes.lat_engage
   assert chimes.long_engage

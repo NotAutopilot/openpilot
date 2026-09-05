@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import time
 from opendbc.car import structs
-from opendbc.car.tesla.preap.constants import (
-  GAS_COMMAND_ID,
-  PREAP_FLAG_ENABLE_PEDAL,
-  PREAP_FLAG_PEDAL_BUS_ZERO,
-  PREAP_FLAG_PEDAL_CALIBRATION,
-  PREAP_MODE_INVALID,
-)
+from opendbc.car.tesla.preap.teslacan import GAS_COMMAND_ID
+
+# Matches tesla_preap.h PREAP_FLAG_ENABLE_PEDAL / calibration island.
+PREAP_FLAG_ENABLE_PEDAL = 1
+PREAP_MODE_INVALID = 3
+PREAP_FLAG_PEDAL_BUS_ZERO = 1 << 5
+PREAP_FLAG_PEDAL_CALIBRATION = 1 << 6
 
 SAFETY_SILENT = int(structs.CarParams.SafetyModel.silent)
 SAFETY_ELM327 = int(structs.CarParams.SafetyModel.elm327)
@@ -76,11 +76,10 @@ class DiagnosticTransport:
     self._set_safety_mode(SAFETY_SILENT)
 
   def set_pedal_calibration_session(self, bus: int = 2) -> None:
-    """Tesla Pre-AP safety with the calibration-only flag. Never ELM327/allOutput.
+    """teslaPreap calibration island. Never ELM327/allOutput/ENABLE_PEDAL.
 
-    Firmware 0xdf is ignored in car safety modes, so the order is: silent/non-car,
-    safetyParamSP INVALID via 0xdf, then teslaPreap calibration. Calibration uses
-    INVALID plus an isolated 0x551 allowlist and must not depend on mode validity.
+    Legal safetyParam is 64 (bus 2) or 96 (bus 0). Production 0x551 gates
+    are unchanged; this mode only admits 0x551 on the selected bus.
     """
     if bus not in (0, 2):
       raise TransportError("invalid pedal bus")
@@ -88,20 +87,22 @@ class DiagnosticTransport:
     if bus == 0:
       param |= PREAP_FLAG_PEDAL_BUS_ZERO
     self.set_silent()
-    setter = getattr(self.panda, "set_alternative_experience", None)
-    if not callable(setter):
-      raise TransportError("panda cannot set safetyParamSP")
-    setter(0, PREAP_MODE_INVALID)
     self._set_safety_mode(SAFETY_TESLA_PREAP, param=param)
 
   def _set_safety_mode(self, mode: int, param: int = 0) -> None:
     if mode == SAFETY_ALLOUTPUT or mode not in ALLOWED_SAFETY_MODES:
       raise TransportError("panda TX bypass is not permitted")
     if mode == SAFETY_TESLA_PREAP:
-      if (int(param) & PREAP_FLAG_PEDAL_CALIBRATION) == 0:
-        raise TransportError("teslaPreap transport requires calibration flag")
       if int(param) & PREAP_FLAG_ENABLE_PEDAL:
         raise TransportError("calibration must not grant longitudinal")
+      if (int(param) & PREAP_FLAG_PEDAL_CALIBRATION) == 0:
+        raise TransportError("teslaPreap transport requires calibration flag")
+      extra = int(param) & ~(PREAP_FLAG_PEDAL_CALIBRATION | PREAP_FLAG_PEDAL_BUS_ZERO)
+      if extra:
+        raise TransportError("calibration safetyParam must be exactly 64 or 96")
+      if int(param) not in (PREAP_FLAG_PEDAL_CALIBRATION,
+                            PREAP_FLAG_PEDAL_CALIBRATION | PREAP_FLAG_PEDAL_BUS_ZERO):
+        raise TransportError("calibration safetyParam must be exactly 64 or 96")
     elif int(param) != 0:
       raise TransportError("diagnostic modes cannot carry safetyParam bits")
     if self.panda is None:

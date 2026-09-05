@@ -59,7 +59,6 @@ class TestTeslaSettingsPedalBus(unittest.TestCase):
 
   def test_tesla_menu_does_not_own_mads_engagement(self):
     src = TESLA_PY.read_text()
-    self.assertNotIn("NAPLateralEngagementMode", src)
     self.assertNotIn("Lateral Engagement Mode", src)
     self.assertNotIn("Active Engagement Mode", src)
 

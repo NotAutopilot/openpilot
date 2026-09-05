@@ -76,14 +76,6 @@ def vin_mux_chars(dat: bytes) -> tuple[int, tuple[str, ...]] | None:
   return None
 
 
-def _point_measured(point) -> bool:
-  # liveTracks RadarPoint.measured lives under deprecated (car.capnp).
-  deprecated = getattr(point, "deprecated", None)
-  if deprecated is not None:
-    return bool(getattr(deprecated, "measured", False))
-  return bool(getattr(point, "measured", False))
-
-
 @dataclass(frozen=True)
 class RadarTrack:
   track_id: int
@@ -219,7 +211,7 @@ class BoschRadarMonitor:
           d_rel=float(p.dRel),
           y_rel=float(p.yRel),
           v_rel=float(p.vRel),
-          measured=_point_measured(p),
+          measured=bool(p.measured),
         )
         for p in points
       )

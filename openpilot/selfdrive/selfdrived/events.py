@@ -223,6 +223,29 @@ def invalid_lkas_setting_alert(CP: car.CarParams, CS: car.CarState, sm: messagin
   return NormalPermanentAlert("Invalid LKAS setting", text)
 
 
+def _is_tesla_preap(CP: car.CarParams) -> bool:
+  return CP.brand == "tesla" and CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+
+
+def pcm_enable_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  if _is_tesla_preap(CP):
+    return Alert(
+      "Steering Engaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.MID, VisualAlert.none, AudibleAlert.engage, 0.8)
+  return EngagementAlert(AudibleAlert.engage)
+
+
+def pcm_disable_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  if _is_tesla_preap(CP):
+    return Alert(
+      "Steering Disengaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.MID, VisualAlert.none, AudibleAlert.disengage, 0.8)
+  return EngagementAlert(AudibleAlert.disengage)
+
 
 EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   # ********** events with no alerts **********
@@ -507,7 +530,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   # ********** events that affect controls state transitions **********
 
   EventName.pcmEnable: {
-    ET.ENABLE: EngagementAlert(AudibleAlert.engage),
+    ET.ENABLE: pcm_enable_alert,
   },
 
   EventName.buttonEnable: {
@@ -515,7 +538,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.pcmDisable: {
-    ET.USER_DISABLE: EngagementAlert(AudibleAlert.disengage),
+    ET.USER_DISABLE: pcm_disable_alert,
   },
 
   EventName.buttonCancel: {
@@ -652,6 +675,11 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.PERMANENT: calibration_incomplete_alert,
     ET.SOFT_DISABLE: soft_disable_alert("Calibration Incomplete"),
     ET.NO_ENTRY: NoEntryAlert("Calibration in Progress"),
+  },
+
+  EventName.pedalNotCalibrated: {
+    ET.PERMANENT: NormalPermanentAlert("Pedal Not Calibrated", "Check Calibration"),
+    ET.NO_ENTRY: NoEntryAlert("Pedal Not Calibrated: Check Calibration"),
   },
 
   EventName.calibrationRecalibrating: {
@@ -854,6 +882,58 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: personality_changed_alert,
   },
 
+  EventName.pedalCruiseEnabled: {
+    ET.PERMANENT: Alert(
+      "Pedal Cruise Engaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.HIGH, VisualAlert.none, AudibleAlert.engage, 0.8),
+  },
+
+  EventName.pedalCruiseDisabled: {
+    ET.PERMANENT: Alert(
+      "Pedal Cruise Disengaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.HIGH, VisualAlert.none, AudibleAlert.disengage, 0.8),
+  },
+
+  EventName.pedalMaxRegen: {
+    ET.WARNING: Alert(
+      "Regen Limit Reached",
+      "Press Brake to Slow Down",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.HIGH, VisualAlert.brakePressed, AudibleAlert.promptRepeat, .2),
+  },
+
+  EventName.teslaCCEngaged: {
+    ET.PERMANENT: Alert(
+      "Tesla Cruise Engaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.HIGH, VisualAlert.none, AudibleAlert.engage, 0.8),
+  },
+
+  EventName.teslaCCDisengaged: {
+    ET.PERMANENT: Alert(
+      "Tesla Cruise Disengaged",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.HIGH, VisualAlert.none, AudibleAlert.disengage, 0.8),
+  },
+
+  EventName.teslaCCNotArmed: {
+    ET.PERMANENT: NormalPermanentAlert("Arm Stock Cruise to Enable Speed Control"),
+  },
+
+  EventName.pedalUnavailable: {
+    ET.WARNING: Alert(
+      "Pedal Control Unavailable",
+      "Speed Control Disabled",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.HIGH, VisualAlert.none, AudibleAlert.disengage, 3.0),
+  },
+
   EventName.userBookmark: {
     ET.PERMANENT: NormalPermanentAlert("Bookmark Saved", duration=1.5),
   },
@@ -959,6 +1039,3 @@ if __name__ == '__main__':
     for p, alert_list in evs:
       print(f"  {repr(p)}:")
       print("   ", ', '.join(alert_list), "\n")
-
-# Pedal regen under-delivery alert. EventNameSP.pedalMaxRegen is registered at selfdrived start.
-from openpilot.selfdrive.selfdrived.preap_regen import PREAP_REGEN_ALERT  # noqa: F401

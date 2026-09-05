@@ -13,15 +13,20 @@ from __future__ import annotations
 
 import os
 import queue
-import signal
 import subprocess
 import sys
 import threading
 from pathlib import Path
 
 from openpilot.common.basedir import BASEDIR
+from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.params import Params
-from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.runner import APPROVED_TOOLS
+from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.runner import (
+  APPROVED_TOOLS,
+  clear_tool_flags,
+  mark_script_running,
+  stop_child,
+)
 from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools.safety import (
   DESTRUCTIVE_TOOLS,
   ToolSafetyError,
@@ -65,6 +70,7 @@ def spawn_approved_module(module: str, params: Params | None = None) -> subproce
   cmd = [sys.executable, "-m", module]
   if tool in DESTRUCTIVE_TOOLS:
     cmd.append("--confirm")
+  mark_script_running(params)
   try:
     return subprocess.Popen(
       cmd,
@@ -77,7 +83,7 @@ def spawn_approved_module(module: str, params: Params | None = None) -> subproce
       bufsize=1,
     )
   except Exception:
-    params.put_bool("NAPEpasRiskAccepted", False, block=True)
+    clear_tool_flags(params)
     raise
 
 
@@ -137,10 +143,16 @@ def main(argv: list[str] | None = None) -> int:
         return
       self._state = ScriptState.RUNNING
       self._output_lines = ["Starting script...", ""]
+
+      # Set NAPScriptRunning before spawn so manager stops pandad before
+      # the child process tries to open Panda USB.
+      mark_script_running(self._params)
+
       try:
         self._process = spawn_approved_module(self._module, self._params)
         threading.Thread(target=self._read_output, daemon=True).start()
       except Exception as exc:
+        clear_tool_flags(self._params)
         self._output_lines.append(f"Error starting script: {exc}")
         self._state = ScriptState.ERROR
 
@@ -164,17 +176,24 @@ def main(argv: list[str] | None = None) -> int:
 
     def _on_exit(self):
       if self._process and self._process.poll() is None:
-        self._process.send_signal(signal.SIGINT)
-        try:
-          self._process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-          self._process.terminate()
-          try:
-            self._process.wait(timeout=2)
-          except subprocess.TimeoutExpired:
-            self._process.kill()
-      self._params.put_bool("NAPEpasRiskAccepted", False, block=True)
+        if not stop_child(self._process):
+          # Child still alive after SIGKILL. Bail without clearing
+          # NAPScriptRunning — letting manager resume pandad while
+          # a zombie script may still hold Panda USB would create
+          # the exact dual-owner state this runner is meant to
+          # prevent. Surface an error and keep the runner up.
+          self._output_lines.append(
+            "[ERROR] script did not exit; manager will stay paused")
+          self._output_lines.append("Reboot the device to recover.")
+          self._state = ScriptState.ERROR
+          return
+
+      # Clear NAPScriptRunning only after we've confirmed the child is gone.
+      clear_tool_flags(self._params)
+
       gui_app.request_close()
+      if not PC:
+        HARDWARE.reboot()
 
     def render(self):
       rect = rl.Rectangle(0, 0, gui_app.width, gui_app.height)
@@ -215,10 +234,18 @@ def main(argv: list[str] | None = None) -> int:
       if self._state == ScriptState.READY:
         self._start_button.render(rl.Rectangle(rect.x + rect.width - margin - button_width * 2 - button_spacing,
                                                button_y, button_width, button_height))
+      # Exit is disabled while RUNNING. The flash path can't be
+      # safely interrupted mid-write; the calibration/test paths
+      # also disable cancel for consistency with the original design.
+      self._exit_button.set_enabled(self._state != ScriptState.RUNNING)
       self._exit_button.render(rl.Rectangle(rect.x + rect.width - margin - button_width,
                                             button_y, button_width, button_height))
 
-  subprocess.run(["tmux", "kill-session", "-t", "comma"], capture_output=True)
+  # tmux isn't installed on dev hosts, so swallow the FileNotFoundError.
+  try:
+    subprocess.run(["tmux", "kill-session", "-t", "comma"], capture_output=True)
+  except FileNotFoundError:
+    pass
   gui_app.init_window("Pre-AP Script Runner")
   app = ScriptRunnerApp()
   app.init_ui()

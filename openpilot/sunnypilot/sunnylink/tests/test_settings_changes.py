@@ -231,7 +231,6 @@ class TestTeslaPreAPSettings:
     assert "tesla_preap_longitudinal_path" in keys
     assert "tesla_preap_pedal_health" in keys
     assert "tesla_preap_radar_health" in keys
-    assert "NAPLateralEngagementMode" not in keys
     assert "tesla_preap_active_mode" not in keys
     assert "MadsSteeringMode" not in keys
     assert "NAPRadarOffset" not in keys
@@ -301,24 +300,8 @@ class TestTeslaPreAPSettings:
     cond = json.dumps(sp.get("trigger_condition"))
     assert "tesla_preap" in cond
     assert "Mads" in cond
-
-  def test_engagement_mode_is_next_drive(self, schema):
-    item = _find_item(schema, "NAPLateralEngagementMode")
-    assert item is not None
-    assert item.get("needs_onroad_cycle") is True
-    assert "offroad_only" not in _flatten_rule_types(item.get("enablement"))
-
-  def test_engagement_mode_lives_in_native_mads_settings(self, schema):
-    vs_keys = {item["key"] for item in schema["vehicle_settings"]["tesla"].get("items", [])}
-    assert "NAPLateralEngagementMode" not in vs_keys
-    section = _find_section(schema, "steering", "mads")
-    assert section is not None
-    sp = next(s for s in section["sub_panels"] if s["id"] == "mads_settings")
     keys = [item["key"] for item in sp["items"]]
-    assert "NAPLateralEngagementMode" in keys
-    assert keys[0] == "NAPLateralEngagementMode"
-    vis = json.dumps(_find_item(schema, "NAPLateralEngagementMode").get("visibility"))
-    assert "tesla_preap" in vis
+    assert "MadsSteeringMode" in keys
 
   def test_mads_full_platforms_excludes_preap_key(self):
     import yaml

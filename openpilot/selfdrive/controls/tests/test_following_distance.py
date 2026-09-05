@@ -13,7 +13,7 @@ def desired_follow_distance(v_ego, v_lead, t_follow=None):
     t_follow = get_T_FOLLOW()
   return get_safe_obstacle_distance(v_ego, t_follow) - get_stopped_equivalence_factor(v_lead)
 
-def run_following_distance_simulation(v_lead, t_end=100.0, e2e=False, personality=0):
+def run_following_distance_simulation(v_lead, t_end=100.0, e2e=False, personality=0, nap_follow_dist=None):
   man = Maneuver(
     '',
     duration=t_end,
@@ -24,6 +24,7 @@ def run_following_distance_simulation(v_lead, t_end=100.0, e2e=False, personalit
     breakpoints=[0.],
     e2e=e2e,
     personality=personality,
+    nap_follow_dist=nap_follow_dist,
   )
   valid, output = man.evaluate()
   assert valid

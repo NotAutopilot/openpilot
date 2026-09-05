@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from typing import Any, cast
 
+from opendbc.car import structs
 from openpilot.cereal import log
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.sunnypilot.selfdrive.controls.lib.auto_lane_change import AutoLaneChangeMode
@@ -25,7 +26,9 @@ def _car_state(*, left=True, right=False, lever=0):
 
 
 def _helper():
-  helper = DesireHelper()
+  CP = structs.CarParams()
+  CP.carFingerprint = "TESLA_MODEL_S_PREAP"
+  helper = DesireHelper(CP)
   cast(Any, helper.alc).update_params = lambda: None
   helper.alc.lane_change_set_timer = AutoLaneChangeMode.NUDGE
   cast(Any, helper.lane_turn_controller).update_params = lambda: None

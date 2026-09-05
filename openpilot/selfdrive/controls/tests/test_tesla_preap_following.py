@@ -1,33 +1,34 @@
 from types import SimpleNamespace
-from typing import Any, cast
 
 import numpy as np
 import pytest
 
 from openpilot.cereal import log, messaging
 from opendbc.car import structs
+from opendbc.car.structs import car
 from opendbc.car.tesla.preap import virtual_das
-from opendbc.car.tesla.preap.boot import apply_preap_hardware_snapshot, hardware_snapshot_from_values, pedal_pipeline_enabled
-from opendbc.car.tesla.preap.constants import (
-  PEDAL_LONG_K_BP, PEDAL_LONG_KI_V, PEDAL_LONG_KP_V,
-  PEDAL_RAMP_RATE_DOWN, PEDAL_RAMP_RATE_UP,
-  PREAP_T_FOLLOW,
-)
+from opendbc.car.tesla.preap.constants import PEDAL_LONG_K_BP, PEDAL_LONG_KI_V, PEDAL_LONG_KP_V
 from opendbc.car.tesla.preap.virtual_das import GRAVITY, VirtualDAS
+from opendbc.car.tesla.pedal.controller import PEDAL_RAMP_RATE_DOWN, PEDAL_RAMP_RATE_UP
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
-import openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc as long_mpc_mod
+from openpilot.selfdrive.controls.lib import longitudinal_planner
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import (
   LongitudinalPlanSource,
   T_IDXS,
+  get_safe_obstacle_distance,
+  get_stopped_equivalence_factor,
   get_T_FOLLOW,
 )
 from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
+from openpilot.selfdrive.controls.tests.test_following_distance import run_following_distance_simulation
 from openpilot.selfdrive.modeld.constants import ModelConstants
+from openpilot.selfdrive.test.longitudinal_maneuvers.maneuver import Maneuver
+from openpilot.selfdrive.test.process_replay.process_replay import get_process_config
 
 
 NAP_FOLLOW_SETTINGS = range(1, 8)
-NAP_FOLLOW_TIMES_S = PREAP_T_FOLLOW
+NAP_FOLLOW_TIMES_S = (0.7, 0.9, 1.1, 1.3, 1.5, 1.7, 1.9)
 FOLLOW_TEST_SPEED_MPS = 25.0
 STOP_DISTANCE_M = 6.0
 FULL_LOOP_DT_S = 0.01
@@ -52,9 +53,29 @@ FULL_LOOP_GRADE_SETTLING_S = (
 )
 
 
-class _FollowParams:
-  def __init__(self, nap_follow_dist):
+class _PlannerInputs(dict):
+  logMonoTime = {"modelV2": 0}
+
+  @staticmethod
+  def all_checks(service_list=None):
+    return True
+
+
+class _CapturingPubMaster:
+  def send(self, service, message):
+    if service == "longitudinalPlanSP":
+      return
+    assert service == "longitudinalPlan"
+    self.message = message
+
+
+class _MutablePlannerParams:
+  def __init__(self, nap_follow_dist, adaptive_accel=False):
     self.nap_follow_dist = nap_follow_dist
+    self.adaptive_accel = adaptive_accel
+
+  def __bool__(self):
+    return False
 
   def get(self, key, return_default=False):
     assert return_default
@@ -62,7 +83,8 @@ class _FollowParams:
     return self.nap_follow_dist
 
   def get_bool(self, key):
-    raise AssertionError(f"NAPAdaptiveAccel must not be read; got {key}")
+    assert key == "NAPAdaptiveAccel"
+    return self.adaptive_accel
 
 
 class _ConstantAccelerationMpc:
@@ -84,39 +106,36 @@ class _ConstantAccelerationMpc:
   def set_cur_state(speed_mps, acceleration_mps2):
     pass
 
-  def update(self, radar_state, cruise_speed_mps, personality=None):
-    t_follow = long_mpc_mod.get_T_FOLLOW(personality)
+  def update(self, radar_state, cruise_speed_mps, t_follow):
     self.captured_t_follow = t_follow
     self.params[:, 4] = t_follow
 
 
 def _make_preap_params():
-  CP = structs.CarParams()
-  CP.brand = "tesla"
-  CP.carFingerprint = "TESLA_MODEL_S_PREAP"
-  CP.openpilotLongitudinalControl = True
-  CP.pcmCruise = False
-  CP.steerRatio = 15.75
-  CP.wheelbase = 2.959
-  CP.longitudinalTuning.kpBP = list(PEDAL_LONG_K_BP)
-  CP.longitudinalTuning.kpV = list(PEDAL_LONG_KP_V)
-  CP.longitudinalTuning.kiBP = list(PEDAL_LONG_K_BP)
-  CP.longitudinalTuning.kiV = list(PEDAL_LONG_KI_V)
+  params = structs.CarParams()
+  params.brand = "tesla"
+  params.carFingerprint = "TESLA_MODEL_S_PREAP"
+  params.openpilotLongitudinalControl = True
+  params.pcmCruise = False
+  params.steerRatio = 15.75
+  params.wheelbase = 2.959
+  params.longitudinalTuning.kpBP = list(PEDAL_LONG_K_BP)
+  params.longitudinalTuning.kpV = list(PEDAL_LONG_KP_V)
+  params.longitudinalTuning.kiBP = list(PEDAL_LONG_K_BP)
+  params.longitudinalTuning.kiV = list(PEDAL_LONG_KI_V)
   try:
-    CP.longitudinalTuning.kf = 1.0
+    params.longitudinalTuning.kf = 1.0
   except AttributeError:
     pass
-  CP_SP = structs.CarParamsSP()
-  apply_preap_hardware_snapshot(CP, CP_SP, hardware_snapshot_from_values(
-    pedal_enabled=True,
-    pedal_bus=2,
-    pedal_calib_done=True,
-    pedal_calib_factor=0.035,
-    pedal_calib_zero=0.25,
-    pedal_calib_min=-3.0,
-    pedal_calib_max=99.6,
-  ))
-  return CP, CP_SP
+  try:
+    params.vEgoStarting = 0.1
+  except AttributeError:
+    pass
+  return params
+
+
+def _cp_sp():
+  return structs.CarParamsSP()
 
 
 def _make_planner_inputs(speed_mps):
@@ -124,42 +143,42 @@ def _make_planner_inputs(speed_mps):
   controls = messaging.new_message("controlsState").controlsState
   selfdrive = messaging.new_message("selfdriveState").selfdriveState
   car_state = messaging.new_message("carState").carState
-  car_state_sp = messaging.new_message("carStateSP").carStateSP
   car_control = messaging.new_message("carControl").carControl
   live_parameters = messaging.new_message("liveParameters").liveParameters
-  gps_location = messaging.new_message("gpsLocation").gpsLocation
+  car_state_sp = messaging.new_message("carStateSP").carStateSP
   live_map_data_sp = messaging.new_message("liveMapDataSP").liveMapDataSP
+  gps_location = messaging.new_message("gpsLocation").gpsLocation
   model = messaging.new_message("modelV2").modelV2
 
   controls.longControlState = LongCtrlState.pid
   selfdrive.personality = log.LongitudinalPersonality.standard
   car_state.vEgo = speed_mps
   car_state.vCruise = speed_mps * 3.6
+  car_control.orientationNED = [0.0, 0.0, 0.0]
 
-  position = log.XYZTData.new_message()
-  position.x = ((speed_mps + 0.5) * np.array(ModelConstants.T_IDXS)).tolist()
-  model.position = position
-  velocity = log.XYZTData.new_message()
-  velocity.x = ((speed_mps + 0.5) * np.ones_like(ModelConstants.T_IDXS)).tolist()
-  velocity.x[0] = speed_mps
-  model.velocity = velocity
-  acceleration = log.XYZTData.new_message()
-  acceleration.x = np.zeros_like(ModelConstants.T_IDXS).tolist()
-  model.acceleration = acceleration
+  model.position.x = (speed_mps * np.array(ModelConstants.T_IDXS)).tolist()
+  model.velocity.x = (speed_mps * np.ones_like(ModelConstants.T_IDXS)).tolist()
+  model.acceleration.x = np.zeros_like(ModelConstants.T_IDXS).tolist()
   model.meta.disengagePredictions.gasPressProbs = [1.0] * 6
 
-  return {
+  return _PlannerInputs({
     "radarState": radar,
     "controlsState": controls,
     "selfdriveState": selfdrive,
     "carState": car_state,
-    "carStateSP": car_state_sp,
     "carControl": car_control,
     "liveParameters": live_parameters,
     "modelV2": model,
-    "gpsLocation": gps_location,
+    "carStateSP": car_state_sp,
     "liveMapDataSP": live_map_data_sp,
-  }
+    "gpsLocation": gps_location,
+  })
+
+
+def _physical_lead_distance(v_ego, v_lead, t_follow, obstacle_ratio):
+  safe_obstacle_distance = get_safe_obstacle_distance(v_ego, t_follow)
+  lead_obstacle_distance = obstacle_ratio * safe_obstacle_distance
+  return lead_obstacle_distance - get_stopped_equivalence_factor(max(v_lead, 0.0))
 
 
 def _full_loop_pitch(elapsed_s):
@@ -201,8 +220,8 @@ def _run_full_closed_loop_following(
 ):
   monkeypatch.setattr(
     virtual_das,
-    "PEDAL_MAX_VALUES",
-    [50.0] * len(virtual_das.PEDAL_BP),
+    "nap_conf",
+    SimpleNamespace(get_pedal_profile_values=lambda: [50.0] * len(virtual_das.PEDAL_BP)),
   )
   monkeypatch.setattr(
     virtual_das,
@@ -219,11 +238,11 @@ def _run_full_closed_loop_following(
   planner_target_mps2 = 0.0
   vdas_target_mps2 = 0.0
 
-  params = _FollowParams(nap_follow_dist)
-  car_params, car_params_sp = _make_preap_params()
+  params = _MutablePlannerParams(nap_follow_dist=nap_follow_dist, adaptive_accel=True)
+  car_params = _make_preap_params()
   car_params.longitudinalActuatorDelay = FULL_LOOP_PLANT_DELAY_S
-  planner = LongitudinalPlanner(car_params, car_params_sp, init_v=speed_mps, params=params)
-  long_control = LongControl(car_params, car_params_sp)
+  planner = LongitudinalPlanner(car_params, _cp_sp(), init_v=speed_mps, params=params)
+  long_control = LongControl(car_params, _cp_sp())
   vdas = VirtualDAS(dt=FULL_LOOP_VDAS_DT_S)
   vdas.reset(measured_accel=acceleration_mps2, commanded_accel=0.0, pedal_di_init=pedal_di)
   if plant_aligned_feedforward:
@@ -274,7 +293,7 @@ def _run_full_closed_loop_following(
       planner.update(inputs)
       planner_target_mps2 = float(planner.output_a_target)
 
-    state = structs.CarState()
+    state = car.CarState.new_message()
     state.vEgo = float(speed_mps)
     state.aEgo = float(acceleration_mps2)
     state.brakePressed = False
@@ -324,54 +343,168 @@ def _run_full_closed_loop_following(
   return np.array(samples), np.array(pedal_samples)
 
 
+@pytest.mark.parametrize(("lead_speed", "obstacle_ratio", "expected_strength"), [
+  (30.0, 1.0, 1.0),
+  (30.0, 1.2, 1.0),
+  (30.0, 1.35, 0.5),
+  (30.0, 1.5, 0.0),
+  (20.0, 1.35, 0.5),
+  (-5.0, 1.35, 0.5),
+])
+def test_preap_follow_cap_uses_obstacle_equivalent_distance(lead_speed, obstacle_ratio, expected_strength):
+  speed_mps = 30.0
+  t_follow = 1.9
+  lead_distance = _physical_lead_distance(speed_mps, lead_speed, t_follow, obstacle_ratio)
+
+  cap_strength = longitudinal_planner.get_preap_follow_cap_strength(
+    speed_mps,
+    lead_distance,
+    lead_speed,
+    t_follow,
+  )
+
+  assert cap_strength == pytest.approx(expected_strength)
+
+
+def test_planner_adaptive_cap_changes_the_delivered_acceleration_for_unequal_speed_lead():
+  speed_mps = 30.0
+  lead_speed_mps = 35.0
+  obstacle_ratio = 1.35
+  t_follow = 1.9
+  params = _MutablePlannerParams(nap_follow_dist=7, adaptive_accel=True)
+  planner = LongitudinalPlanner(_make_preap_params(), _cp_sp(), init_v=speed_mps, params=params)
+  planner.mpc = _ConstantAccelerationMpc(speed_mps, acceleration_mps2=1.5)
+  inputs = _make_planner_inputs(speed_mps)
+  lead = inputs["radarState"].leadOne
+  lead.present = True
+  lead.dRel = _physical_lead_distance(speed_mps, lead_speed_mps, t_follow, obstacle_ratio)
+  lead.vLead = lead_speed_mps
+
+  for _ in range(32):
+    planner.update(inputs)
+
+  open_road_limit = longitudinal_planner.get_max_accel(speed_mps)
+  follow_limit = longitudinal_planner._get_preap_follow_limit(speed_mps)
+  cap_strength = longitudinal_planner.get_preap_follow_cap_strength(
+    speed_mps,
+    lead.dRel,
+    lead_speed_mps,
+    t_follow,
+  )
+  expected_adaptive_limit = open_road_limit * (1.0 - cap_strength) + follow_limit * cap_strength
+
+  assert cap_strength == pytest.approx(0.5)
+  assert planner.mpc.captured_t_follow == t_follow
+  assert planner.output_a_target == pytest.approx(expected_adaptive_limit)
+  assert planner.output_a_target < open_road_limit
+
 
 def test_planner_publishes_the_follow_policy_used_by_mpc():
-  CP, CP_SP = _make_preap_params()
-  assert pedal_pipeline_enabled(CP, CP_SP)
-  params = _FollowParams(1)
-  planner = LongitudinalPlanner(CP, CP_SP, init_v=FOLLOW_TEST_SPEED_MPS, params=params)
-  planner.mpc = cast(Any, _ConstantAccelerationMpc(FOLLOW_TEST_SPEED_MPS, 0.0))
+  params = _MutablePlannerParams(nap_follow_dist=1)
+  planner = LongitudinalPlanner(_make_preap_params(), _cp_sp(), init_v=FOLLOW_TEST_SPEED_MPS, params=params)
   inputs = _make_planner_inputs(FOLLOW_TEST_SPEED_MPS)
+  publisher = _CapturingPubMaster()
+
   params.nap_follow_dist = 7
   planner._frame = 19
   planner.update(inputs)
-  assert planner.t_follow == pytest.approx(1.9)
-  assert planner.mpc.captured_t_follow == pytest.approx(1.9)
+  planner.publish(inputs, publisher)
+
+  plan = publisher.message.longitudinalPlan
+  assert plan.napFollowDistance == 7
+  assert plan.tFollow == pytest.approx(1.9)
+  assert planner.t_follow == 1.9
   assert np.all(planner.mpc.params[:, 4] == planner.t_follow)
+  assert plan.tFollow == pytest.approx(planner.t_follow, abs=1e-6)
 
 
 @pytest.mark.parametrize("nap_follow_dist", [-1, 0, 8])
-def test_invalid_nap_follow_setting_uses_personality(nap_follow_dist):
-  CP, CP_SP = _make_preap_params()
-  planner = LongitudinalPlanner(CP, CP_SP, init_v=FOLLOW_TEST_SPEED_MPS, params=_FollowParams(nap_follow_dist))
-  planner.mpc = cast(Any, _ConstantAccelerationMpc(FOLLOW_TEST_SPEED_MPS, 0.0))
+def test_invalid_nap_follow_setting_publishes_zero_and_uses_personality(nap_follow_dist):
+  params = _MutablePlannerParams(nap_follow_dist)
+  planner = LongitudinalPlanner(_make_preap_params(), _cp_sp(), init_v=FOLLOW_TEST_SPEED_MPS, params=params)
   inputs = _make_planner_inputs(FOLLOW_TEST_SPEED_MPS)
+  publisher = _CapturingPubMaster()
+
   planner.update(inputs)
+  planner.publish(inputs, publisher)
+
+  plan = publisher.message.longitudinalPlan
+  assert plan.napFollowDistance == 0
   assert planner.t_follow == get_T_FOLLOW(log.LongitudinalPersonality.standard)
-  assert planner.mpc.captured_t_follow == planner.t_follow
+  assert np.all(planner.mpc.params[:, 4] == planner.t_follow)
+  assert plan.tFollow == pytest.approx(planner.t_follow, abs=1e-6)
 
 
-def test_non_preap_planner_uses_personality():
-  CP = structs.CarParams()
-  CP.brand = "honda"
-  CP.carFingerprint = "HONDA_CIVIC"
-  CP.steerRatio = 15.75
-  CP.wheelbase = 2.959
-  CP_SP = structs.CarParamsSP()
-  planner = LongitudinalPlanner(CP, CP_SP, init_v=FOLLOW_TEST_SPEED_MPS)
-  planner.mpc = cast(Any, _ConstantAccelerationMpc(FOLLOW_TEST_SPEED_MPS, 0.0))
+def test_non_preap_planner_publishes_zero_and_uses_personality():
+  planner_params = _make_preap_params()
+  planner_params.brand = "honda"
+  planner_params.carFingerprint = "HONDA_CIVIC"
+  planner = LongitudinalPlanner(planner_params, _cp_sp(), init_v=FOLLOW_TEST_SPEED_MPS)
   inputs = _make_planner_inputs(FOLLOW_TEST_SPEED_MPS)
   inputs["selfdriveState"].personality = log.LongitudinalPersonality.relaxed
+  publisher = _CapturingPubMaster()
+
   planner.update(inputs)
-  assert not planner._pedal_preap
+  planner.publish(inputs, publisher)
+
+  plan = publisher.message.longitudinalPlan
+  assert plan.napFollowDistance == 0
   assert planner.t_follow == get_T_FOLLOW(log.LongitudinalPersonality.relaxed)
+  assert np.all(planner.mpc.params[:, 4] == planner.t_follow)
+  assert plan.tFollow == pytest.approx(planner.t_follow, abs=1e-6)
 
 
-def test_nap_follow_setting_map_is_strictly_monotonic():
-  actual_follow_times = [PREAP_T_FOLLOW[setting - 1] for setting in NAP_FOLLOW_SETTINGS]
+def test_process_replay_ignores_additive_follow_policy_telemetry():
+  ignored_fields = get_process_config("plannerd").ignore
+
+  assert "longitudinalPlan.napFollowDistance" in ignored_fields
+  assert "longitudinalPlan.tFollow" in ignored_fields
+
+
+def test_nap_follow_setting_map_and_physical_gaps_are_strictly_monotonic():
+  actual_follow_times = [get_T_FOLLOW(nap_follow_dist=setting) for setting in NAP_FOLLOW_SETTINGS]
   physical_gaps = [t_follow * FOLLOW_TEST_SPEED_MPS + STOP_DISTANCE_M for t_follow in actual_follow_times]
+
   assert actual_follow_times == list(NAP_FOLLOW_TIMES_S)
   assert np.all(np.diff(physical_gaps) > 0.0)
+
+
+def test_nap_follow_settings_control_monotonic_maneuver_gaps():
+  steady_gaps = [
+    run_following_distance_simulation(
+      FOLLOW_TEST_SPEED_MPS,
+      t_end=80.0,
+      nap_follow_dist=nap_follow_dist,
+    )
+    for nap_follow_dist in NAP_FOLLOW_SETTINGS
+  ]
+  expected_gaps = [
+    t_follow * FOLLOW_TEST_SPEED_MPS + STOP_DISTANCE_M
+    for t_follow in NAP_FOLLOW_TIMES_S
+  ]
+
+  assert steady_gaps == pytest.approx(expected_gaps, abs=0.5)
+  assert np.all(np.diff(steady_gaps) > 0.0)
+
+
+def test_max_follow_setting_recovers_from_a_close_lead_without_closing_first():
+  maneuver = Maneuver(
+    "max follow recovery",
+    duration=60.0,
+    initial_speed=FOLLOW_TEST_SPEED_MPS,
+    lead_relevancy=True,
+    initial_distance_lead=20.0,
+    speed_lead_values=[FOLLOW_TEST_SPEED_MPS],
+    breakpoints=[0.0],
+    e2e=False,
+    nap_follow_dist=7,
+  )
+
+  valid, output = maneuver.evaluate()
+  assert valid
+  assert np.min(output[:, 6]) >= 19.5
+  assert output[-1, 6] == pytest.approx(53.5, abs=0.5)
+  assert output[-1, 3] == pytest.approx(FOLLOW_TEST_SPEED_MPS, abs=0.1)
 
 
 def test_max_follow_full_closed_loop_recovers_gap_with_production_fallback(monkeypatch):
@@ -383,7 +516,7 @@ def test_max_follow_full_closed_loop_recovers_gap_with_production_fallback(monke
   )
   elapsed_s, gaps_m, speeds_mps, accelerations_mps2, planner_targets_mps2, vdas_targets_mps2, _ = samples.T
   disabled_grade_speeds_mps = disabled_grade_samples[:, 2]
-  desired_gap_m = PREAP_T_FOLLOW[6] * FOLLOW_TEST_SPEED_MPS + STOP_DISTANCE_M
+  desired_gap_m = get_T_FOLLOW(nap_follow_dist=7) * FOLLOW_TEST_SPEED_MPS + STOP_DISTANCE_M
   recovery_window = (elapsed_s >= FULL_LOOP_RECOVERY_END_S - 5.0) & (elapsed_s < FULL_LOOP_RECOVERY_END_S)
   grade_window = elapsed_s >= FULL_LOOP_RECOVERY_END_S
   settled_rolling_window = elapsed_s >= FULL_LOOP_ROLLING_RAMP_END_S + FULL_LOOP_GRADE_SETTLING_S
@@ -424,7 +557,7 @@ def test_plant_aligned_full_closed_loop_grade_compensation_holds_speed(monkeypat
     plant_aligned_feedforward=True,
   )
   elapsed_s, gaps_m, speeds_mps, accelerations_mps2, _, vdas_targets_mps2, pitches_rad = samples.T
-  desired_gap_m = PREAP_T_FOLLOW[6] * FOLLOW_TEST_SPEED_MPS + STOP_DISTANCE_M
+  desired_gap_m = get_T_FOLLOW(nap_follow_dist=7) * FOLLOW_TEST_SPEED_MPS + STOP_DISTANCE_M
   uphill_window = (
     (elapsed_s >= FULL_LOOP_UPHILL_RAMP_END_S + FULL_LOOP_GRADE_SETTLING_S)
     & (elapsed_s < FULL_LOOP_UPHILL_HOLD_END_S)

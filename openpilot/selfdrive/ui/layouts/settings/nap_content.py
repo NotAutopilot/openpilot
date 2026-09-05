@@ -4,26 +4,7 @@ Constants and user-facing text used by the NAP settings panels. Both UI trees
 import from here so the safety-critical instruction strings (EPAS flash,
 calibration, restore) have a single source.
 """
-
-
-class NAPParamKeys:
-  ADAPTIVE_ACCEL = "NAPAdaptiveAccel"
-  PEDAL_ENABLED = "NAPPedalEnabled"
-  FOLLOW_DISTANCE = "NAPFollowDistance"
-  PEDAL_CAN_BUS = "NAPPedalCanBus"
-  PEDAL_CALIB_DONE = "NAPPedalCalibDone"
-  RADAR_ENABLED = "NAPRadarEnabled"
-  RADAR_HUD = "NAPRadarHud"
-  RADAR_IGNORE_HW_FAIL = "NAPRadarIgnoreHwFail"
-  RADAR_OFFSET = "NAPRadarOffset"
-  RADAR_DONOR_VIN = "NAPRadarDonorVin"
-  RADAR_EPAS_TYPE = "NAPRadarEpasType"
-  RADAR_POSITION = "NAPRadarPosition"
-  RADAR_READ_VIN = "NAPRadarReadVin"
-  RADAR_VIN_READ_STATUS = "NAPRadarVinReadStatus"
-  IBOOSTER_ENABLED = "NAPiBoosterEnabled"
-  BRAKE_FACTOR = "NAPBrakeFactor"
-  FORCE_PRE_AP = "NAPForcePreAP"
+from opendbc.car.tesla.preap.nap_params import NAPParamKeys
 
 
 DEFAULTS = {

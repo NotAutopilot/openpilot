@@ -8,7 +8,7 @@ from opendbc.car.structs import car
 from enum import IntEnum
 
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.sunnypilot.selfdrive.car.preap_boot import is_preap_ui_platform
+from opendbc.car.tesla.preap.sp.platform import is_preap_ui_platform
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.sunnypilot.widgets.list_view import toggle_item_sp, simple_button_item_sp, option_item_sp, LineSeparatorSP
 from openpilot.system.ui.widgets.scroller_tici import Scroller

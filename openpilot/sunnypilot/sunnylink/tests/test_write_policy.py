@@ -18,12 +18,10 @@ def test_live_follow_distance():
   assert not evaluate_param_write("NAPFollowDistance", 8, PREAP).allow
 
 
-def test_next_drive_engagement_and_brake():
-  assert evaluate_param_write("NAPLateralEngagementMode", 0, PREAP).allow
-  assert evaluate_param_write("NAPLateralEngagementMode", 2, PREAP).allow
-  assert not evaluate_param_write("NAPLateralEngagementMode", 3, PREAP).allow
+def test_next_drive_brake_mode():
   assert evaluate_param_write("MadsSteeringMode", 1, PREAP).allow
   assert not evaluate_param_write("MadsSteeringMode", 1, PREAP_COUPLED).allow
+  assert not evaluate_param_write("MadsSteeringMode", 9, PREAP).allow
 
 
 def test_rejects_hardware_and_hidden_preap_keys():
@@ -42,7 +40,6 @@ def test_modern_tesla_unchanged_for_coop_and_mads():
 
 def test_preap_only_keys_rejected_on_modern():
   assert not evaluate_param_write("NAPFollowDistance", 4, MODERN).allow
-  assert not evaluate_param_write("NAPLateralEngagementMode", 0, MODERN).allow
   assert evaluate_param_write("MadsSteeringMode", 1, MODERN).allow
 
 
@@ -52,22 +49,19 @@ def test_hardware_rejected_on_modern_and_preap():
     assert not evaluate_param_write("NAPPedalEnabled", True, caps).allow
 
 
-def test_hostile_batch_mode_then_brake_fails_closed():
+def test_brake_and_follow_batch_is_independent():
   results = evaluate_ordered_writes(
-    [("NAPLateralEngagementMode", 1), ("MadsSteeringMode", 1)],
+    [("MadsSteeringMode", 1), ("NAPFollowDistance", 4)],
     PREAP,
-    staged_mode=0,
   )
   assert results[0][2].allow
-  assert not results[1][2].allow
-  assert results[1][2].reason == "brake_mode_not_independent"
+  assert results[1][2].allow
 
 
-def test_hostile_batch_brake_then_mode_is_order_independent():
+def test_coupled_cap_rejects_brake_in_batch():
   results = evaluate_ordered_writes(
-    [("MadsSteeringMode", 1), ("NAPLateralEngagementMode", 1)],
-    PREAP,
-    staged_mode=0,
+    [("MadsSteeringMode", 1), ("NAPFollowDistance", 4)],
+    PREAP_COUPLED,
   )
   assert not results[0][2].allow
   assert results[0][2].reason == "brake_mode_not_independent"
@@ -85,3 +79,11 @@ def test_read_only_status_keys_are_local_only():
   for key in ("tesla_preap_active_mode", "tesla_preap_longitudinal_path",
               "tesla_preap_pedal_health", "tesla_preap_radar_health"):
     assert not evaluate_param_write(key, "ok", PREAP).allow
+
+
+def test_retired_engagement_mode_keys_are_refused():
+  for key in ("NAPLateralEngagementMode", "NAPLateralEngagementModeMigrated"):
+    for caps in ({"tesla_preap": True}, {}):
+      decision = evaluate_param_write(key, 0, caps)
+      assert not decision.allow
+      assert decision.reason == "retired_key"
