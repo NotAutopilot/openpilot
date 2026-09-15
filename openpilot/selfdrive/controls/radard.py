@@ -154,9 +154,12 @@ def association_score(v_ego: float, vision_d_rel: float, lead: capnp._DynamicStr
 
 def is_association_candidate(v_ego: float, vision_d_rel: float, lead: capnp._DynamicStructReader,
                              track: Track, score: float) -> bool:
-  distance_limit = ASSOCIATION_DISTANCE_GATE * max(lead.xStd[0], ASSOCIATION_MIN_DISTANCE_STD)
+  # Uncertainty must not erase range and speed compatibility.
+  distance_limit = min(ASSOCIATION_DISTANCE_GATE * max(lead.xStd[0], ASSOCIATION_MIN_DISTANCE_STD),
+                       max(5.0, 0.25 * vision_d_rel))
   lateral_limit = ASSOCIATION_LATERAL_GATE * max(lead.yStd[0], ASSOCIATION_MIN_LATERAL_STD)
-  velocity_limit = ASSOCIATION_VELOCITY_GATE * max(lead.vStd[0], ASSOCIATION_MIN_VELOCITY_STD)
+  velocity_limit = min(ASSOCIATION_VELOCITY_GATE * max(lead.vStd[0], ASSOCIATION_MIN_VELOCITY_STD),
+                       10.0)
 
   distance_compatible = abs(track.dRel - vision_d_rel) <= distance_limit
   lateral_compatible = abs(track.yRel + lead.y[0]) <= lateral_limit

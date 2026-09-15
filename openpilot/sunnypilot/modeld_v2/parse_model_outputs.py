@@ -124,7 +124,13 @@ class Parser:
     if 'sim_pose' in outs:
       self.parse_mdn('sim_pose', outs, out_shape=(ModelConstants.POSE_WIDTH,))
     self.parse_mdn('wide_from_device_euler', outs, out_shape=(ModelConstants.WIDE_FROM_DEVICE_WIDTH,))
-    self.parse_mdn('lead', outs, out_shape=(ModelConstants.LEAD_TRAJ_LEN, ModelConstants.LEAD_WIDTH))
+    # 144-wide lead is concatenated means then logstds, not 3x48 MHP.
+    non_mhp_lead_width = 2 * ModelConstants.LEAD_MHP_SELECTION * ModelConstants.LEAD_TRAJ_LEN * ModelConstants.LEAD_WIDTH
+    if 'lead' in outs and outs['lead'].shape[1] == non_mhp_lead_width:
+      self.parse_mdn('lead', outs, in_N=1, out_N=0,
+                     out_shape=(ModelConstants.LEAD_MHP_SELECTION, ModelConstants.LEAD_TRAJ_LEN, ModelConstants.LEAD_WIDTH))
+    else:
+      self.parse_mdn('lead', outs, out_shape=(ModelConstants.LEAD_TRAJ_LEN, ModelConstants.LEAD_WIDTH))
     if 'lat_planner_solution' in outs:
       self.parse_mdn('lat_planner_solution', outs, out_shape=(ModelConstants.IDX_N, ModelConstants.LAT_PLANNER_SOLUTION_WIDTH))
     if 'desired_curvature' in outs:

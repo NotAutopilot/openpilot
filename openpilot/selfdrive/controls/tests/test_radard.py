@@ -7,6 +7,7 @@ from openpilot.selfdrive.controls.radard import KalmanParams, RADAR_TO_CAMERA, R
 
 
 MAX_RADAR_MEASUREMENT_AGE = 0.5
+CLIPPED_VISION_STD = 59874.140625
 
 
 def _cp(*, fingerprint: str = "TESLA_MODEL_S_PREAP", brand: str = "tesla"):
@@ -26,8 +27,10 @@ class RadarScenario:
     self.frame = 0
 
   def step(self, time_s: float, vision_d_rel: float, radar_points: list[tuple[int, float, float, float]] | None = None,
-           vision_v: float | None = None):
-    messages = [self._model_message(time_s, vision_d_rel, vision_v)]
+           vision_v: float | None = None, *, x_std: float = 3.0, v_std: float = 2.0, y_std: float = 1.0,
+           vision_y: float = 0.0, vision_prob: float = 0.9):
+    messages = [self._model_message(time_s, vision_d_rel, vision_v, x_std=x_std, v_std=v_std, y_std=y_std,
+                                    vision_y=vision_y, vision_prob=vision_prob)]
     if self.frame == 0:
       messages.append(self._car_state_message(time_s))
     if radar_points is not None:
@@ -38,19 +41,21 @@ class RadarScenario:
     self.frame += 1
     return self.radar.radar_state.leadOne
 
-  def _model_message(self, time_s: float, vision_d_rel: float, vision_v: float | None):
+  def _model_message(self, time_s: float, vision_d_rel: float, vision_v: float | None, *,
+                     x_std: float = 3.0, v_std: float = 2.0, y_std: float = 1.0,
+                     vision_y: float = 0.0, vision_prob: float = 0.9):
     message = messaging.new_message("modelV2")
     message.logMonoTime = int(time_s * 1e9)
     message.modelV2.velocity.x = [self.v_ego]
     leads = message.modelV2.init("leadsV3", 2)
     for lead in leads:
-      lead.prob = 0.9
+      lead.prob = vision_prob
       lead.x = [vision_d_rel + RADAR_TO_CAMERA]
-      lead.xStd = [3.0]
-      lead.y = [0.0]
-      lead.yStd = [1.0]
+      lead.xStd = [x_std]
+      lead.y = [vision_y]
+      lead.yStd = [y_std]
       lead.v = [self.v_ego if vision_v is None else vision_v]
-      lead.vStd = [2.0]
+      lead.vStd = [v_std]
       lead.a = [0.0]
     return message
 
@@ -156,3 +161,85 @@ def test_fingerprint_gate_skips_preap_association_for_other_cars():
   lead = scenario.step(1.0, vision_d_rel=100.0, radar_points=[(7, 120.0, 0.0, 0.0)])
   assert lead.radar
   assert lead.dRel == pytest.approx(120.0)
+
+
+def test_association_rejects_stationary_speed_mismatch_when_distance_fits_cap():
+  vision_d_rel = 97.1520767 - RADAR_TO_CAMERA
+  scenario = RadarScenario(v_ego=22.33053)
+  lead = scenario.step(
+    1.0,
+    vision_d_rel=vision_d_rel,
+    radar_points=[(438, 75.8125, 1.375, -22.0)],
+    vision_v=22.43566,
+    x_std=CLIPPED_VISION_STD,
+    v_std=CLIPPED_VISION_STD,
+    y_std=0.23918359,
+    vision_y=-1.4312779,
+  )
+
+  assert not lead.radar
+  assert lead.dRel == pytest.approx(vision_d_rel)
+
+
+def test_association_rejects_distant_mismatch_when_velocity_fits():
+  v_ego = 17.41916
+  vision_v = 12.84962
+  vision_d_rel = 89.7781 - RADAR_TO_CAMERA
+  scenario = RadarScenario(v_ego=v_ego)
+  lead = scenario.step(
+    1.0,
+    vision_d_rel=vision_d_rel,
+    radar_points=[(478, 15.875, 0.0, vision_v - v_ego)],
+    vision_v=vision_v,
+    x_std=CLIPPED_VISION_STD,
+    v_std=CLIPPED_VISION_STD,
+  )
+
+  assert not lead.radar
+  assert lead.dRel == pytest.approx(vision_d_rel)
+
+
+def test_association_does_not_keep_ineligible_incumbent_via_hysteresis():
+  scenario = RadarScenario()
+  clipped = {"x_std": CLIPPED_VISION_STD, "v_std": CLIPPED_VISION_STD}
+  lead = scenario.step(1.0, vision_d_rel=40.0, radar_points=[(81, 40.0, 0.0, 0.0)], **clipped)
+  assert lead.radarTrackId == 81
+
+  lead = scenario.step(
+    1.1,
+    vision_d_rel=40.0,
+    radar_points=[(81, 15.0, 0.0, 0.0), (82, 40.0, 0.0, 0.0)],
+    **clipped,
+  )
+
+  assert lead.radar
+  assert lead.radarTrackId == 82
+
+
+@pytest.mark.parametrize("v_ego, vision_v, radar_v_rel", [
+  (20.0, 20.0, 0.0),
+  (22.33053, 0.0, -22.33053),
+])
+def test_association_keeps_agreeing_tracks_at_clipped_std(v_ego, vision_v, radar_v_rel):
+  scenario = RadarScenario(v_ego=v_ego)
+  lead = scenario.step(
+    1.0,
+    vision_d_rel=40.0,
+    radar_points=[(7, 40.0, 0.0, radar_v_rel)],
+    vision_v=vision_v,
+    x_std=CLIPPED_VISION_STD,
+    v_std=CLIPPED_VISION_STD,
+  )
+
+  assert lead.radar
+  assert lead.radarTrackId == 7
+  assert lead.dRel == pytest.approx(40.0)
+
+
+def test_low_speed_override_selects_in_path_stop_without_vision():
+  scenario = RadarScenario(v_ego=3.0)
+  lead = scenario.step(1.0, vision_d_rel=30.0, radar_points=[(7, 10.0, 0.0, -3.0)], vision_prob=0.0)
+
+  assert lead.radar
+  assert lead.radarTrackId == 7
+  assert lead.dRel == pytest.approx(10.0)
