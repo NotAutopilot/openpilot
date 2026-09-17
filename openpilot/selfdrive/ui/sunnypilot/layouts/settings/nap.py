@@ -113,7 +113,6 @@ class NAPLayout(Widget):
     self._add_toggle(NAPParamKeys.ADAPTIVE_ACCEL, tr("Adaptive Accel Limits"),
                      tr("Reduces acceleration authority when close to a lead car to prevent overshoot."))
     follow_dist = int(self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True) or 4)
-    self._follow_distance = follow_dist
     self._follow_buttons = multiple_button_item_sp(
       title=lambda: tr("Follow Distance"),
       description=lambda: tr("Follow distance (1=closest, 7=farthest). Overridden by cruise stalk if present."),
@@ -549,6 +548,4 @@ class NAPLayout(Widget):
 
   def _refresh_follow_distance(self):
     follow_dist = int(self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True) or 4)
-    if follow_dist != self._follow_distance:
-      self._follow_distance = follow_dist
-      self._follow_buttons.action_item.set_selected_button(max(0, min(6, follow_dist - 1)))
+    self._follow_buttons.action_item.set_selected_button(max(0, min(6, follow_dist - 1)))
