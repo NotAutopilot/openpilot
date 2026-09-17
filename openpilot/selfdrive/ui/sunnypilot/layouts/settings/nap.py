@@ -113,6 +113,7 @@ class NAPLayout(Widget):
     self._add_toggle(NAPParamKeys.ADAPTIVE_ACCEL, tr("Adaptive Accel Limits"),
                      tr("Reduces acceleration authority when close to a lead car to prevent overshoot."))
     follow_dist = int(self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True) or 4)
+    self._follow_distance = follow_dist
     self._follow_buttons = multiple_button_item_sp(
       title=lambda: tr("Follow Distance"),
       description=lambda: tr("Follow distance (1=closest, 7=farthest). Overridden by cruise stalk if present."),
@@ -510,6 +511,11 @@ class NAPLayout(Widget):
       "<h1>Reset to Defaults</h1><br><p>This will reset all NAP settings. This cannot be undone.</p>",
       tr("Reset All"), rich=True, callback=confirm_callback))
 
+  def _update_state(self):
+    super()._update_state()
+    if self._page == "main":
+      self._refresh_follow_distance()
+
   def _render(self, rect):
     if self._page == "radar":
       self._radar_back_btn.set_position(rect.x, rect.y + 10)
@@ -530,8 +536,7 @@ class NAPLayout(Widget):
   def _refresh_toggles(self):
     for key, item in self._toggle_map.items():
       item.action_item.set_state(self._params.get_bool(key))
-    follow_dist = int(self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True) or 4)
-    self._follow_buttons.action_item.set_selected_button(max(0, min(6, follow_dist - 1)))
+    self._refresh_follow_distance()
     self._pedal_bus_buttons.action_item.set_selected_button(
       pedal_bus_selector_index(self._params.get(NAPParamKeys.PEDAL_CAN_BUS)))
     brake_factor = self._params.get(NAPParamKeys.BRAKE_FACTOR, return_default=True)
@@ -541,3 +546,9 @@ class NAPLayout(Widget):
     self._radar_position_buttons.action_item.set_selected_button(max(0, min(2, radar_position)))
     radar_epas = int(self._params.get(NAPParamKeys.RADAR_EPAS_TYPE, return_default=True) or 0)
     self._radar_epas_buttons.action_item.set_selected_button(max(0, min(4, radar_epas)))
+
+  def _refresh_follow_distance(self):
+    follow_dist = int(self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True) or 4)
+    if follow_dist != self._follow_distance:
+      self._follow_distance = follow_dist
+      self._follow_buttons.action_item.set_selected_button(max(0, min(6, follow_dist - 1)))
