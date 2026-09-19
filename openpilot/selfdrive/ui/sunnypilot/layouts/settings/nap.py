@@ -12,6 +12,9 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   acknowledgments_html, find_preset_index,
   pedal_calibration_entry_block_reason, pedal_calibration_entry_enabled,
 )
+from openpilot.selfdrive.ui.onroad.follow_distance_indicator import (
+  live_stalk_follow_distance, note_follow_distance_tap, selected_follow_distance,
+)
 from openpilot.selfdrive.ui.radar.radar_view import RadarMonitorDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.sunnypilot.selfdrive.car.tesla.preap.tools import instructions as preap_instructions
@@ -335,7 +338,9 @@ class NAPLayout(Widget):
     (dest if dest is not None else self._main_items).append(item)
 
   def _on_follow_distance(self, index: int):
-    self._params.put(NAPParamKeys.FOLLOW_DISTANCE, index + 1)
+    distance = index + 1
+    self._params.put(NAPParamKeys.FOLLOW_DISTANCE, distance)
+    note_follow_distance_tap(distance, live_stalk_follow_distance(ui_state.sm))
 
   def _on_pedal_can_bus(self, index: int):
     self._params.put(NAPParamKeys.PEDAL_CAN_BUS, PEDAL_CAN_BUS_VALUES[index])
@@ -547,5 +552,7 @@ class NAPLayout(Widget):
     self._radar_epas_buttons.action_item.set_selected_button(max(0, min(4, radar_epas)))
 
   def _refresh_follow_distance(self):
-    follow_dist = int(self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True) or 4)
+    selected = selected_follow_distance(live_stalk_follow_distance(ui_state.sm)) if ui_state.started else 0
+    # Live driver selection must not wait for, or be rolled back by, queued disk writes.
+    follow_dist = selected or int(self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True) or 4)
     self._follow_buttons.action_item.set_selected_button(max(0, min(6, follow_dist - 1)))

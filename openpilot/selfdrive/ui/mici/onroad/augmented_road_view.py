@@ -11,6 +11,7 @@ from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.mici.onroad.confidence_ball import ConfidenceBall
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
+from openpilot.selfdrive.ui.onroad.follow_distance_indicator import FollowDistanceIndicator
 from openpilot.selfdrive.ui.radar.radar_view import RadarHudOverlay, radar_hud_rect
 from openpilot.system.ui.lib.application import FontWeight, gui_app, MousePos, MouseEvent
 from openpilot.system.ui.widgets.label import UnifiedLabel
@@ -158,6 +159,7 @@ class AugmentedRoadView(CameraView):
     self._driver_state_renderer = DriverStateRenderer()
     self._confidence_ball = ConfidenceBall()
     self._radar_hud = RadarHudOverlay()
+    self._follow_distance = FollowDistanceIndicator()
     self._offroad_label = UnifiedLabel("start the car to\nuse sunnypilot", 54, FontWeight.DISPLAY,
                                        text_color=rl.Color(255, 255, 255, int(255 * 0.9)),
                                        alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER,
@@ -188,6 +190,7 @@ class AugmentedRoadView(CameraView):
   def _render(self, _):
     # Draw text if not onroad
     if not ui_state.started:
+      self._follow_distance.reset_offroad()
       rl.draw_rectangle_rec(self.rect, rl.BLACK)
       self._offroad_label.render(self._rect)
       return
@@ -235,6 +238,7 @@ class AugmentedRoadView(CameraView):
     self._hud_renderer.set_can_draw_top_icons(alert_to_render is None)
     self._hud_renderer.set_wheel_critical_icon(alert_to_render is not None and not not_animating_out and
                                                alert_to_render.visual_alert == car.CarControl.HUDControl.VisualAlert.steerRequired)
+    self._follow_distance.render(self._content_rect, alert=alert_to_render is not None)
     self._alert_renderer.render(self._content_rect)
     self._hud_renderer.render(self._content_rect)
     self._radar_hud.render(radar_hud_rect(self._content_rect))
