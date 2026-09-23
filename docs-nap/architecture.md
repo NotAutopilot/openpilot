@@ -39,6 +39,10 @@ All actual safety checks are active (steering angle/rate limits, hands-on diseng
 
 Bosch radar with GTW (GateWay ECU) emulation. The panda forwards chassis-bus traffic with a radar-position rewrite when `RADAR_BEHIND_NOSECONE` is set. The emulation hook is `rx_all` (not `rx`) because it must see every CAN frame, not just whitelisted ones.
 
+For a physically inverted Pre-AP radar, enable **NAP → Radar Settings → Radar Upside Down** while offroad, then reboot. `NAPRadarUpsideDown` defaults to off. The radar interface snapshots it at startup and reverses lateral position and lateral velocity only; range, longitudinal speed, and acceleration are unchanged. This is a host-side coordinate correction, separate from nosecone configuration and radar calibration. It does not program the radar or change panda safety.
+
+`NAPRadarOffset` is added after orientation correction: `yRel = direction * LatDist + offset`, `yvRel = direction * LatSpeed`, where `direction` is -1 when inverted and +1 otherwise. Tinkla instead negated the offset together with lateral position. To preserve a Tinkla upside-down setup's numeric output, negate its old offset when entering it in NAP. Upright setups keep their existing offset.
+
 `tesla_radar_bosch_generated.dbc` and `tesla_radar_continental_generated.dbc` are produced by device scons from `opendbc_repo/opendbc/dbc/generator/` and are not in git. See [contributing.md](contributing.md).
 
 ### Comma Pedal (optional)

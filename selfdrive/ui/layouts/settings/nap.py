@@ -274,6 +274,15 @@ class NAPLayout(Widget):
     )
 
     self._add_toggle(
+      NAPParamKeys.RADAR_UPSIDE_DOWN,
+      "Radar Upside Down",
+      "Radar is physically mounted upside down. Corrects lateral position and velocity, then applies the lateral offset. Requires reboot.",
+      enabled=ui_state.is_offroad,
+      needs_reboot=True,
+      dest=self._radar_items,
+    )
+
+    self._add_toggle(
       NAPParamKeys.RADAR_IGNORE_HW_FAIL,
       "Ignore radar hardware fail",
       "Let's you engage when Bosch raises HWFail even though tracks are still live.",

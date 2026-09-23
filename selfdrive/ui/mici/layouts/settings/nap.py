@@ -58,6 +58,10 @@ class RadarSettingsLayoutMici(NavScroller):
                                     toggle_callback=_reboot_on_toggle)
     radar_enabled.set_enabled(ui_state.is_offroad)
 
+    radar_upside_down = BigParamControl("radar upside down", NAPParamKeys.RADAR_UPSIDE_DOWN,
+                                        toggle_callback=_reboot_on_toggle)
+    radar_upside_down.set_enabled(ui_state.is_offroad)
+
     ignore_hw_fail = BigParamControl("ignore radar hardware fail", NAPParamKeys.RADAR_IGNORE_HW_FAIL)
 
     def on_radar_hud(checked):
@@ -95,6 +99,7 @@ class RadarSettingsLayoutMici(NavScroller):
 
     self._scroller.add_widgets([
       radar_enabled,
+      radar_upside_down,
       ignore_hw_fail,
       radar_hud,
       radar_offset_btn,
