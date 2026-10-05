@@ -14,6 +14,7 @@ from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.selfdrive.test.process_replay.process_replay import CONFIGS
 
 AlertSize = log.SelfdriveState.AlertSize
+EventName = log.OnroadEvent.EventName
 
 OFFROAD_ALERTS_PATH = os.path.join(BASEDIR, "selfdrive/selfdrived/alerts_offroad.json")
 
@@ -80,6 +81,12 @@ class TestAlerts:
         width = right - left
         msg = f"type: {alert.alert_type} msg: {txt}"
         assert width <= max_text_width, msg
+
+  def test_nap_startup_alert_names_car(self):
+    CP = car.CarParams.new_message(carFingerprint="TESLA_MODEL_S_HW1", fingerprintSource="can")
+    for event in (EventName.startup, EventName.startupMaster):
+      alert = EVENTS[event][ET.PERMANENT](CP, self.CS, self.sm, False, 100, log.LongitudinalPersonality.standard)
+      assert alert.alert_text_2.endswith("AP1 Model S (auto)"), alert.alert_text_2
 
   def test_alert_sanity_check(self):
     for event_types in EVENTS.values():

@@ -14,6 +14,7 @@ from openpilot.selfdrive.locationd.calibrationd import MIN_SPEED_FILTER
 from openpilot.system.micd import SAMPLE_RATE, SAMPLE_BUFFER
 from openpilot.selfdrive.ui.feedback.feedbackd import FEEDBACK_MAX_DURATION
 from openpilot.system.hardware import HARDWARE
+from openpilot.selfdrive.car.nap_profiles import car_label
 
 AlertSize = log.SelfdriveState.AlertSize
 AlertStatus = log.SelfdriveState.AlertStatus
@@ -259,10 +260,20 @@ def user_soft_disable_alert(alert_text_2: str) -> AlertCallbackType:
     return UserSoftDisableAlert(alert_text_2)
   return func
 
+def startup_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  label = car_label(CP)
+  if label:
+    return StartupAlert("Be ready to take over at any time", f"NAP: {label}")
+  return StartupAlert("Be ready to take over at any time")
+
 def startup_master_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   branch = get_short_branch()  # Ensure get_short_branch is cached to avoid lags on startup
   if "REPLAY" in os.environ:
     branch = "replay"
+
+  label = car_label(CP)
+  if label:
+    branch = f"{branch} - {label}"
 
   return StartupAlert("WARNING: This branch is not tested", branch, alert_status=AlertStatus.userPrompt)
 
@@ -443,7 +454,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.startup: {
-    ET.PERMANENT: StartupAlert("Be ready to take over at any time")
+    ET.PERMANENT: startup_alert,
   },
 
   EventName.startupMaster: {
