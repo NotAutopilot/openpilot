@@ -424,7 +424,7 @@ ACTIVE_CASES: tuple[ReplayCase, ...] = (
 segments = [(c.car_brand, c.source) for c in ACTIVE_CASES]
 
 NAP_PREAP_PEDAL_PARAMS: dict[str, ParamValue] = {
-  "NAPForcePreAP": True,
+  "NAPCarType": 1,
   "NAPAdaptiveAccel": True,
   "NAPPedalEnabled": True,
   "NAPFollowDistance": 7,
@@ -472,8 +472,8 @@ PENDING_CASES: tuple[ReplayCase, ...] = (
 )
 
 EMPTY_PARAMS_DIGEST = "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
-NAP_PREAP_PEDAL_PARAMS_DIGEST = "b5217b239c759d5a960872a99f2e9ff6cacdb37aff6e99e1ee1bd0c20dead809"
-NAP_PREAP_NO_PEDAL_PARAMS_DIGEST = "96b5f9f76bdf20f24bf2a29d408d87e60ebf377eccc3858b4f0c0de7c3c2e786"
+NAP_PREAP_PEDAL_PARAMS_DIGEST = "bdd1ddabbb757db6ef26163a4b3bc6bfdfa23a8f59785dd30dc75c0b4477c8d8"
+NAP_PREAP_NO_PEDAL_PARAMS_DIGEST = "159852e44c3d67d814a720ebca6f3ecf419d2aa0f263d316b734f4df54198858"
 
 
 def params_type_name(value: ParamValue) -> str:

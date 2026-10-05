@@ -92,7 +92,7 @@ def test_header_type_validation_and_rejection():
   with pytest.raises(TypeError):
     tp.validate_params_against_header({"NAPBrakeFactor": 1})
   with pytest.raises(TypeError):
-    tp.validate_params_against_header({"NAPForcePreAP": 1})
+    tp.validate_params_against_header({"NAPRadarEnabled": 1})
 
 
 def test_params_round_trip_native_types():
@@ -102,16 +102,16 @@ def test_params_round_trip_native_types():
       declared = params.get_type(key)
       if declared == ParamKeyType.BOOL:
         assert isinstance(value, bool)
-        params.put_bool(key, value)
+        params.put_bool(key, value, block=True)  # non-blocking writes race the read-back
         assert params.get_bool(key) is value
       elif declared == ParamKeyType.INT:
         assert isinstance(value, int)
         assert not isinstance(value, bool)
-        params.put(key, value)
+        params.put(key, value, block=True)
         assert params.get(key) == value
       elif declared == ParamKeyType.FLOAT:
         assert isinstance(value, float)
-        params.put(key, value)
+        params.put(key, value, block=True)
         assert params.get(key) == value
       else:
         raise AssertionError(f"unexpected type for {key}: {declared}")
@@ -309,7 +309,7 @@ def test_case_dedup_does_not_hash_custom_params():
     car_brand="TESLA",
     source="",
     processes=("card",),
-    custom_params={"NAPForcePreAP": True},
+    custom_params={"NAPCarType": 1},
   )
   tasks = [tp.ReplayTask(case=case, process="card"), tp.ReplayTask(case=case, process="card")]
   deduped = tp.unique_cases_by_id(tasks)

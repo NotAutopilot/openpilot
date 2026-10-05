@@ -65,9 +65,10 @@ def manager_init() -> None:
   params.put_bool("IsReleaseBranch", build_metadata.release_channel, block=True)
   params.put("HardwareSerial", serial, block=True)
 
-  # NAP: ensure Pre-AP fingerprint is forced on first boot
-  if params.get("NAPForcePreAP") is None:
-    params.put_bool("NAPForcePreAP", True)
+  # NAP: car type defaults to Auto. Written here rather than relied on as a param
+  # default, so replay/tests without it keep stock fingerprinting for other brands.
+  if params.get("NAPCarType") is None:
+    params.put("NAPCarType", 0)
 
   # set dongle id
   reg_res = register(show_spinner=True)

@@ -278,8 +278,8 @@
       "custom_params": {
         "NAPAdaptiveAccel": true,
         "NAPBrakeFactor": 1.0,
+        "NAPCarType": 1,
         "NAPFollowDistance": 7,
-        "NAPForcePreAP": true,
         "NAPPedalCalibDone": true,
         "NAPPedalCalibFactor": 0.9478672985781991,
         "NAPPedalCalibMax": 110.23299810159,
@@ -294,7 +294,7 @@
         "NAPiBoosterEnabled": false
       },
       "executable": false,
-      "params_digest": "b5217b239c759d5a960872a99f2e9ff6cacdb37aff6e99e1ee1bd0c20dead809",
+      "params_digest": "bdd1ddabbb757db6ef26163a4b3bc6bfdfa23a8f59785dd30dc75c0b4477c8d8",
       "processes": [
         "card",
         "controlsd",
@@ -313,8 +313,8 @@
       "custom_params": {
         "NAPAdaptiveAccel": true,
         "NAPBrakeFactor": 1.0,
+        "NAPCarType": 1,
         "NAPFollowDistance": 5,
-        "NAPForcePreAP": true,
         "NAPPedalCalibDone": true,
         "NAPPedalCalibFactor": 0.946969696969697,
         "NAPPedalCalibMax": 110.43821722611,
@@ -329,7 +329,7 @@
         "NAPiBoosterEnabled": false
       },
       "executable": false,
-      "params_digest": "96b5f9f76bdf20f24bf2a29d408d87e60ebf377eccc3858b4f0c0de7c3c2e786",
+      "params_digest": "159852e44c3d67d814a720ebca6f3ecf419d2aa0f263d316b734f4df54198858",
       "processes": [
         "card",
         "controlsd",
@@ -344,7 +344,7 @@
     }
   ],
   "expected_cases": 18,
-  "expected_params_digest": "200ac7871bca5f1026c3a271864d88cc7a28e36f10051e85ce73205409658522",
+  "expected_params_digest": "59a720c67bfdc73d6e260620184c6ef1f65cb86ac90b2eeddb7f9e5d5eb2b2a6",
   "expected_sources_digest": "d08466e4dfe7796111b612aed7bbc2532bb40567fc85b9d71ea4343440d7736f",
   "expected_tasks": 78,
   "inventory": "staged",
