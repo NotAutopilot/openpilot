@@ -20,6 +20,7 @@ from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper
+from openpilot.selfdrive.car.nap_profiles import switch_profile
 
 REPLAY = "REPLAY" in os.environ
 
@@ -101,6 +102,10 @@ class Car:
       self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, cached_params)
       self.RI = interfaces[self.CI.CP.carFingerprint].RadarInterface(self.CI.CP)
       self.CP = self.CI.CP
+
+      # NAP: load this car's calibration, learned params, and driving prefs before
+      # CarParams is written below; every learner blocks on CarParams before loading.
+      switch_profile(self.params, self.CP.carFingerprint)
 
       # continue onto next fingerprinting step in pandad
       self.params.put_bool("FirmwareQueryDone", True, block=True)
