@@ -6,6 +6,7 @@ calibration, restore) have a single source.
 """
 
 from openpilot.system.ui.lib.multilang import tr_noop
+from openpilot.selfdrive.car.nap_profiles import PROFILE_LABELS
 
 # Preset values for float/int params exposed as multiple-button selectors.
 BRAKE_FACTOR_PRESETS = [0.5, 1.0, 1.5, 2.0]
@@ -20,6 +21,22 @@ FOLLOW_DISTANCE_MAX = 7
 # ~0.27 is typical for the 3D-printed factory-location mount.
 RADAR_OFFSET_MIN = -2.0
 RADAR_OFFSET_MAX = 2.0
+
+# NAPCarType options (see opendbc/car/tesla/nap_detect.py)
+CAR_TYPE_VALUES = [0, 1, 2]
+CAR_TYPE_LABELS = ["Auto", "Pre-AP", "AP1"]
+
+
+def car_type_index(value) -> int:
+  return CAR_TYPE_VALUES.index(value) if value in CAR_TYPE_VALUES else 0
+
+
+def active_car_text(active_profile: str | None, car_type) -> str:
+  """Which car's calibration and prefs are loaded, and how it was chosen."""
+  label = PROFILE_LABELS.get(active_profile or "")
+  if label is None:
+    return "None yet"
+  return f"{label} ({'auto-detected' if car_type_index(car_type) == 0 else 'forced'})"
 
 
 CALIBRATE_PEDAL_INSTRUCTIONS = tr_noop("""Keep the car ON for calibration.

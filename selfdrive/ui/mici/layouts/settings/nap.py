@@ -14,11 +14,14 @@ from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog, Bi
 from openpilot.selfdrive.ui.mici.layouts.settings.nap_script import launch_script, open_pedal_wizard
 from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   BACKUP_EPAS_INSTRUCTIONS,
+  CAR_TYPE_LABELS,
+  CAR_TYPE_VALUES,
   FLASH_EPAS_INSTRUCTIONS,
   PEDAL_CAN_BUS_VALUES,
   RADAR_OFFSET_MAX,
   RADAR_OFFSET_MIN,
   RESTORE_EPAS_INSTRUCTIONS,
+  active_car_text,
   pedal_calibration_entry_enabled,
 )
 from openpilot.selfdrive.ui.radar.radar_view import RadarMonitorDialog
@@ -187,7 +190,6 @@ class NAPLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
     self._params = Params()
-    self._params.put_bool(NAPParamKeys.FORCE_PRE_AP, True)
 
     # set_enabled accepts bool | Callable[[], bool]. Pass methods directly
     # (e.g. ui_state.is_offroad), NOT lambdas-wrapping-methods. The form
@@ -235,9 +237,15 @@ class NAPLayoutMici(NavScroller):
     ibooster_enabled = BigParamControl("ibooster enabled", NAPParamKeys.IBOOSTER_ENABLED)
     ibooster_enabled.set_enabled(False)
 
-    # ── Advanced (locked on) ─────────────────────────
-    force_pre_ap = BigParamControl("force pre-ap mode", NAPParamKeys.FORCE_PRE_AP)
-    force_pre_ap.set_enabled(False)
+    # ── Vehicle ──────────────────────────────────────
+    car_type = BigMultiValueParamToggle(
+      "car type",
+      NAPParamKeys.CAR_TYPE,
+      values=CAR_TYPE_VALUES,
+      labels=[label.lower() for label in CAR_TYPE_LABELS],
+      default_value=0,
+    )
+    self._active_car_btn = BigButton("active car", self._active_car_text())
 
     # ── Actions ──────────────────────────────────────
     backup_epas_btn = BigButton("backup epas", "extract")
@@ -264,6 +272,8 @@ class NAPLayoutMici(NavScroller):
     restore_epas_btn.set_enabled(ui_state.is_offroad)
 
     self._scroller.add_widgets([
+      car_type,
+      self._active_car_btn,
       pedal_enabled,
       adaptive_accel,
       pedal_can_bus,
@@ -271,9 +281,16 @@ class NAPLayoutMici(NavScroller):
       calibrate_pedal_btn,
       radar_settings_btn,
       ibooster_enabled,
-      force_pre_ap,
       backup_epas_btn,
       flash_epas_btn,
       restore_epas_btn,
     ])
+
+  def _active_car_text(self) -> str:
+    return active_car_text(self._params.get(NAPParamKeys.ACTIVE_PROFILE),
+                           self._params.get(NAPParamKeys.CAR_TYPE, return_default=True)).lower()
+
+  def show_event(self):
+    super().show_event()
+    self._active_car_btn.set_value(self._active_car_text())
 

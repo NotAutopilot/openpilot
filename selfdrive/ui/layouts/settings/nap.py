@@ -16,12 +16,12 @@ from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets.html_render import HtmlRenderer, ElementType
 from openpilot.selfdrive.ui.layouts.settings.nap_content import (
-  BACKUP_EPAS_INSTRUCTIONS, BRAKE_FACTOR_PRESETS,
+  BACKUP_EPAS_INSTRUCTIONS, BRAKE_FACTOR_PRESETS, CAR_TYPE_LABELS, CAR_TYPE_VALUES,
   CALIBRATE_PEDAL_INSTRUCTIONS,
   FLASH_EPAS_INSTRUCTIONS, PEDAL_CAN_BUS_VALUES,
   RADAR_OFFSET_MAX, RADAR_OFFSET_MIN,
   RESTORE_EPAS_INSTRUCTIONS,
-  acknowledgments_html, find_preset_index,
+  acknowledgments_html, active_car_text, car_type_index, find_preset_index,
   pedal_calibration_entry_enabled,
 )
 from opendbc.car.tesla.preap.nap_params import NAPParamKeys, DEFAULTS
@@ -105,8 +105,28 @@ class NAPLayout(Widget):
     self._radar_items = []
     self._toggle_map = {}  # param_key -> ListItem (for refresh)
 
+    # ── Vehicle ──
+    self._main_items.append(section_header_item("Vehicle"))
+
+    self._car_type_buttons = multiple_button_item(
+      "Car Type",
+      "Auto picks AP1 when the Autopilot computer is on the harness, otherwise Pre-AP. "
+      + "Takes effect at the next ignition.",
+      buttons=CAR_TYPE_LABELS,
+      button_width=170,
+      selected_index=car_type_index(self._params.get(NAPParamKeys.CAR_TYPE, return_default=True)),
+      callback=self._on_car_type,
+    )
+    self._main_items.append(self._car_type_buttons)
+
+    self._main_items.append(text_item(
+      "Active Car",
+      self._active_car_text,
+      description="Car whose calibration and driving preferences are loaded. Updates when a car is detected at ignition.",
+    ))
+
     # ── Section 1: Longitudinal Control ──
-    self._main_items.append(section_header_item("Longitudinal Control"))
+    self._main_items.append(section_header_item("Longitudinal Control (Pre-AP only)"))
 
     self._add_toggle(
       NAPParamKeys.PEDAL_ENABLED,
@@ -134,7 +154,7 @@ class NAPLayout(Widget):
     self._main_items.append(self._follow_buttons)
 
     # ── Section 2: Pedal Hardware ──
-    self._main_items.append(section_header_item("Pedal Hardware"))
+    self._main_items.append(section_header_item("Pedal Hardware (Pre-AP only)"))
 
 
     pedal_bus = self._params.get(NAPParamKeys.PEDAL_CAN_BUS, return_default=True)
@@ -166,7 +186,7 @@ class NAPLayout(Widget):
     self._main_items.append(self._calibrate_pedal_btn)
 
     # ── Section 3: Radar (submenu) ──
-    self._main_items.append(section_header_item("Radar"))
+    self._main_items.append(section_header_item("Radar (Pre-AP only)"))
     self._radar_settings_btn = button_item(
       "Radar Settings",
       "Open",
@@ -177,7 +197,7 @@ class NAPLayout(Widget):
     self._build_radar_items()
 
     # ── Section 4: iBooster / Braking (not yet implemented — grayed out) ──
-    self._main_items.append(section_header_item("iBooster / Braking"))
+    self._main_items.append(section_header_item("iBooster / Braking (Pre-AP only)"))
 
     self._add_toggle(
       NAPParamKeys.IBOOSTER_ENABLED,
@@ -197,18 +217,6 @@ class NAPLayout(Widget):
     )
     self._brake_factor_buttons.action_item.set_enabled(False)
     self._main_items.append(self._brake_factor_buttons)
-
-    # ── Section 5: Advanced ──
-    self._main_items.append(section_header_item("Advanced"))
-
-    # Force Pre-AP is always on for now — grayed out in the ON position
-    self._params.put_bool(NAPParamKeys.FORCE_PRE_AP, True)
-    self._add_toggle(
-      NAPParamKeys.FORCE_PRE_AP,
-      "Force Pre-AP Mode",
-      "Force the system to treat this vehicle as a Pre-Autopilot Tesla.",
-      enabled=False,
-    )
 
     # ── Section 6: Actions ──
     self._main_items.append(section_header_item("Actions"))
@@ -401,6 +409,13 @@ class NAPLayout(Widget):
 
   def _on_brake_factor(self, index: int):
     self._params.put(NAPParamKeys.BRAKE_FACTOR, BRAKE_FACTOR_PRESETS[index])
+
+  def _on_car_type(self, index: int):
+    self._params.put(NAPParamKeys.CAR_TYPE, CAR_TYPE_VALUES[index])
+
+  def _active_car_text(self) -> str:
+    return active_car_text(self._params.get(NAPParamKeys.ACTIVE_PROFILE),
+                           self._params.get(NAPParamKeys.CAR_TYPE, return_default=True))
 
   def _get_radar_offset(self) -> float:
     raw = self._params.get(NAPParamKeys.RADAR_OFFSET, return_default=True)
@@ -617,10 +632,6 @@ class NAPLayout(Widget):
         self._params.put_bool(key, default)
       elif isinstance(default, (int, float)):
         self._params.put(key, default)
-    # Force Pre-AP is locked on in the panel but DEFAULTS keeps it off
-    # for non-UI consumers. Re-apply the lock after the wholesale loop
-    # so reset doesn't silently flip the invariant.
-    self._params.put_bool(NAPParamKeys.FORCE_PRE_AP, True)
 
   # ── Render / lifecycle ──
 
@@ -650,6 +661,9 @@ class NAPLayout(Widget):
     follow_dist = self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True)
     self._follow_buttons.action_item.set_selected_button(
       max(0, min(6, follow_dist - 1)))
+
+    self._car_type_buttons.action_item.set_selected_button(
+      car_type_index(self._params.get(NAPParamKeys.CAR_TYPE, return_default=True)))
 
     pedal_bus = self._params.get(NAPParamKeys.PEDAL_CAN_BUS, return_default=True)
     self._pedal_bus_buttons.action_item.set_selected_button(
