@@ -4,22 +4,23 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
+import pytest
+
+from openpilot.common.params import Params
 from openpilot.sunnypilot.sunnylink.athena import sunnylinkd
 
 
 class TestSunnylinkdMethods:
-  def setup_method(self):
+  @pytest.fixture(autouse=True)
+  def setup(self, monkeypatch):
+    # Bind module-level Params to this test's isolated OpenpilotPrefix.
+    monkeypatch.setattr(sunnylinkd, "params", Params())
     self.saved_params = []
-
-    self.original_save = sunnylinkd.save_param_from_base64_encoded_string
 
     def mock_save_param(key, value, compression=False):
       self.saved_params.append((key, value, compression))
 
-    sunnylinkd.save_param_from_base64_encoded_string = mock_save_param  # ty: ignore[invalid-assignment]
-
-  def teardown_method(self):
-    sunnylinkd.save_param_from_base64_encoded_string = self.original_save  # ty: ignore[invalid-assignment]
+    monkeypatch.setattr(sunnylinkd, "save_param_from_base64_encoded_string", mock_save_param)
 
   def test_saveParams_blocked(self):
     blocked_params = {
