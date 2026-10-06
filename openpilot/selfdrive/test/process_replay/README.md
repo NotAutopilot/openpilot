@@ -35,15 +35,17 @@ optional arguments:
   --update-refs                         Updates reference logs using current commit
 ```
 
-## Forks
+## Fork references
 
-openpilot forks can use this test with their own reference logs, by default `test_proccesses.py` saves logs locally.
+`naponsp-dev` reads references from [`NotAutopilot/ci-artifacts@process-replay-naponsp`](https://github.com/NotAutopilot/ci-artifacts/tree/process-replay-naponsp). The checked-in `ref_commit` pins the parent revision used to generate them, independently of the artifact branch's latest commit.
 
-To generate new logs:
+The initial reference is pre-feature parent `b688860729d5c9c1510f4902963ee119d6082040`, with opendbc `f9c9d0e3bc6f5f0c44aabefa056772146e375537`. Its 66 replay cases matched candidate `5758742aa2f7f8bb11b4ae594ef3960ccbd30319` using the unchanged comparison settings. This preserves the fork's `carStateSP` output rather than hiding it to match upstream references. The ordinary NAP `process-replay` artifact branch is separate and unchanged.
 
-`./test_processes.py`
+For a reference update, run the complete matrix on x86-64 Linux at the proposed reference revision, review the output differences, and obtain maintainer approval. Publish the resulting revision-named `.zst` files and `ref_commit` to `process-replay-naponsp`, then update this repository's pin and rerun the complete matrix against the published files. Do not narrow the process set, remove message streams, or loosen tolerances to accept a change.
 
-Then, check in the new logs using git-lfs. Make sure to also update the `ref_commit` file to the current commit.
+The existing matrix uses 16 public CI routes. Its Tesla route is Model Y; it does not replace Pre-AP-specific replay or vehicle validation.
+
+Other forks can use their own artifact URL, or keep revision-named logs in the local `fakedata` directory. `test_processes.py` saves generated logs there. Keep the logs and `ref_commit` aligned.
 
 ## API
 

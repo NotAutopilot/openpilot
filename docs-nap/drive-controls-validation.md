@@ -77,15 +77,18 @@ The radar overlay is farther right and reserves space for driver monitoring. Lar
 ## Verification performed
 
 - Native `scons -j8` build, including schema and parameter changes: passed.
-- Clean Ubuntu 24.04 Docker image and full container `scons -j$(nproc)` build: passed at `097f43a770022044b4728ade4d066462ed238ea1`, with eight CPUs assigned. The standalone recursive checkout used genuine Git metadata and resolved LFS files; no host build products or virtual environment were reused.
+- Clean Ubuntu 24.04 Docker image and full container `scons -j$(nproc)` build: passed at `5758742aa2f7f8bb11b4ae594ef3960ccbd30319`, with four CPUs assigned. The standalone recursive checkout used genuine Git metadata and resolved LFS files; no host build products or virtual environment were reused.
 - Publication check of the Pre-AP CI suites, cruise-speed helpers, and UI state: **1,060 passed, 39 skipped, 7 deselected, 114 subtests passed**. The opendbc and parent suites ran separately with their respective pytest configurations. The earlier integrated run passed 851 tests and 123 subtests. Coverage includes Pre-AP controller and engagement, panda safety and radar contracts, host/MADS/desire transitions, planner/MPC following, cruise-speed helpers, radar processing, UI state, and remote-write policy.
 - Actual state-machine smoke: initial set, cancel with retained target, resume at lower vehicle speed, two-down current-speed selection without engagement, and resume of the new target.
 - Baseline/candidate grade-estimator smoke: both slope signs, return to flat, and full crest reversals; the candidate stayed within the physical endpoint bounds.
 - Full-log replay through the production planner, native MPC, and cereal publication: 3,596 model updates across three recorded segments. Published following distance and actual MPC headway agreed on every update. Native dynamic target publication agreed with planner output.
 - Production drawing paths rendered to images with synthetic UI inputs, including active dynamic target and retained manual ceiling.
 - Ruff checks passed for all 41 changed Python files.
+- Standalone opendbc `./test.sh`: lint, type checking and MISRA passed; 9,796 unittest cases ran with 1,320 skipped, plus 383 passing function-style Pre-AP tests and 7 deselected.
+- Direct boundary smoke: both `handsOnPaused` values survive cereal-to-Python conversion. Standalone and integrated radar constructors retain explicit sunnypilot settings, use separate default settings when omitted, and leave the shared base constructor unchanged.
+- Complete shared-route replay: all 66 candidate outputs matched pre-feature parent `b688860729d5c9c1510f4902963ee119d6082040` with unchanged comparator settings. Both revisions differed from upstream reference `3323aafb5422cee72653206dc83a56e66c61799d`; the approved naponsp-specific reference set preserves all streams, including `carStateSP`. The matrix's Tesla route is Model Y, not Pre-AP.
 
-Not performed: deployment, road driving, a full-repository test run, or an instrument-cluster hardware test. Skipped and deselected tests are not counted as passing.
+Not performed: deployment, road driving, or an instrument-cluster hardware test. Skipped and deselected tests are not counted as passing.
 
 ### Repeating the container build
 
