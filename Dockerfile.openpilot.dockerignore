@@ -22,9 +22,6 @@
 **/.sconsign.dblite.*
 **/.coverage*
 **/htmlcov
-**/build
-**/dist
-**/obj
 **/*.egg-info
 **/*.pyc
 **/*.pyo
