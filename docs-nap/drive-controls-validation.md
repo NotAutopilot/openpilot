@@ -75,21 +75,24 @@ The radar overlay is farther right and reserves space for driver monitoring. Lar
 - Run function-style Pre-AP tests in standalone opendbc CI. Tests requiring native openpilot Params run in the parent repository with isolated parameter stores.
 - Run opendbc model shards against the matching NotAutopilot parent branch and install their dependencies into that parent's virtual environment.
 - Collect shared safety tests only through configured variants, preserving the common angle-steering and MADS checks.
+- Preserve full unittest safety coverage and add the plain pytest radar suites. Remove unregistered callbacks and unreachable/write-only Pre-AP code rather than excluding it from coverage; the line-coverage requirement remains 100%.
 
 ## Verification performed
 
-- Native `scons -j8` build, including schema and parameter changes: passed.
-- Clean Ubuntu 24.04 Docker image and full container `scons -j$(nproc)` build: passed at `5758742aa2f7f8bb11b4ae594ef3960ccbd30319`, with four CPUs assigned. The standalone recursive checkout used genuine Git metadata and resolved LFS files; no host build products or virtual environment were reused.
-- Publication check of the Pre-AP CI suites, cruise-speed helpers, and UI state: **1,060 passed, 39 skipped, 7 deselected, 114 subtests passed**. The opendbc and parent suites ran separately with their respective pytest configurations. The earlier integrated run passed 851 tests and 123 subtests. Coverage includes Pre-AP controller and engagement, panda safety and radar contracts, host/MADS/desire transitions, planner/MPC following, cruise-speed helpers, radar processing, UI state, and remote-write policy.
+- Native `scons -j8` build, including the final schema and publisher changes: passed at `f9e7386f3c`.
+- Clean Ubuntu 24.04 Docker image and full container `scons -j4` build: passed at `f9e7386f3c`, with four CPUs assigned. The standalone recursive checkout used genuine Git metadata and resolved LFS files; no host build products or virtual environment were reused.
+- Final focused suites ran separately with their respective pytest configurations: opendbc **601 passed, 38 skipped, 7 deselected, 317 subtests passed**; parent controls, car integration, MADS, Sunnylink and following UI **466 passed, 1 skipped, 6 subtests passed**.
 - Actual state-machine smoke: initial set, cancel with retained target, resume at lower vehicle speed, two-down current-speed selection without engagement, and resume of the new target.
 - Baseline/candidate grade-estimator smoke: both slope signs, return to flat, and full crest reversals; the candidate stayed within the physical endpoint bounds.
 - Full-log replay through the production planner, native MPC, and cereal publication: 3,596 model updates across three recorded segments. Published following distance and actual MPC headway agreed on every update. Native dynamic target publication agreed with planner output.
 - Production drawing paths rendered to images with synthetic UI inputs, including active dynamic target and retained manual ceiling.
-- Ruff checks passed for all 41 changed Python files.
-- Standalone opendbc `./test.sh`: lint, type checking and MISRA passed; 9,796 unittest cases ran with 1,320 skipped, plus 383 passing function-style Pre-AP tests and 7 deselected.
+- Parent static analysis and standalone opendbc lint, type checking, spelling, C lint and MISRA passed.
+- Standalone opendbc `./test.sh`: 9,808 unittest cases ran with 1,320 skipped, plus 384 passing function-style Pre-AP tests and 7 deselected.
+- Complete safety gate: 8,857 unittest cases ran with 976 skipped, plus 25 passing radar pytest cases. All **3,099 measured lines have 100% coverage**, without lowering the threshold or adding exclusions.
+- Actual picker/native-Params/native-MPC smoke: delayed planner receipt selected 7 with 1.9-second headway; physical out-and-back movement restored 3 with 1.1-second headway. An unavailable-dial tap selected 7, then a valid return missed by both consumers restored 3 through the publisher's retained metadata. Production picker images show the settled selections.
 - Direct boundary smoke: both `handsOnPaused` values survive cereal-to-Python conversion. Standalone and integrated radar constructors retain explicit sunnypilot settings, use separate default settings when omitted, and leave the shared base constructor unchanged.
 - Complete shared-route replay: all 66 candidate outputs matched pre-feature parent `b688860729d5c9c1510f4902963ee119d6082040` with unchanged comparator settings. Both revisions differed from upstream reference `3323aafb5422cee72653206dc83a56e66c61799d`; the approved naponsp-specific reference set preserves all streams, including `carStateSP`. The matrix's Tesla route is Model Y, not Pre-AP.
-- Replay against the published `NotAutopilot/ci-artifacts` `process-replay-naponsp` endpoint and checked-in baseline pin passed all 66 cases at parent `f7deb5dcb5`, without changing comparator settings or omitting streams.
+- Replay against the published `NotAutopilot/ci-artifacts` `process-replay-naponsp` endpoint and checked-in baseline pin passed all 66 cases at parent `f9e7386f3c`, without changing comparator settings or omitting streams.
 - Full local parent unit run at `5758742aa2`: **1,896 passed, 81 skipped, 1 xfailed, 90 subtests passed; 1 failed**. The remaining failure was the unchanged Qt-dependent PlotJuggler demo timing out on the host. The test was not skipped or relaxed; remote CI remains a separate required result.
 
 Not performed: deployment, road driving, or an instrument-cluster hardware test. Skipped and deselected tests are not counted as passing.
