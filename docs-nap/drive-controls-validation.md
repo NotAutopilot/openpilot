@@ -68,6 +68,7 @@ The radar overlay is farther right and reserves space for driver monitoring. Lar
 ## Verification performed
 
 - Native `scons -j8` build, including schema and parameter changes: passed.
+- Clean Ubuntu 24.04 Docker image and full container `scons -j$(nproc)` build: passed at `097f43a770022044b4728ade4d066462ed238ea1`, with eight CPUs assigned. The standalone recursive checkout used genuine Git metadata and resolved LFS files; no host build products or virtual environment were reused.
 - Publication check of the Pre-AP CI suites, cruise-speed helpers, and UI state: **1,060 passed, 39 skipped, 7 deselected, 114 subtests passed**. The opendbc and parent suites ran separately with their respective pytest configurations. The earlier integrated run passed 851 tests and 123 subtests. Coverage includes Pre-AP controller and engagement, panda safety and radar contracts, host/MADS/desire transitions, planner/MPC following, cruise-speed helpers, radar processing, UI state, and remote-write policy.
 - Actual state-machine smoke: initial set, cancel with retained target, resume at lower vehicle speed, two-down current-speed selection without engagement, and resume of the new target.
 - Baseline/candidate grade-estimator smoke: both slope signs, return to flat, and full crest reversals; the candidate stayed within the physical endpoint bounds.
@@ -75,7 +76,18 @@ The radar overlay is farther right and reserves space for driver monitoring. Lar
 - Production drawing paths rendered to images with synthetic UI inputs, including active dynamic target and retained manual ceiling.
 - Ruff checks passed for all 41 changed Python files.
 
-Not performed: deployment, road driving, a Docker CI build, a full-repository test run, or an instrument-cluster hardware test. Skipped tests are not counted as passing.
+Not performed: deployment, road driving, a full-repository test run, or an instrument-cluster hardware test. Skipped and deselected tests are not counted as passing.
+
+### Repeating the container build
+
+Use a fresh standalone recursive clone at the desired parent revision, with every submodule initialized at its recorded gitlink and all LFS files resolved. A worktree whose `.git` file points outside the build context is not supported. Keep canonical repository origins and do not copy credential-bearing Git configuration into the image.
+
+```sh
+docker build -t nap-ci -f Dockerfile.openpilot .
+docker run --rm nap-ci bash -c 'source .venv/bin/activate && scons -j$(nproc)'
+```
+
+Both repositories run their tests workflow on `naponsp-dev` pushes. Remote CI conclusions must be checked against the exact published commit, separately from the local results above.
 
 ## Morning check sequence
 
