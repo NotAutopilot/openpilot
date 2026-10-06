@@ -65,6 +65,15 @@ Native Params is authoritative for the mounting flag, including explicit false. 
 
 The radar overlay is farther right and reserves space for driver monitoring. Large layout, sidebar, left/right driver-monitoring placement, and compact layout were rendered for inspection.
 
+## CI integration corrections
+
+- Keep the Python `ModularAssistiveDrivingSystem` representation in sync with cereal's `handsOnPaused` field so car-control deserialization works across all platforms.
+- Construct Tesla radar interfaces with explicit per-instance sunnypilot parameters; do not replace the shared base constructor during initialization.
+- Assemble radar gateway words with unsigned shifts, including wheel-speed values that cross the 32-bit boundary. The packet layout, checksum, counter and permission gates are unchanged.
+- Run function-style Pre-AP tests in standalone opendbc CI. Tests requiring native openpilot Params run in the parent repository with isolated parameter stores.
+- Run opendbc model shards against the matching NotAutopilot parent branch and install their dependencies into that parent's virtual environment.
+- Collect shared safety tests only through configured variants, preserving the common angle-steering and MADS checks.
+
 ## Verification performed
 
 - Native `scons -j8` build, including schema and parameter changes: passed.

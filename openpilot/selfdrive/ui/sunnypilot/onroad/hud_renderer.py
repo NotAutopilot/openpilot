@@ -73,7 +73,7 @@ class HudRendererSP(HudRenderer):
     if (cp is None or cp.brand != "tesla" or cp.carFingerprint != "TESLA_MODEL_S_PREAP"
         or not cp.openpilotLongitudinalControl or cp.pcmCruise or not self.is_cruise_set):
       return
-    services = ("carState", "carControl", "longitudinalPlanSP")
+    services = ["carState", "carControl", "longitudinalPlanSP"]
     if not sm.all_checks(service_list=services) or any(sm.recv_frame[s] < ui_state.started_frame for s in services):
       return
     cc = sm['carControl']

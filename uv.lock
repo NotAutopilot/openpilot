@@ -806,6 +806,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "pycapnp" },
     { name = "pycryptodome" },
+    { name = "pytest", marker = "extra == 'testing'" },
     { name = "ruff", marker = "extra == 'testing'" },
     { name = "tqdm" },
     { name = "tree-sitter", marker = "extra == 'testing'" },
@@ -817,6 +818,11 @@ requires-dist = [
 provides-extras = ["testing", "docs", "examples"]
 
 [package.metadata.requires-dev]
+models = [
+    { name = "hypothesis", specifier = "==6.47.*" },
+    { name = "pytest" },
+    { name = "pytest-xdist" },
+]
 testing = [
     { name = "comma-car-segments", url = "https://huggingface.co/datasets/commaai/commaCarSegments/resolve/main/dist/comma_car_segments-0.1.0-py3-none-any.whl" },
     { name = "cppcheck", git = "https://github.com/commaai/dependencies.git?subdirectory=cppcheck&rev=release-cppcheck" },
