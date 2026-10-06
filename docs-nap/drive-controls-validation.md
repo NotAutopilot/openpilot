@@ -87,6 +87,8 @@ The radar overlay is farther right and reserves space for driver monitoring. Lar
 - Standalone opendbc `./test.sh`: lint, type checking and MISRA passed; 9,796 unittest cases ran with 1,320 skipped, plus 383 passing function-style Pre-AP tests and 7 deselected.
 - Direct boundary smoke: both `handsOnPaused` values survive cereal-to-Python conversion. Standalone and integrated radar constructors retain explicit sunnypilot settings, use separate default settings when omitted, and leave the shared base constructor unchanged.
 - Complete shared-route replay: all 66 candidate outputs matched pre-feature parent `b688860729d5c9c1510f4902963ee119d6082040` with unchanged comparator settings. Both revisions differed from upstream reference `3323aafb5422cee72653206dc83a56e66c61799d`; the approved naponsp-specific reference set preserves all streams, including `carStateSP`. The matrix's Tesla route is Model Y, not Pre-AP.
+- Replay against the published `NotAutopilot/ci-artifacts` `process-replay-naponsp` endpoint and checked-in baseline pin passed all 66 cases at parent `f7deb5dcb5`, without changing comparator settings or omitting streams.
+- Full local parent unit run at `5758742aa2`: **1,896 passed, 81 skipped, 1 xfailed, 90 subtests passed; 1 failed**. The remaining failure was the unchanged Qt-dependent PlotJuggler demo timing out on the host. The test was not skipped or relaxed; remote CI remains a separate required result.
 
 Not performed: deployment, road driving, or an instrument-cluster hardware test. Skipped and deselected tests are not counted as passing.
 

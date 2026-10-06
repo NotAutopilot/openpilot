@@ -24,7 +24,7 @@ class _WheelSM:
 
   def __getitem__(self, key):
     assert key == "carState"
-    return SimpleNamespace(napStalkFollowDistance=self._distance)
+    return SimpleNamespace(napStalkFollowDistance=self._distance, napStalkFollowDistanceTimestamp=0)
 
 
 def test_live_stalk_requires_valid_alive_carstate(feedback):
@@ -37,11 +37,11 @@ def test_live_stalk_requires_valid_alive_carstate(feedback):
 
 
 def test_tap_survives_unchanged_wheel_until_detent(feedback):
-  feedback.note_follow_distance_tap(7, wheel=4)
-  assert feedback.selected_follow_distance(4) == 7
-  assert feedback.selected_follow_distance(4) == 7
-  assert feedback.selected_follow_distance(5) == 5
-  assert feedback.selected_follow_distance(4) == 4
+  feedback.note_follow_distance_tap(7, wheel=4, wheel_timestamp_ns=100)
+  assert feedback.selected_follow_distance(4, 100) == 7
+  assert feedback.selected_follow_distance(4, 100) == 7
+  assert feedback.selected_follow_distance(5, 200) == 5
+  assert feedback.selected_follow_distance(4, 300) == 4
 
 
 def test_overlay_first_sample_does_not_show(feedback):
@@ -203,12 +203,12 @@ def test_picker_request_is_drive_scoped_and_async(feedback, monkeypatch, started
   monkeypatch.setattr(feedback.time, "monotonic_ns", lambda: 123456789)
   params = Mock()
   params.get.return_value = route
-  feedback.request_follow_distance(7, 4, params)
+  feedback.request_follow_distance(7, 4, 100, params)
   if started and route:
     assert params.put.call_args_list[0].args == ("NAPFollowDistanceRequest", {
-      "distance": 7, "wheel": 4, "timestampNs": 123456789, "route": route,
+      "distance": 7, "wheel": 4, "wheelTimestampNs": 100, "timestampNs": 123456789, "route": route,
     })
-    assert feedback.selected_follow_distance(4) == 7
+    assert feedback.selected_follow_distance(4, 100) == 7
   else:
     assert params.put.call_count == 1
   assert params.put.call_args.args == ("NAPFollowDistance", 7)
