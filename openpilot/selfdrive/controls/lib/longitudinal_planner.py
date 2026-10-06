@@ -103,8 +103,9 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self._nap_last_detent_ns = 0
     self._nap_last_wheel = 0
     self._nap_last_request_ns = 0
+    self._nap_last_valid_carstate_ns = 0
     self._nap_follow_request = None
-    self._nap_follow_override: tuple[int, int] | None = None
+    self._nap_follow_override: tuple[int, int, int] | None = None
 
     self.a_desired = init_a
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
@@ -130,6 +131,7 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
         self._nap_last_detent_ns = 0
         self._nap_last_wheel = 0
         self._nap_last_request_ns = 0
+        self._nap_last_valid_carstate_ns = 0
         self._nap_follow_override = None
 
     if len(sm['carControl'].orientationNED) == 3:
@@ -185,8 +187,10 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     # Live detents take effect now; only an explicit, newer GUI request may
     # override an unchanged dial. Disk persistence is never a live request.
     self.active_nap_follow_dist = (
-      self._select_nap_follow_distance(sm['carState'].napStalkFollowDistance,
-                                       sm['carState'].napStalkFollowDistanceTimestamp, time.monotonic_ns())
+      self._select_nap_follow_distance(
+        sm['carState'].napStalkFollowDistance if sm.alive['carState'] and sm.valid['carState'] else 0,
+        sm['carState'].napStalkFollowDistanceTimestamp, sm.logMonoTime['carState'], time.monotonic_ns(),
+      )
       if self._is_preap else None
     )
     self.t_follow = get_T_FOLLOW(sm['selfdriveState'].personality, self.active_nap_follow_dist)
@@ -242,14 +246,18 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.output_a_target = np.clip(output_a_target, accel_clip[0], accel_clip[1])
     self.prev_accel_clip = accel_clip
 
-  def _select_nap_follow_distance(self, live: int, detent_ns: int, now_ns: int) -> int | None:
+  def _select_nap_follow_distance(self, live: int, detent_ns: int, carstate_ns: int, now_ns: int) -> int | None:
     current_wheel = live if live in NAP_FOLLOW_DISTANCE_RANGE else 0
-    override_without_wheel = self._nap_follow_override is not None and self._nap_follow_override[1] == 0
-    if detent_ns > self._nap_last_detent_ns or (current_wheel and override_without_wheel):
+    wheel_returned = (
+      current_wheel and self._nap_follow_override is not None
+      and self._nap_follow_override[1] == 0 and carstate_ns > self._nap_follow_override[2]
+    )
+    if detent_ns > self._nap_last_detent_ns or wheel_returned:
       self._nap_follow_override = None
     self._nap_last_detent_ns = max(self._nap_last_detent_ns, detent_ns)
     if current_wheel:
       self._nap_last_wheel = current_wheel
+      self._nap_last_valid_carstate_ns = max(self._nap_last_valid_carstate_ns, carstate_ns)
 
     request = self._nap_follow_request
     if isinstance(request, dict) and self._nap_route and request.get("route") == self._nap_route:
@@ -257,16 +265,24 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
       wheel = request.get("wheel")
       timestamp_ns = request.get("timestampNs")
       wheel_timestamp_ns = request.get("wheelTimestampNs")
+      request_carstate_ns = request.get("carStateMonoTime")
       if (type(distance) is int and distance in NAP_FOLLOW_DISTANCE_RANGE
           and type(wheel) is int and 0 <= wheel <= 7
           and type(wheel_timestamp_ns) is int and 0 <= wheel_timestamp_ns <= self._nap_last_detent_ns
+          and type(request_carstate_ns) is int and 0 <= request_carstate_ns <= carstate_ns
           and type(timestamp_ns) is int and self._nap_last_request_ns < timestamp_ns <= now_ns):
-        # A UI request may arrive before its carState sample. Leave it pending
-        # until this consumer catches up to the producer event it references.
+        # The request can arrive before its carState publication, even for SNA
+        # where the physical detent identity did not change.
         self._nap_last_request_ns = timestamp_ns
         if (timestamp_ns > max(self._nap_started_ns, self._nap_last_detent_ns)
-            and wheel_timestamp_ns == self._nap_last_detent_ns and wheel == current_wheel):
-          self._nap_follow_override = (distance, wheel)
+            and wheel_timestamp_ns == self._nap_last_detent_ns
+            and (wheel != 0 or request_carstate_ns >= self._nap_last_valid_carstate_ns)
+            and (wheel == current_wheel or current_wheel == 0
+                 or (wheel == 0 and carstate_ns == request_carstate_ns))):
+          # Availability can differ between subscribers of the same snapshot.
+          # A tap made while unavailable expires on a newer valid publication,
+          # not on another subscriber's still-valid view of the old snapshot.
+          self._nap_follow_override = (distance, wheel, request_carstate_ns)
 
     selected = self._nap_follow_override[0] if self._nap_follow_override is not None else None
     if selected is None:

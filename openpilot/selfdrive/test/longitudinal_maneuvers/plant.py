@@ -28,6 +28,11 @@ class _ManeuverParams:
     return False
 
 
+class _PlannerInputs(dict):
+  alive = {"carState": True}
+  valid = {"carState": True}
+
+
 class Plant:
   messaging_initialized = False
 
@@ -164,16 +169,19 @@ class Plant:
     car_control.carControl.orientationNED = [0., float(pitch), 0.]
 
     # ******** get controlsState messages for plotting ***
-    sm = {'radarState': radar.radarState,
-          'carState': car_state.carState,
-          'carControl': car_control.carControl,
-          'controlsState': control.controlsState,
-          'selfdriveState': ss.selfdriveState,
-          'liveParameters': lp.liveParameters,
-          'modelV2': model.modelV2,
-          'carStateSP': car_state_sp.carStateSP,
-          'liveMapDataSP': live_map_data_sp.liveMapDataSP,
-          'gpsLocation': gps_data.gpsLocation}
+    sm = _PlannerInputs({
+      'radarState': radar.radarState,
+      'carState': car_state.carState,
+      'carControl': car_control.carControl,
+      'controlsState': control.controlsState,
+      'selfdriveState': ss.selfdriveState,
+      'liveParameters': lp.liveParameters,
+      'modelV2': model.modelV2,
+      'carStateSP': car_state_sp.carStateSP,
+      'liveMapDataSP': live_map_data_sp.liveMapDataSP,
+      'gpsLocation': gps_data.gpsLocation,
+    })
+    sm.logMonoTime = {'carState': car_state.logMonoTime}
     self.planner.update(sm)
     self.acceleration = self.planner.output_a_target
     if self.planner.output_should_stop:

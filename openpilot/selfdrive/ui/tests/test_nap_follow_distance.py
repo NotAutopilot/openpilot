@@ -203,10 +203,11 @@ def test_picker_request_is_drive_scoped_and_async(feedback, monkeypatch, started
   monkeypatch.setattr(feedback.time, "monotonic_ns", lambda: 123456789)
   params = Mock()
   params.get.return_value = route
-  feedback.request_follow_distance(7, 4, 100, params)
+  feedback.request_follow_distance(7, 4, 100, 200, params)
   if started and route:
     assert params.put.call_args_list[0].args == ("NAPFollowDistanceRequest", {
       "distance": 7, "wheel": 4, "wheelTimestampNs": 100, "timestampNs": 123456789, "route": route,
+      "carStateMonoTime": 200,
     })
     assert feedback.selected_follow_distance(4, 100) == 7
   else:

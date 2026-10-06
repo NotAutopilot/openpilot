@@ -26,8 +26,9 @@ A valid live stalk detent, 1–7, reaches the planner on its next model update r
 
 The on-screen picker still works:
 
-- A tap submits an explicit `NAPFollowDistanceRequest` containing the selected distance, current wheel value, monotonic timestamp, and current route identity. Persistence is a separate preference write.
+- A tap submits an explicit `NAPFollowDistanceRequest` containing the selected distance, wheel value, producer-latched detent identity, source car-state publication time, request time, and current route identity. Persistence is a separate preference write.
 - The planner reads requests at its existing 20-frame cadence, approximately once a second. Asynchronous delivery can add delay; this is not a hard one-second guarantee.
+- Request precedence uses producer events, not the order in which the UI and planner happen to receive them. The planner waits for the request's source snapshot before deciding; an out-and-back physical dial movement still supersedes the earlier picker selection.
 - An accepted tap overrides an unchanged dial until a subsequent physical detent change.
 - Old-route, pre-start, stale, or mismatched-baseline requests cannot override a newer detent.
 - A tap made while the dial is unavailable can take effect; any returning valid dial then wins. An override made against a valid dial survives a temporary outage if that same dial value returns.

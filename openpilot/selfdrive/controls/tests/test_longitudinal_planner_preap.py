@@ -20,6 +20,12 @@ def make_preap_params():
   return CP, structs.CarParamsSP()
 
 
+class _PlannerInputs(dict):
+  logMonoTime = {"carState": 0}
+  alive = {"carState": True}
+  valid = {"carState": True}
+
+
 def make_planner_inputs(*, v_ego, v_cruise, pitch, throttle_probability):
   radar = messaging.new_message("radarState").radarState
   controls = messaging.new_message("controlsState").controlsState
@@ -50,7 +56,7 @@ def make_planner_inputs(*, v_ego, v_cruise, pitch, throttle_probability):
   model.acceleration = acceleration
   model.meta.disengagePredictions.gasPressProbs = [throttle_probability] * 6
 
-  return {
+  return _PlannerInputs({
     "radarState": radar,
     "controlsState": controls,
     "selfdriveState": selfdrive,
@@ -61,7 +67,7 @@ def make_planner_inputs(*, v_ego, v_cruise, pitch, throttle_probability):
     "modelV2": model,
     "gpsLocation": gps_location,
     "liveMapDataSP": live_map_data_sp,
-  }
+  })
 
 
 def test_preap_cruise_ignores_model_throttle_suppression():

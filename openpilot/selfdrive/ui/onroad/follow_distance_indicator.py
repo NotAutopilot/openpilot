@@ -73,7 +73,7 @@ def note_follow_distance_tap(distance: int, wheel: int, wheel_timestamp_ns: int)
   _force_show = True
 
 
-def request_follow_distance(distance: int, wheel: int, wheel_timestamp_ns: int, params) -> None:
+def request_follow_distance(distance: int, wheel: int, wheel_timestamp_ns: int, carstate_mono_time: int, params) -> None:
   """Persist the picker value and separately identify this drive's live request."""
   if not FOLLOW_DISTANCE_MIN <= distance <= FOLLOW_DISTANCE_MAX:
     return
@@ -83,7 +83,7 @@ def request_follow_distance(distance: int, wheel: int, wheel_timestamp_ns: int, 
     if route:
       params.put("NAPFollowDistanceRequest", {
         "distance": distance, "wheel": wheel, "wheelTimestampNs": wheel_timestamp_ns,
-        "timestampNs": time.monotonic_ns(), "route": route,
+        "carStateMonoTime": carstate_mono_time, "timestampNs": time.monotonic_ns(), "route": route,
       })
   params.put("NAPFollowDistance", distance)
   # Without a drive identity, save the fallback but do not pretend the planner

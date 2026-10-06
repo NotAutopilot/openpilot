@@ -343,7 +343,8 @@ class NAPLayout(Widget):
 
   def _on_follow_distance(self, index: int):
     distance = index + 1
-    request_follow_distance(distance, live_stalk_follow_distance(ui_state.sm), live_stalk_follow_timestamp(ui_state.sm), self._params)
+    request_follow_distance(distance, live_stalk_follow_distance(ui_state.sm), live_stalk_follow_timestamp(ui_state.sm),
+                            ui_state.sm.logMonoTime["carState"], self._params)
 
   def _on_pedal_can_bus(self, index: int):
     self._params.put(NAPParamKeys.PEDAL_CAN_BUS, PEDAL_CAN_BUS_VALUES[index])
