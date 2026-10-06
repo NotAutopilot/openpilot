@@ -67,6 +67,24 @@ def note_follow_distance_tap(distance: int, wheel: int = 0) -> None:
   _force_show = True
 
 
+def request_follow_distance(distance: int, wheel: int, params) -> None:
+  """Persist the picker value and separately identify this drive's live request."""
+  if not FOLLOW_DISTANCE_MIN <= distance <= FOLLOW_DISTANCE_MAX:
+    return
+  route = None
+  if ui_state.started:
+    route = params.get("CurrentRoute")
+    if route:
+      params.put("NAPFollowDistanceRequest", {
+        "distance": distance, "wheel": wheel, "timestampNs": time.monotonic_ns(), "route": route,
+      })
+  params.put("NAPFollowDistance", distance)
+  # Without a drive identity, save the fallback but do not pretend the planner
+  # accepted a live override.
+  if not ui_state.started or route:
+    note_follow_distance_tap(distance, wheel)
+
+
 def reset_follow_distance_tap() -> None:
   global _pending_tap, _wheel_at_tap, _force_show, _last_wheel, _selection_started_frame
   _pending_tap = None
@@ -107,7 +125,8 @@ def follow_distance_overlay_rect(content: rl.Rectangle) -> rl.Rectangle:
   height = 40.0 if compact else 88.0
   width = min(width, max(0.0, content.width * 0.52))
   height = min(height, max(0.0, content.height * 0.26))
-  bottom = content.y + content.height
+  # Keep feedback in the middle-lower view, not against the bottom controls.
+  bottom = content.y + content.height * 0.62
   if getattr(ui_state, "radar_hud", False):
     bottom = min(bottom, radar_hud_rect(content).y)
   margin = 6.0 if compact else 18.0

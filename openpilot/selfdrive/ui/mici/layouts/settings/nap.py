@@ -72,6 +72,9 @@ class RadarSettingsLayoutMici(NavScroller):
     radar_enabled.set_enabled(ui_state.is_offroad)
 
     ignore_hw_fail = BigParamControl("ignore radar hardware fail", NAPParamKeys.RADAR_IGNORE_HW_FAIL)
+    upside_down = BigParamControl("radar upside down\n(reboot required)", NAPParamKeys.RADAR_UPSIDE_DOWN,
+                                 toggle_callback=_reboot_on_toggle)
+    upside_down.set_enabled(ui_state.is_offroad)
 
     def on_radar_hud(checked):
       ui_state.radar_hud = checked
@@ -80,6 +83,7 @@ class RadarSettingsLayoutMici(NavScroller):
 
     radar_offset_btn = BigButton("radar lateral offset", self._radar_offset_label())
     radar_offset_btn.set_click_callback(lambda: self._open_radar_offset_input(radar_offset_btn))
+    radar_offset_btn.set_enabled(ui_state.is_offroad)
 
     donor_vin_btn = BigButton("donor radar vin", self._radar_vin_label())
     donor_vin_btn.set_click_callback(lambda: self._open_radar_vin_input(donor_vin_btn))
@@ -117,6 +121,7 @@ class RadarSettingsLayoutMici(NavScroller):
     self._scroller.add_widgets([
       radar_enabled,
       ignore_hw_fail,
+      upside_down,
       radar_hud,
       radar_offset_btn,
       donor_vin_btn,
@@ -146,6 +151,8 @@ class RadarSettingsLayoutMici(NavScroller):
     return "reading..." if self._params.get_bool(NAPParamKeys.RADAR_READ_VIN) else "read"
 
   def _open_radar_offset_input(self, btn: BigButton) -> None:
+    if not ui_state.is_offroad():
+      return
     raw = self._params.get(NAPParamKeys.RADAR_OFFSET, return_default=True)
     try:
       default_text = f"{float(raw or 0):.2f}"
@@ -153,6 +160,8 @@ class RadarSettingsLayoutMici(NavScroller):
       default_text = "0.00"
 
     def on_confirm(text: str) -> None:
+      if not ui_state.is_offroad():
+        return
       try:
         v = float(text)
       except (TypeError, ValueError):
@@ -163,9 +172,10 @@ class RadarSettingsLayoutMici(NavScroller):
       except Exception:
         return
       btn.set_value(self._radar_offset_label())
+      _reboot_dialog()
 
     gui_app.push_widget(BigInputDialog(
-      f"radar offset (m, {RADAR_OFFSET_MIN} to {RADAR_OFFSET_MAX})",
+      "offset m (+left / -right)\nrequires reboot",
       default_text=default_text,
       confirm_callback=on_confirm,
     ))

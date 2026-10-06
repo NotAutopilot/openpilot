@@ -16,6 +16,8 @@ class _ManeuverParams:
     self.nap_follow_dist = nap_follow_dist
 
   def get(self, key, return_default=False):
+    if key in ("CurrentRoute", "NAPFollowDistanceRequest"):
+      return None
     assert return_default
     assert key == "NAPFollowDistance"
     return self.nap_follow_dist

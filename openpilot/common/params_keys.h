@@ -233,6 +233,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // absent/false.
     {"NAPForcePreAP", {PERSISTENT | BACKUP, BOOL}},
     {"NAPFollowDistance", {PERSISTENT | BACKUP, INT, "4"}},
+    {"NAPFollowDistanceRequest", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"NAPPedalEnabled", {PERSISTENT | BACKUP, BOOL}},
     {"NAPPedalCanBus", {PERSISTENT | BACKUP, INT, "2"}},
     {"NAPPedalProfile", {PERSISTENT | BACKUP, INT, "4"}},
@@ -245,6 +246,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"NAPRadarEnabled", {PERSISTENT | BACKUP, BOOL}},
     {"NAPRadarBehindNosecone", {PERSISTENT | BACKUP, BOOL}},
     {"NAPRadarOffset", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
+    {"NAPRadarUpsideDown", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"NAPRadarHud", {PERSISTENT | BACKUP, BOOL}},
     {"NAPRadarIgnoreHwFail", {PERSISTENT | BACKUP, BOOL}},
     {"NAPRadarDonorVin", {PERSISTENT | BACKUP, STRING}},

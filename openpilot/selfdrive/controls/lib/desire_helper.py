@@ -57,6 +57,8 @@ class DesireHelper:
     self.keep_pulse_timer = 0.0
     self.prev_one_blinker = False
     self.desire = log.Desire.none
+    self._lane_change_nudge = False
+    self._hands_on_paused_prev = False
 
     self.arm_timer = 0.0
     self.signals_remaining = math.ceil(LANE_CHANGE_ARM_TIME)
@@ -86,8 +88,9 @@ class DesireHelper:
     self.arm_timer = 0.0
     self.queued_changes = 0
     self.lane_changes_remaining = 0
+    self._lane_change_nudge = False
 
-  def _update_preap(self, carstate, lateral_active, lane_change_prob):
+  def _update_preap(self, carstate, lateral_active, lane_change_prob, hands_on_paused):
     v_ego = carstate.vEgo
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN
@@ -107,7 +110,16 @@ class DesireHelper:
     else:
       same_direction_tap, opposite_direction_tap = False, False
 
-    if not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX:
+    blindspot_detected = ((carstate.leftBlindspot and self.lane_change_direction == LaneChangeDirection.left) or
+                          (carstate.rightBlindspot and self.lane_change_direction == LaneChangeDirection.right))
+    paused_maneuver_blocked = (
+      (hands_on_paused or self._hands_on_paused_prev) and blindspot_detected
+      and self.lane_change_state in (LaneChangeState.laneChangeStarting, LaneChangeState.laneChangeFinishing)
+    )
+    self._hands_on_paused_prev = hands_on_paused
+
+    if ((not lateral_active and not hands_on_paused) or self.lane_change_timer > LANE_CHANGE_TIME_MAX
+        or (hands_on_paused and below_lane_change_speed) or paused_maneuver_blocked):
       self._reset()
     else:
       just_cancelled = False
@@ -134,21 +146,23 @@ class DesireHelper:
                          ((carstate.steeringTorque > 0 and self.lane_change_direction == LaneChangeDirection.left) or
                           (carstate.steeringTorque < 0 and self.lane_change_direction == LaneChangeDirection.right))
 
-        blindspot_detected = ((carstate.leftBlindspot and self.lane_change_direction == LaneChangeDirection.left) or
-                              (carstate.rightBlindspot and self.lane_change_direction == LaneChangeDirection.right))
-
         self.arm_timer += DT_MDL
+        if torque_applied and not blindspot_detected:
+          self._lane_change_nudge = True
+        if blindspot_detected:
+          self._lane_change_nudge = False
 
         if below_lane_change_speed:
           self._reset()
-        elif torque_applied and not blindspot_detected:
+        elif self._lane_change_nudge and not hands_on_paused:
           self.lane_change_state = LaneChangeState.laneChangeStarting
+          self._lane_change_nudge = False
         elif self.arm_timer > LANE_CHANGE_ARM_TIME:
           # Window expired with no wheel nudge — cancel everything.
           self._reset()
 
       # LaneChangeState.laneChangeStarting
-      elif self.lane_change_state == LaneChangeState.laneChangeStarting:
+      elif self.lane_change_state == LaneChangeState.laneChangeStarting and not hands_on_paused:
         # fade out over .5s
         self.lane_change_ll_prob = max(self.lane_change_ll_prob - 2 * DT_MDL, 0.0)
 
@@ -157,7 +171,7 @@ class DesireHelper:
           self.lane_change_state = LaneChangeState.laneChangeFinishing
 
       # LaneChangeState.laneChangeFinishing
-      elif self.lane_change_state == LaneChangeState.laneChangeFinishing:
+      elif self.lane_change_state == LaneChangeState.laneChangeFinishing and not hands_on_paused:
         # fade in laneline over 1s
         self.lane_change_ll_prob = min(self.lane_change_ll_prob + DT_MDL, 1.0)
 
@@ -262,7 +276,7 @@ class DesireHelper:
     else:
       self.desire = log.Desire.none
 
-  def update(self, carstate, lateral_active, lane_change_prob, left_edge_detected=False, right_edge_detected=False):
+  def update(self, carstate, lateral_active, lane_change_prob, left_edge_detected=False, right_edge_detected=False, *, hands_on_paused=False):
     self.alc.update_params()
     self.lane_turn_controller.update_params()
 
@@ -272,11 +286,15 @@ class DesireHelper:
     self.lane_turn_direction = self.lane_turn_controller.get_turn_direction()
 
     if self._preap:
-      self._update_preap(carstate, lateral_active, lane_change_prob)
+      self._update_preap(carstate, lateral_active, lane_change_prob, hands_on_paused)
     else:
       self._update_sp(carstate, lateral_active, lane_change_prob, left_edge_detected, right_edge_detected)
 
     if self.lane_turn_direction != TurnDirection.none:
       self.desire = TURN_DESIRES[self.lane_turn_direction]
+
+    if self._preap and hands_on_paused:
+      # Preserve intent without advancing a maneuver against driver override.
+      self.desire = log.Desire.none
 
     self.alc.update_state()

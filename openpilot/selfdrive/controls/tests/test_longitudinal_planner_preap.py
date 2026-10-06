@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
+from unittest.mock import Mock
 
-from openpilot.cereal import log, messaging
+from openpilot.cereal import custom, log, messaging
 from opendbc.car import structs
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
@@ -34,6 +35,7 @@ def make_planner_inputs(*, v_ego, v_cruise, pitch, throttle_probability):
   controls.longControlState = LongCtrlState.pid
   car_state.vEgo = v_ego
   car_state.vCruise = v_cruise * 3.6
+  car_state.vCruiseCluster = car_state.vCruise
   car_control.orientationNED = [0.0, pitch, 0.0]
 
   position = log.XYZTData.new_message()
@@ -106,3 +108,40 @@ def test_non_vdas_modes_keep_model_throttle_suppression(
   assert not planner._is_preap
   assert not planner.allow_throttle
   assert planner.output_a_target < -0.5
+
+
+@pytest.mark.parametrize(("vision", "map_target", "speed_limit", "expected", "source"), [
+  (15.0, 255.0, 255.0, 15.0, "sccVision"),
+  (255.0, 17.0, 255.0, 17.0, "sccMap"),
+  (255.0, 255.0, 18.0, 18.0, "speedLimitAssist"),
+  (30.0, 30.0, 30.0, 25.0, "cruise"),
+])
+def test_native_dynamic_target_reaches_mpc_without_replacing_manual_ceiling(
+  monkeypatch, vision, map_target, speed_limit, expected, source,
+):
+  CP, CP_SP = make_preap_params()
+  planner = LongitudinalPlanner(CP, CP_SP, init_v=25.0)
+  inputs = make_planner_inputs(v_ego=25.0, v_cruise=25.0, pitch=0.0, throttle_probability=1.0)
+  inputs["carState"].enableLongControl = True
+  inputs["carControl"].enabled = True
+  inputs["carControl"].longActive = True
+  # Stub only the independent controllers' outputs; production arbitration and
+  # the actual MPC update must consume the selected target.
+  monkeypatch.setattr(planner.scc, "update", lambda *args: None)
+  monkeypatch.setattr(planner.sla, "update", lambda *args: None)
+  for controller, target in ((planner.scc.vision, vision), (planner.scc.map, map_target), (planner.sla, speed_limit)):
+    controller.output_v_target = target
+    controller.output_a_target = 0.0
+  mpc_update = Mock(wraps=planner.mpc.update)
+  monkeypatch.setattr(planner.mpc, "update", mpc_update)
+  planner.update(inputs)
+  assert mpc_update.call_args.args[1] == pytest.approx(expected)
+  assert planner.output_v_target == pytest.approx(expected)
+  assert planner.source == getattr(custom.LongitudinalPlanSP.LongitudinalPlanSource, source)
+  assert inputs["carState"].vCruise == pytest.approx(90.0)
+  planner.scc.vision.output_v_target = 255.0
+  planner.scc.map.output_v_target = 255.0
+  planner.sla.output_v_target = 255.0
+  planner.update(inputs)
+  assert mpc_update.call_args.args[1] == pytest.approx(25.0)
+  assert inputs["carState"].vCruise == pytest.approx(90.0)

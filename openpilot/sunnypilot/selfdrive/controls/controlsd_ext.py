@@ -97,6 +97,7 @@ class ControlsExt(ModelStateBase):
     CC_SP.mads.enabled = mads_src.enabled
     CC_SP.mads.active = mads_src.active
     CC_SP.mads.available = mads_src.available
+    CC_SP.mads.handsOnPaused = mads_src.handsOnPaused
 
     # ICBM state
     icbm_src = sm['selfdriveStateSP'].intelligentCruiseButtonManagement

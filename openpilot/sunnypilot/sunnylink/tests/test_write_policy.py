@@ -61,6 +61,7 @@ def test_next_drive_hands_on_pause_and_level():
 def test_hardware_rejected_on_modern_and_preap():
   for caps in (PREAP, MODERN):
     assert not evaluate_param_write("NAPRadarOffset", 0.1, caps).allow
+    assert not evaluate_param_write("NAPRadarUpsideDown", True, caps).allow
     assert not evaluate_param_write("NAPPedalEnabled", True, caps).allow
 
 

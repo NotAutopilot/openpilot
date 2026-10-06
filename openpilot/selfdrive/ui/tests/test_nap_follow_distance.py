@@ -121,6 +121,7 @@ def test_live_picker_tracks_wheel_without_waiting_for_disk(follow_picker, monkey
 
   panel, params = follow_picker
   wheel = _WheelSM(4)
+  params.put("CurrentRoute", "test-route", block=True)
   monkeypatch.setattr(ui_state, "sm", wheel)
   monkeypatch.setattr(ui_state, "started", True)
   panel._update_state()
@@ -150,7 +151,8 @@ def test_live_picker_tracks_wheel_without_waiting_for_disk(follow_picker, monkey
 def test_initial_overlay_frame_does_not_undo_picker_tap(follow_picker, feedback, monkeypatch):
   from openpilot.selfdrive.ui.ui_state import ui_state
 
-  panel, _ = follow_picker
+  panel, params = follow_picker
+  params.put("CurrentRoute", "test-route", block=True)
   monkeypatch.setattr(ui_state, "sm", _WheelSM(4))
   monkeypatch.setattr(ui_state, "started", True)
   monkeypatch.setattr(ui_state, "CP", SimpleNamespace(carFingerprint="TESLA_MODEL_S_PREAP"))
@@ -158,3 +160,93 @@ def test_initial_overlay_frame_does_not_undo_picker_tap(follow_picker, feedback,
   feedback.FollowDistanceIndicator().render(rl.Rectangle(0, 0, 2160, 1080), alert=True)
   panel._update_state()
   assert panel._follow_buttons.action_item.get_selected_button() == 6
+
+
+@pytest.mark.parametrize("size", [(2160, 1080), (1560, 1080), (536, 240)])
+@pytest.mark.parametrize("radar_enabled", [False, True])
+def test_follow_feedback_is_raised_clear_of_radar(feedback, monkeypatch, size, radar_enabled):
+  from openpilot.selfdrive.ui.ui_state import ui_state
+  monkeypatch.setattr(ui_state, "radar_hud", radar_enabled)
+  content = rl.Rectangle(30, 30, size[0] - 60, size[1] - 60)
+  follow = feedback.follow_distance_overlay_rect(content)
+  assert follow.x >= content.x
+  assert follow.x + follow.width <= content.x + content.width
+  assert follow.y >= content.y
+  assert follow.y + follow.height < content.y + content.height * 0.62
+  if radar_enabled:
+    radar = feedback.radar_hud_rect(content)
+    assert follow.y + follow.height < radar.y
+
+
+@pytest.mark.parametrize("size", [(2160, 1080), (1560, 1080), (536, 240)])
+def test_radar_moves_right_and_preserves_dm_space(feedback, size):
+  content = rl.Rectangle(30, 30, size[0] - 60, size[1] - 60)
+  radar = feedback.radar_hud_rect(content)
+  assert radar.x + radar.width / 2 > content.x + content.width / 2
+  assert radar.x >= content.x
+  assert radar.y >= content.y
+  assert radar.x + radar.width <= content.x + content.width
+  assert radar.y + radar.height <= content.y + content.height
+  if size[0] >= 800:
+    # Large-layout DM icons can appear in either bottom corner.
+    assert radar.x - content.x >= min(240, content.width * 0.15)
+    assert content.x + content.width - (radar.x + radar.width) >= min(240, content.width * 0.15)
+  else:
+    # Compact DM is the 60px icon at screen (16, 10).
+    assert radar.x > 76
+    assert radar.y > 70
+
+
+@pytest.mark.parametrize("started,route", [(False, None), (True, None), (True, "drive-a")])
+def test_picker_request_is_drive_scoped_and_async(feedback, monkeypatch, started, route):
+  monkeypatch.setattr(feedback, "ui_state", SimpleNamespace(started=started, started_frame=10))
+  monkeypatch.setattr(feedback.time, "monotonic_ns", lambda: 123456789)
+  params = Mock()
+  params.get.return_value = route
+  feedback.request_follow_distance(7, 4, params)
+  if started and route:
+    assert params.put.call_args_list[0].args == ("NAPFollowDistanceRequest", {
+      "distance": 7, "wheel": 4, "timestampNs": 123456789, "route": route,
+    })
+    assert feedback.selected_follow_distance(4) == 7
+  else:
+    assert params.put.call_count == 1
+  assert params.put.call_args.args == ("NAPFollowDistance", 7)
+  assert all("block" not in call.kwargs for call in params.put.call_args_list)
+
+
+@pytest.mark.parametrize("layout", ["big", "mici"])
+def test_radar_mount_toggle_is_local_offroad_and_requests_restart(feedback, monkeypatch, layout):
+  from opendbc.car.tesla.preap.nap_params import NAPParamKeys
+  from openpilot.selfdrive.ui.ui_state import ui_state
+  from openpilot.system.ui.lib.application import gui_app
+
+  monkeypatch.setattr(gui_app, "font", lambda *_: rl.Font())
+  monkeypatch.setattr(gui_app, "texture", lambda *_, **__: rl.Texture())
+  dialogs = Mock()
+  monkeypatch.setattr(gui_app, "push_widget", dialogs)
+  monkeypatch.setattr(ui_state, "started", False)
+  params = Params()
+  params.put_bool(NAPParamKeys.RADAR_UPSIDE_DOWN, False, block=True)
+  if layout == "big":
+    from openpilot.selfdrive.ui.sunnypilot.layouts.settings.nap import NAPLayout
+    panel = NAPLayout()
+    control = panel._toggle_map[NAPParamKeys.RADAR_UPSIDE_DOWN].action_item
+    panel._params = Mock(wraps=params)
+    assert not control.get_state()
+    assert control.enabled
+    control.toggle._handle_mouse_release(rl.Vector2(0, 0))
+    panel._params.put_bool.assert_called_once_with(NAPParamKeys.RADAR_UPSIDE_DOWN, True)
+  else:
+    from openpilot.selfdrive.ui.mici.layouts.settings.nap import RadarSettingsLayoutMici
+    panel = RadarSettingsLayoutMici()
+    control = next(item for item in panel._scroller.items if getattr(item, "param", None) == NAPParamKeys.RADAR_UPSIDE_DOWN)
+    assert not control._checked
+    assert control.enabled
+    control._handle_mouse_release(rl.Vector2(0, 0))
+    assert params.get_bool(NAPParamKeys.RADAR_UPSIDE_DOWN)
+  dialogs.assert_called_once()
+  # The setting is disabled onroad; a restart is a separate confirmation.
+  assert not params.get_bool("DoReboot")
+  monkeypatch.setattr(ui_state, "started", True)
+  assert not control.enabled

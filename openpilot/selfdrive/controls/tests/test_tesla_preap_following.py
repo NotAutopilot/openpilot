@@ -75,11 +75,17 @@ class _MutablePlannerParams:
   def __init__(self, nap_follow_dist, adaptive_accel=False):
     self.nap_follow_dist = nap_follow_dist
     self.adaptive_accel = adaptive_accel
+    self.route = "test-route"
+    self.follow_request = None
 
   def __bool__(self):
     return False
 
   def get(self, key, return_default=False):
+    if key == "CurrentRoute":
+      return self.route
+    if key == "NAPFollowDistanceRequest":
+      return self.follow_request
     assert return_default
     assert key == "NAPFollowDistance"
     return self.nap_follow_dist
@@ -419,6 +425,172 @@ def test_planner_publishes_the_follow_policy_used_by_mpc():
   assert planner.t_follow == 1.9
   assert np.all(planner.mpc.params[:, 4] == planner.t_follow)
   assert plan.tFollow == pytest.approx(planner.t_follow, abs=1e-6)
+
+
+def test_live_stalk_follow_changes_reach_mpc_without_waiting_for_params():
+  # Route ae/10: 4 -> 3 -> 2 in 305 ms; persisted 3 arrived 29 seconds
+  # later and 2 another 39 seconds later. Neither may override the live 2.
+  params = _MutablePlannerParams(nap_follow_dist=4)
+  planner = LongitudinalPlanner(_make_preap_params(), _cp_sp(), init_v=FOLLOW_TEST_SPEED_MPS, params=params)
+  inputs = _make_planner_inputs(FOLLOW_TEST_SPEED_MPS)
+  publisher = _CapturingPubMaster()
+  for live, persisted in ((4, 4), (3, 4), (2, 4), (2, 3), (2, 2)):
+    inputs["carState"].napStalkFollowDistance = live
+    params.nap_follow_dist = persisted
+    planner._frame = 19  # Exercise the conflicting persistence refresh too.
+    planner.update(inputs)
+    planner.publish(inputs, publisher)
+    assert planner.active_nap_follow_dist == live
+    assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=live))
+    assert publisher.message.longitudinalPlan.napFollowDistance == live
+    assert publisher.message.longitudinalPlan.tFollow == pytest.approx(get_T_FOLLOW(nap_follow_dist=live))
+
+
+@pytest.mark.parametrize("live", [0, 8])
+def test_unavailable_live_follow_uses_persisted_fallback(live):
+  params = _MutablePlannerParams(nap_follow_dist=6)
+  planner = LongitudinalPlanner(_make_preap_params(), _cp_sp(), init_v=FOLLOW_TEST_SPEED_MPS, params=params)
+  inputs = _make_planner_inputs(FOLLOW_TEST_SPEED_MPS)
+  inputs["carState"].napStalkFollowDistance = live
+  planner.update(inputs)
+  assert planner.active_nap_follow_dist == 6
+  assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=6))
+
+
+def test_gui_follow_request_controls_mpc_until_next_detent(monkeypatch):
+  monkeypatch.setenv("SCALE", "1")
+  from openpilot.selfdrive.ui.onroad import follow_distance_indicator as feedback
+
+  class QueuedParams(_MutablePlannerParams):
+    def __init__(self):
+      super().__init__(4)
+      self.writes = []
+
+    def put(self, key, value):
+      self.writes.append((key, value))
+
+  clock = [1_000_000_000]
+  monkeypatch.setattr(longitudinal_planner.time, "monotonic_ns", lambda: clock[0])
+  monkeypatch.setattr(feedback, "ui_state", SimpleNamespace(started=True, started_frame=1))
+  feedback.reset_follow_distance_tap()
+  params = QueuedParams()
+  planner = LongitudinalPlanner(_make_preap_params(), _cp_sp(), init_v=FOLLOW_TEST_SPEED_MPS, params=params)
+  inputs = _make_planner_inputs(FOLLOW_TEST_SPEED_MPS)
+  inputs["carState"].napStalkFollowDistance = 4
+  clock[0] += 1_000_000_000
+  planner.update(inputs)
+  clock[0] += 1_000_000_000
+  feedback.request_follow_distance(7, 4, params)
+  assert feedback.selected_follow_distance(4) == 7
+  assert [key for key, _ in params.writes] == ["NAPFollowDistanceRequest", "NAPFollowDistance"]
+  params.follow_request = params.writes[0][1]  # Runtime request delivered, persistence still old.
+  clock[0] += 1_000_000_000
+  planner._frame = 19
+  planner.update(inputs)
+  assert planner.active_nap_follow_dist == 7
+  assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=7))
+  planner.update(inputs)
+  assert planner.active_nap_follow_dist == 7
+
+  # A tap made against wheel4 survives a transient unavailable sample and
+  # wheel4 returning; only a tap made against unavailable0 expires on return.
+  for wheel in (0, 4):
+    inputs["carState"].napStalkFollowDistance = wheel
+    planner.update(inputs)
+    assert feedback.selected_follow_distance(wheel) == 7
+    assert planner.active_nap_follow_dist == 7
+
+  # Detents win on the next model update, even outside the Params poll cadence.
+  for wheel in (3, 2, 4):
+    clock[0] += 1_000_000_000
+    inputs["carState"].napStalkFollowDistance = wheel
+    planner.update(inputs)
+    assert feedback.selected_follow_distance(wheel) == wheel
+    assert planner.active_nap_follow_dist == wheel
+    assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=wheel))
+  params.nap_follow_dist = 7  # Late picker persistence cannot resurrect its consumed request.
+  planner._frame = 19
+  planner.update(inputs)
+  assert planner.active_nap_follow_dist == 4
+  inputs["carState"].napStalkFollowDistance = 0
+  planner.update(inputs)
+  assert planner.active_nap_follow_dist == 4
+
+
+@pytest.mark.parametrize("return_wheel", [4, 3])
+def test_gui_request_while_wheel_unavailable_controls_mpc_until_wheel_returns(monkeypatch, return_wheel):
+  monkeypatch.setenv("SCALE", "1")
+  from openpilot.selfdrive.ui.onroad import follow_distance_indicator as feedback
+
+  clock = [1_000_000_000]
+  monkeypatch.setattr(longitudinal_planner.time, "monotonic_ns", lambda: clock[0])
+  monkeypatch.setattr(feedback, "ui_state", SimpleNamespace(started=True, started_frame=1))
+  feedback.reset_follow_distance_tap()
+  params = _MutablePlannerParams(4)
+  writes = []
+  params.put = lambda key, value: writes.append((key, value))
+  planner = LongitudinalPlanner(_make_preap_params(), _cp_sp(), init_v=FOLLOW_TEST_SPEED_MPS, params=params)
+  inputs = _make_planner_inputs(FOLLOW_TEST_SPEED_MPS)
+  inputs["carState"].napStalkFollowDistance = 4
+  clock[0] += 1_000_000_000
+  planner.update(inputs)
+  assert feedback.selected_follow_distance(4) == 4
+  inputs["carState"].napStalkFollowDistance = 0
+  clock[0] += 1_000_000_000
+  planner.update(inputs)
+  clock[0] += 1_000_000_000
+  feedback.request_follow_distance(7, 0, params)
+  params.follow_request = writes[0][1]
+  clock[0] += 1_000_000_000
+  planner._frame = 19
+  planner.update(inputs)
+  assert feedback.selected_follow_distance(0) == 7
+  assert planner.active_nap_follow_dist == 7
+  assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=7))
+
+  # Any returning valid dial supersedes a tap whose baseline was unavailable.
+  inputs["carState"].napStalkFollowDistance = return_wheel
+  clock[0] += 1_000_000_000
+  planner.update(inputs)
+  assert feedback.selected_follow_distance(return_wheel) == return_wheel
+  assert planner.active_nap_follow_dist == return_wheel
+  assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=return_wheel))
+  # A late replay of that request, even during another outage, cannot revive it.
+  inputs["carState"].napStalkFollowDistance = 0
+  params.nap_follow_dist = 7
+  clock[0] += 1_000_000_000
+  planner._frame = 19
+  planner.update(inputs)
+  assert planner.active_nap_follow_dist == return_wheel
+
+
+@pytest.mark.parametrize("case", ["older_detent", "wrong_route", "wrong_baseline", "restart", "drive_boundary"])
+def test_stale_follow_requests_never_override_live_dial(monkeypatch, case):
+  clock = [1_000_000_000]
+  monkeypatch.setattr(longitudinal_planner.time, "monotonic_ns", lambda: clock[0])
+  params = _MutablePlannerParams(4)
+  planner = LongitudinalPlanner(_make_preap_params(), _cp_sp(), init_v=FOLLOW_TEST_SPEED_MPS, params=params)
+  inputs = _make_planner_inputs(FOLLOW_TEST_SPEED_MPS)
+  inputs["carState"].napStalkFollowDistance = 4
+  clock[0] = 2_000_000_000
+  planner.update(inputs)
+  params.follow_request = {"distance": 7, "wheel": 4, "timestampNs": 3_000_000_000, "route": params.route}
+  if case == "older_detent":
+    params.follow_request["timestampNs"] = 1_500_000_000
+  elif case == "wrong_route":
+    params.follow_request["route"] = "old-route"
+  elif case == "wrong_baseline":
+    params.follow_request["wheel"] = 3
+  elif case == "restart":
+    clock[0] = 4_000_000_000
+    planner = LongitudinalPlanner(_make_preap_params(), _cp_sp(), init_v=FOLLOW_TEST_SPEED_MPS, params=params)
+  elif case == "drive_boundary":
+    params.route = "new-route"
+  clock[0] = 5_000_000_000
+  planner._frame = 19
+  planner.update(inputs)
+  assert planner.active_nap_follow_dist == 4
+  assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=4))
 
 
 @pytest.mark.parametrize("nap_follow_dist", [-1, 0, 8])

@@ -668,6 +668,7 @@ class SelfdriveD(CruiseHelper):
     mads.enabled = self.mads.enabled
     mads.active = self.mads.active
     mads.available = self.mads.enabled_toggle
+    mads.handsOnPaused = self.mads.hands_on_paused
 
     icbm = ss_sp.intelligentCruiseButtonManagement
     icbm.state = self.icbm.state

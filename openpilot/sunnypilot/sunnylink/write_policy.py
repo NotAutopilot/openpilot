@@ -37,6 +37,7 @@ PREAP_LOCAL_ONLY_KEYS = frozenset({
   "NAPRadarEnabled",
   "NAPRadarBehindNosecone",
   "NAPRadarOffset",
+  "NAPRadarUpsideDown",
   "NAPForcePreAP",
   "NAPEpasRiskAccepted",
   "NAPScriptRunning",

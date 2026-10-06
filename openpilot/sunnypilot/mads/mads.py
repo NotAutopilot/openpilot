@@ -85,6 +85,7 @@ class ModularAssistiveDrivingSystem:
       safety_param = int(getattr(self.CP.safetyConfigs[0], "safetyParam", 0) or 0)
     self._hands_on_disengage_level = get_hands_on_disengage_level(safety_param)
     self._hands_on_steering_inhibited = False
+    self.hands_on_paused = False
     self._hands_on_clear_timing = False
     self._hands_on_clear_ts = 0
     self._lateral_permission_acquired = False
@@ -186,6 +187,8 @@ class ModularAssistiveDrivingSystem:
       self.events_sp.remove(EventNameSP.silentLkasDisable)
     if self.events_sp.has(EventNameSP.silentLkasEnable):
       self.events_sp.remove(EventNameSP.silentLkasEnable)
+    if self.events_sp.has(EventNameSP.lkasEnable):
+      self.events_sp.remove(EventNameSP.lkasEnable)
     if self.enabled or self.state_machine.state == State.paused:
       if not self.events_sp.has(EventNameSP.lkasDisable):
         self.events_sp.add(EventNameSP.lkasDisable)
@@ -400,12 +403,6 @@ class ModularAssistiveDrivingSystem:
             self.events_sp.remove(EventNameSP.lkasEnable)
             self.events_sp.add(EventNameSP.pedalPressedAlertOnly)
 
-    if self._hands_on_pause_available:
-      hands_high = int(getattr(CS, "handsOnLevel", 0) or 0) >= self._hands_on_disengage_level
-      if hands_high or self._hands_on_steering_inhibited:
-        if self.events_sp.has(EventNameSP.lkasEnable):
-          self.events_sp.remove(EventNameSP.lkasEnable)
-
     self._update_hands_on_pause(CS)
     if is_preap_platform(self.CP):
       if self.events_sp.has(EventNameSP.lkasDisable) or self.events.contains(ET.IMMEDIATE_DISABLE) or self.events_sp.contains(ET.IMMEDIATE_DISABLE):
@@ -428,6 +425,7 @@ class ModularAssistiveDrivingSystem:
     self.events.remove(EventName.wrongCruiseMode)
 
   def update(self, CS: structs.CarState):
+    self.hands_on_paused = False
     if persist_required_mads(self.params, self.CP_SP):
       self.enabled_toggle = True
     if not self.enabled_toggle:
@@ -438,7 +436,18 @@ class ModularAssistiveDrivingSystem:
     self.update_events(CS)
 
     if not self.CP.passive and self.selfdrive.initialized:
-      self.enabled, self.active = self.state_machine.update()
+      self.enabled, self.active = self.state_machine.update(hands_on_inhibited=self._hands_on_steering_inhibited)
+      # This reason is narrower than State.paused (which also covers pedals).
+      # A brake/cancel/fault must invalidate any retained lane-change nudge.
+      self.hands_on_paused = (
+        self.state_machine.state == State.paused and self._hands_on_steering_inhibited
+        and not CS.brakePressed and not CS.regenBraking
+        and not self.events.has(EventName.buttonCancel)
+        and not self.events.contains(ET.NO_ENTRY)
+        and not self.events_sp.contains(ET.NO_ENTRY)
+        and not self.events.contains(ET.SOFT_DISABLE)
+        and not self.events_sp.contains(ET.SOFT_DISABLE)
+      )
 
     # Copy of previous SelfdriveD states for MADS events handling
     self.selfdrive.enabled_prev = self.selfdrive.enabled

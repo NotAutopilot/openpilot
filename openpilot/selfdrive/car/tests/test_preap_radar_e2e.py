@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -6,6 +7,7 @@ from openpilot.cereal import messaging
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.tesla.interface import CarInterface
+from opendbc.car.tesla import radar_interface as radar_module
 from opendbc.car.tesla.preap.sp.radar_interface import RadarInterface as PreAPRadarInterface
 from opendbc.car.tesla.values import CAR
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
@@ -133,12 +135,12 @@ def _bosch_interface():
   return radar
 
 
-def _run_raw(radar, *, tracked=True, d_rel=30.0, v_rel=0.0, y_rel=0.0):
+def _run_raw(radar, *, tracked=True, d_rel=30.0, v_rel=0.0, y_rel=0.0, yv_rel=0.0, a_rel=0.0):
   radar.rcp.vl["RadarPoint0_A"] = {
     "Index": 0, "Tracked": tracked, "LongDist": d_rel, "LatDist": y_rel,
-    "LongSpeed": v_rel, "LongAccel": 0.0, "ProbExist": 90.0, "Meas": 1,
+    "LongSpeed": v_rel, "LongAccel": a_rel, "ProbExist": 90.0, "Meas": 1,
   }
-  radar.rcp.vl["RadarPoint0_B"] = {"Index2": 0, "LatSpeed": 0.0}
+  radar.rcp.vl["RadarPoint0_B"] = {"Index2": 0, "LatSpeed": yv_rel}
   radar.rcp.updated_addresses = {BOSCH_TRIGGER_ADDRESS, BOSCH_STATUS_ADDRESS, BOSCH_POINT_A_ADDRESS, BOSCH_POINT_B_ADDRESS}
   return radar.update([])
 
@@ -191,6 +193,99 @@ class RadarHarness:
       lead.vStd = [2.0]
       lead.a = [0.0]
     return message
+
+
+class TestRadarMounting:
+  @pytest.mark.parametrize("inverted", [False, True])
+  @pytest.mark.parametrize("offset", [-0.27, 0.0, 0.27])
+  def test_orientation_precedes_vehicle_offset_and_preserves_longitudinal(self, monkeypatch, inverted, offset):
+    config = SimpleNamespace(radar_upside_down=inverted, radar_offset=offset, radar_ignore_hw_fail=False)
+    monkeypatch.setattr(radar_module, "nap_conf", config)
+    monkeypatch.setattr(radar_module, "_upside_down_from_params", lambda: config.radar_upside_down)
+    radar = _bosch_interface()
+    direction = -1 if inverted else 1
+    point = _run_raw(radar, d_rel=35.0, v_rel=-2.0, a_rel=-0.5, y_rel=1.5, yv_rel=0.25).points[0]
+    assert point.yRel == pytest.approx(direction * 1.5 + offset)
+    assert point.yvRel == pytest.approx(direction * 0.25)
+    assert point.dRel == 35.0
+    assert point.vRel == -2.0
+    assert point.aRel == -0.5
+    assert point.measured
+
+    # A setting change cannot move a live lead across the vehicle mid-drive.
+    config.radar_upside_down = not inverted
+    config.radar_offset = 0.8
+    unchanged = _run_raw(radar, y_rel=1.5, yv_rel=0.25).points[0]
+    assert unchanged.yRel == pytest.approx(direction * 1.5 + offset)
+    assert unchanged.yvRel == pytest.approx(direction * 0.25)
+    restarted = _run_raw(_bosch_interface(), y_rel=1.5, yv_rel=0.25).points[0]
+    assert restarted.yRel == pytest.approx(-direction * 1.5 + 0.8)
+    assert restarted.yvRel == pytest.approx(-direction * 0.25)
+
+  @pytest.mark.parametrize("inverted", [False, True])
+  def test_corrected_point_reaches_lead_fusion(self, monkeypatch, inverted):
+    offset = 0.27
+    config = SimpleNamespace(radar_upside_down=inverted, radar_offset=offset, radar_ignore_hw_fail=False)
+    monkeypatch.setattr(radar_module, "nap_conf", config)
+    monkeypatch.setattr(radar_module, "_upside_down_from_params", lambda: config.radar_upside_down)
+    raw = _bosch_interface()
+    # A centered physical target has the opposite raw displacement after inversion.
+    points = _run_raw(raw, y_rel=offset if inverted else -offset).points
+    assert points[0].yRel == pytest.approx(0.0)
+    lead = RadarHarness().step(1.0, 30.0, points)
+    assert lead.radar
+    assert lead.radarTrackId == points[0].trackId
+    assert lead.yRel == pytest.approx(0.0)
+
+  def test_unreadable_mount_defaults_upright(self, monkeypatch, tmp_path):
+    monkeypatch.setattr(radar_module, "nap_conf", None)
+    def unavailable():
+      raise ImportError("native params unavailable")
+    monkeypatch.setattr(radar_module, "_upside_down_from_params", unavailable)
+    monkeypatch.setattr(radar_module, "UPSIDE_DOWN_PATH", str(tmp_path / "missing"))
+    assert not radar_module._resolve_radar_upside_down()
+    path = tmp_path / "mount"
+    monkeypatch.setattr(radar_module, "UPSIDE_DOWN_PATH", str(path))
+    for value, expected in ((b"1", True), (b"0", False), (b"invalid", False)):
+      path.write_bytes(value)
+      assert radar_module._resolve_radar_upside_down() is expected
+
+  @pytest.mark.parametrize("json_config,param_bytes,expected", [
+    ("{}", b"1", True),
+    ('{"radar_upside_down": false}', b"1", True),
+    ('{"radar_upside_down": true}', b"0", False),
+    ('{"radar_upside_down": true}', None, True),
+  ])
+  def test_real_nap_conf_fallback_does_not_mask_persisted_mount(self, monkeypatch, tmp_path,
+                                                              json_config, param_bytes, expected):
+    from importlib import import_module
+    conf_module = import_module("opendbc.car.tesla.preap.nap_conf")
+    config_path = tmp_path / "nap_params.json"
+    config_path.write_text(json_config)
+    monkeypatch.setattr(conf_module, "CONFIG_FILE", str(config_path))
+    monkeypatch.setattr(conf_module, "_PARAMS_AVAILABLE", False)
+    monkeypatch.setattr(radar_module, "nap_conf", conf_module.NAPConf())
+    def unavailable():
+      raise ImportError("native params unavailable")
+    monkeypatch.setattr(radar_module, "_upside_down_from_params", unavailable)
+    param_path = tmp_path / "NAPRadarUpsideDown"
+    if param_bytes is not None:
+      param_path.write_bytes(param_bytes)
+    monkeypatch.setattr(radar_module, "UPSIDE_DOWN_PATH", str(param_path))
+    assert radar_module._resolve_radar_upside_down() is expected
+
+  def test_native_upright_setting_does_not_use_stale_fallback(self, monkeypatch, tmp_path):
+    from importlib import import_module
+    from openpilot.common.params import Params
+    conf_module = import_module("opendbc.car.tesla.preap.nap_conf")
+    config_path = tmp_path / "nap_params.json"
+    config_path.write_text('{"radar_upside_down": true}')
+    monkeypatch.setattr(conf_module, "CONFIG_FILE", str(config_path))
+    monkeypatch.setattr(conf_module, "_PARAMS_AVAILABLE", False)
+    monkeypatch.setattr(radar_module, "nap_conf", conf_module.NAPConf())
+    monkeypatch.setattr(radar_module, "_upside_down_from_file", lambda: True)
+    Params().put_bool("NAPRadarUpsideDown", False, block=True)
+    assert not radar_module._resolve_radar_upside_down()
 
 
 class TestPreAPRadarInterfaceToRadard:

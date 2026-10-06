@@ -42,7 +42,7 @@ class StateMachine:
   def check_contains_in_list(self) -> bool:
     return bool(self._events.contains_in_list(GEARS_ALLOW_PAUSED) or self._events_sp.contains_in_list(GEARS_ALLOW_PAUSED_SILENT))
 
-  def update(self):
+  def update(self, *, hands_on_inhibited=False):
     # soft disable timer and current alert types are from the state machine of openpilot
     # decrement the soft disable timer at every step, as it's reset on
     # entrance in SOFT_DISABLING state
@@ -88,7 +88,7 @@ class StateMachine:
 
         # PAUSED
         elif self.state == State.paused:
-          if self.check_contains(ET.ENABLE):
+          if self.check_contains(ET.ENABLE) and not hands_on_inhibited:
             if self.check_contains(ET.NO_ENTRY):
               self.add_current_alert_types(ET.NO_ENTRY)
 
@@ -122,7 +122,9 @@ class StateMachine:
           self.add_current_alert_types(ET.NO_ENTRY)
 
         else:
-          if self.check_contains(ET.OVERRIDE_LATERAL):
+          if hands_on_inhibited:
+            self.state = State.paused
+          elif self.check_contains(ET.OVERRIDE_LATERAL):
             self.state = State.overriding
           else:
             self.state = State.enabled

@@ -152,3 +152,40 @@ class TestVCruiseHelper:
           self.enable(float(v_ego), experimental_mode, dynamic_experimental_control)
           assert V_CRUISE_INITIAL <= self.v_cruise_helper.v_cruise_kph <= V_CRUISE_MAX
           assert self.v_cruise_helper.v_cruise_initialized
+
+
+class TestPreAPCruiseCeiling:
+  def setup_method(self):
+    cp = car.CarParams(brand="tesla", carFingerprint="TESLA_MODEL_S_PREAP",
+                       openpilotLongitudinalControl=True, pcmCruise=False)
+    self.helper = VCruiseHelper(cp, custom.CarParamsSP(pcmCruiseSpeed=True))
+
+  def test_retained_ceiling_is_independent_of_longitudinal_authority(self):
+    cs = car.CarState(cruiseState={"available": True, "speed": 25.0})
+    for enabled in (True, False, False, True):
+      cs.enableLongControl = enabled
+      self.helper.update_v_cruise(cs, enabled, True)
+      assert self.helper.v_cruise_kph == pytest.approx(90.0)
+      assert self.helper.v_cruise_cluster_kph == pytest.approx(90.0)
+    self.helper.initialize_v_cruise(car.CarState(vEgo=10.0), False, False)
+    assert self.helper.v_cruise_kph == pytest.approx(90.0)
+
+  def test_uninitialized_and_zero_target_are_distinct(self):
+    cs = car.CarState(cruiseState={"available": True, "speed": -1.0})
+    self.helper.update_v_cruise(cs, False, True)
+    assert not self.helper.v_cruise_initialized
+    cs.cruiseState.speed = 0.0
+    self.helper.update_v_cruise(cs, True, True)
+    assert self.helper.v_cruise_initialized
+    assert self.helper.v_cruise_kph == 0.0
+
+  def test_speed_limit_cap_does_not_replace_resume_ceiling(self):
+    cs = car.CarState(cruiseState={"available": True, "speed": 25.0})
+    plan = custom.LongitudinalPlanSP.new_message()
+    plan.vTarget = 15.0
+    plan.speedLimit.assist.state = custom.LongitudinalPlanSP.SpeedLimit.AssistState.active
+    plan.speedLimit.resolver.speedLimitValid = True
+    plan.speedLimit.resolver.speedLimitFinalLast = 15.0
+    self.helper.update_speed_limit_assist(True, plan)
+    self.helper.update_v_cruise(cs, True, True)
+    assert self.helper.v_cruise_kph == pytest.approx(90.0)
