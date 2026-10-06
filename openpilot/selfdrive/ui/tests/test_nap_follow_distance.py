@@ -20,11 +20,26 @@ class _WheelSM:
   def __init__(self, distance, alive=True, valid=True):
     self.alive = {"carState": alive}
     self.valid = {"carState": valid}
+    self.logMonoTime = {"carState": 0}
+    self._last_valid_distance = 0
+    self._detent_timestamp = 0
+    self._valid_timestamp = 0
+    self.publish(distance)
+
+  def publish(self, distance):
+    self.logMonoTime["carState"] += 1
+    if 1 <= distance <= 7:
+      if distance != self._last_valid_distance:
+        self._detent_timestamp = self.logMonoTime["carState"]
+      self._last_valid_distance = distance
+      if self.valid["carState"]:
+        self._valid_timestamp = self.logMonoTime["carState"]
     self._distance = distance
 
   def __getitem__(self, key):
     assert key == "carState"
-    return SimpleNamespace(napStalkFollowDistance=self._distance, napStalkFollowDistanceTimestamp=0)
+    return SimpleNamespace(napStalkFollowDistance=self._distance, napStalkFollowDistanceTimestamp=self._detent_timestamp,
+                           napStalkFollowDistanceValidTimestamp=self._valid_timestamp)
 
 
 def test_live_stalk_requires_valid_alive_carstate(feedback):
@@ -37,11 +52,11 @@ def test_live_stalk_requires_valid_alive_carstate(feedback):
 
 
 def test_tap_survives_unchanged_wheel_until_detent(feedback):
-  feedback.note_follow_distance_tap(7, wheel=4, wheel_timestamp_ns=100)
-  assert feedback.selected_follow_distance(4, 100) == 7
-  assert feedback.selected_follow_distance(4, 100) == 7
-  assert feedback.selected_follow_distance(5, 200) == 5
-  assert feedback.selected_follow_distance(4, 300) == 4
+  feedback.note_follow_distance_tap(7, wheel=4, wheel_timestamp_ns=100, carstate_mono_time=100)
+  assert feedback.selected_follow_distance(4, 100, 100) == 7
+  assert feedback.selected_follow_distance(4, 100, 150) == 7
+  assert feedback.selected_follow_distance(5, 200, 200) == 5
+  assert feedback.selected_follow_distance(4, 300, 300) == 4
 
 
 def test_overlay_first_sample_does_not_show(feedback):
@@ -126,7 +141,7 @@ def test_live_picker_tracks_wheel_without_waiting_for_disk(follow_picker, monkey
   monkeypatch.setattr(ui_state, "started", True)
   panel._update_state()
 
-  wheel._distance = 6
+  wheel.publish(6)
   panel._update_state()
   assert panel._follow_buttons.action_item.get_selected_button() == 5
   assert params.get("NAPFollowDistance") == 4
@@ -143,7 +158,7 @@ def test_live_picker_tracks_wheel_without_waiting_for_disk(follow_picker, monkey
   panel._update_state()
   assert panel._follow_buttons.action_item.get_selected_button() == 6
   wheel.alive["carState"] = True
-  wheel._distance = 3
+  wheel.publish(3)
   panel._update_state()
   assert panel._follow_buttons.action_item.get_selected_button() == 2
 
@@ -209,7 +224,7 @@ def test_picker_request_is_drive_scoped_and_async(feedback, monkeypatch, started
       "distance": 7, "wheel": 4, "wheelTimestampNs": 100, "timestampNs": 123456789, "route": route,
       "carStateMonoTime": 200,
     })
-    assert feedback.selected_follow_distance(4, 100) == 7
+    assert feedback.selected_follow_distance(4, 100, 200) == 7
   else:
     assert params.put.call_count == 1
   assert params.put.call_args.args == ("NAPFollowDistance", 7)

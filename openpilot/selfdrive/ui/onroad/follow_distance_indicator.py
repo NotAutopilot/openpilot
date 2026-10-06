@@ -35,6 +35,7 @@ _WHEELS = ((0.28, 0.70), (0.80, 0.70))
 _pending_tap: int | None = None
 _wheel_at_tap: int = 0
 _wheel_timestamp_at_tap: int = 0
+_carstate_at_tap: int = 0
 _force_show: bool = False
 _last_wheel: int = 0
 _selection_started_frame: int | None = None
@@ -60,9 +61,13 @@ def live_stalk_follow_timestamp(sm) -> int:
   return int(sm["carState"].napStalkFollowDistanceTimestamp)
 
 
-def note_follow_distance_tap(distance: int, wheel: int, wheel_timestamp_ns: int) -> None:
+def live_stalk_follow_valid_timestamp(sm) -> int:
+  return int(sm["carState"].napStalkFollowDistanceValidTimestamp)
+
+
+def note_follow_distance_tap(distance: int, wheel: int, wheel_timestamp_ns: int, carstate_mono_time: int) -> None:
   """Flash the overlay for a GUI tap until a new physical detent arrives."""
-  global _pending_tap, _wheel_at_tap, _wheel_timestamp_at_tap, _force_show
+  global _pending_tap, _wheel_at_tap, _wheel_timestamp_at_tap, _carstate_at_tap, _force_show
   value = int(distance)
   if not (FOLLOW_DISTANCE_MIN <= value <= FOLLOW_DISTANCE_MAX):
     return
@@ -70,6 +75,7 @@ def note_follow_distance_tap(distance: int, wheel: int, wheel_timestamp_ns: int)
   _pending_tap = value
   _wheel_at_tap = int(wheel) if FOLLOW_DISTANCE_MIN <= int(wheel) <= FOLLOW_DISTANCE_MAX else 0
   _wheel_timestamp_at_tap = wheel_timestamp_ns
+  _carstate_at_tap = carstate_mono_time
   _force_show = True
 
 
@@ -89,14 +95,15 @@ def request_follow_distance(distance: int, wheel: int, wheel_timestamp_ns: int, 
   # Without a drive identity, save the fallback but do not pretend the planner
   # accepted a live override.
   if not ui_state.started or route:
-    note_follow_distance_tap(distance, wheel, wheel_timestamp_ns)
+    note_follow_distance_tap(distance, wheel, wheel_timestamp_ns, carstate_mono_time)
 
 
 def reset_follow_distance_tap() -> None:
-  global _pending_tap, _wheel_at_tap, _wheel_timestamp_at_tap, _force_show, _last_wheel, _selection_started_frame
+  global _pending_tap, _wheel_at_tap, _wheel_timestamp_at_tap, _carstate_at_tap, _force_show, _last_wheel, _selection_started_frame
   _pending_tap = None
   _wheel_at_tap = 0
   _wheel_timestamp_at_tap = 0
+  _carstate_at_tap = 0
   _force_show = False
   _last_wheel = 0
   _selection_started_frame = None
@@ -108,8 +115,8 @@ def pop_forced_follow_distance_show() -> bool:
   return forced
 
 
-def selected_follow_distance(wheel: int, wheel_timestamp_ns: int) -> int:
-  """A newer producer detent wins even if intermediate values were not observed."""
+def selected_follow_distance(wheel: int, wheel_timestamp_ns: int, valid_timestamp_ns: int) -> int:
+  """Producer detents and valid returns win even if intermediate samples were missed."""
   global _pending_tap, _wheel_at_tap, _last_wheel
   _sync_selection_epoch()
   wheel_value = int(wheel)
@@ -117,8 +124,9 @@ def selected_follow_distance(wheel: int, wheel_timestamp_ns: int) -> int:
   if wheel_live:
     _last_wheel = wheel_value
   if _pending_tap is not None:
-    detent_changed = wheel_timestamp_ns > _wheel_timestamp_at_tap or (wheel_live and _wheel_at_tap == 0)
-    if not detent_changed:
+    detent_changed = wheel_timestamp_ns > _wheel_timestamp_at_tap
+    wheel_returned = _wheel_at_tap == 0 and valid_timestamp_ns > _carstate_at_tap
+    if not (detent_changed or wheel_returned):
       return _pending_tap
     _pending_tap = None
     _wheel_at_tap = 0
@@ -253,7 +261,8 @@ class FollowDistanceIndicator:
       self._reset()
       self._started_frame = ui_state.started_frame
 
-    selected = selected_follow_distance(live_stalk_follow_distance(ui_state.sm), live_stalk_follow_timestamp(ui_state.sm))
+    selected = selected_follow_distance(live_stalk_follow_distance(ui_state.sm), live_stalk_follow_timestamp(ui_state.sm),
+                                        live_stalk_follow_valid_timestamp(ui_state.sm))
     if pop_forced_follow_distance_show():
       self._have_sample = True
       self._last = 0

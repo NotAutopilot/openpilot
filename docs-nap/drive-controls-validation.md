@@ -31,6 +31,7 @@ The on-screen picker still works:
 - Request precedence uses producer events, not the order in which the UI and planner happen to receive them. The planner waits for the request's source snapshot before deciding; an out-and-back physical dial movement still supersedes the earlier picker selection.
 - An accepted tap overrides an unchanged dial until a subsequent physical detent change.
 - Old-route, pre-start, stale, or mismatched-baseline requests cannot override a newer detent.
+- The publisher retains the latest valid-dial publication time through outages. A returning valid dial supersedes an unavailable-dial tap even if either consumer misses that intermediate sample.
 - A tap made while the dial is unavailable can take effect; any returning valid dial then wins. An override made against a valid dial survives a temporary outage if that same dial value returns.
 - Offroad changes store the next-drive fallback only. They do not create an onroad request without a route identity.
 

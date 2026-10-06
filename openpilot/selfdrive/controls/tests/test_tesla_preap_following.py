@@ -75,6 +75,49 @@ class _CapturingPubMaster:
     self.message = message
 
 
+@pytest.fixture
+def carstate_publisher(monkeypatch):
+  from openpilot.selfdrive.car import card
+
+  class CapturingPubMaster:
+    def send(self, service, message):
+      if service == "carState":
+        self.message = message.as_reader()
+
+  publisher = card.Car.__new__(card.Car)
+  publisher.CP = _make_preap_params()
+  publisher.sm = SimpleNamespace(frame=1, all_checks=lambda _: True)
+  publisher.pm = CapturingPubMaster()
+  publisher.rk = SimpleNamespace(remaining=0)
+  publisher.can_rcv_cum_timeout_counter = 0
+  publisher.nap_last_valid_follow_timestamp = 0
+  publisher.last_actuators_output = structs.CarControl.Actuators()
+  state_sp = messaging.new_message("carStateSP").carStateSP
+  publication_ns = [0]
+  new_message = messaging.new_message
+
+  def timed_message(service, *args, **kwargs):
+    kwargs["logMonoTime"] = publication_ns[0]
+    return new_message(service, *args, **kwargs)
+
+  monkeypatch.setattr(card.messaging, "new_message", timed_message)
+
+  def publish(state, timestamp):
+    publication_ns[0] = timestamp
+    publisher.state_publish(state, state_sp, None)
+    return publisher.pm.message
+
+  return publisher, publish
+
+
+def _observe_follow_snapshot(sm, message):
+  sm["carState"].napStalkFollowDistance = message.carState.napStalkFollowDistance
+  sm["carState"].napStalkFollowDistanceTimestamp = message.carState.napStalkFollowDistanceTimestamp
+  sm["carState"].napStalkFollowDistanceValidTimestamp = message.carState.napStalkFollowDistanceValidTimestamp
+  sm.logMonoTime["carState"] = message.logMonoTime
+  sm.valid["carState"] = message.valid
+
+
 class _MutablePlannerParams:
   def __init__(self, nap_follow_dist, adaptive_accel=False):
     self.nap_follow_dist = nap_follow_dist
@@ -489,7 +532,7 @@ def test_gui_follow_request_controls_mpc_until_next_detent(monkeypatch, poll_dur
   planner.update(inputs)
   clock[0] += 1_000_000_000
   feedback.request_follow_distance(7, 4, inputs["carState"].napStalkFollowDistanceTimestamp, inputs.logMonoTime["carState"], params)
-  assert feedback.selected_follow_distance(4, inputs["carState"].napStalkFollowDistanceTimestamp) == 7
+  assert feedback.selected_follow_distance(4, inputs["carState"].napStalkFollowDistanceTimestamp, 0) == 7
   assert [key for key, _ in params.writes] == ["NAPFollowDistanceRequest", "NAPFollowDistance"]
   params.follow_request = params.writes[0][1]  # Runtime request delivered, persistence still old.
   clock[0] += 1_000_000_000
@@ -509,7 +552,7 @@ def test_gui_follow_request_controls_mpc_until_next_detent(monkeypatch, poll_dur
     inputs["carState"].napStalkFollowDistance = wheel
     inputs.logMonoTime["carState"] += 1
     planner.update(inputs)
-    assert feedback.selected_follow_distance(wheel, inputs["carState"].napStalkFollowDistanceTimestamp) == 7
+    assert feedback.selected_follow_distance(wheel, inputs["carState"].napStalkFollowDistanceTimestamp, 0) == 7
     assert planner.active_nap_follow_dist == 7
 
   # Detents win on the next model update, even outside the Params poll cadence.
@@ -518,7 +561,7 @@ def test_gui_follow_request_controls_mpc_until_next_detent(monkeypatch, poll_dur
     inputs["carState"].napStalkFollowDistance = wheel
     inputs["carState"].napStalkFollowDistanceTimestamp = clock[0]
     planner.update(inputs)
-    assert feedback.selected_follow_distance(wheel, inputs["carState"].napStalkFollowDistanceTimestamp) == wheel
+    assert feedback.selected_follow_distance(wheel, inputs["carState"].napStalkFollowDistanceTimestamp, 0) == wheel
     assert planner.active_nap_follow_dist == wheel
     assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=wheel))
   params.nap_follow_dist = 7  # Late picker persistence cannot resurrect its consumed request.
@@ -576,7 +619,7 @@ def test_follow_request_order_uses_producer_detents_not_consumer_delay(monkeypat
   clock[0] = 2_010_000_000
   feedback.request_follow_distance(7, changed.napStalkFollowDistance, changed.napStalkFollowDistanceTimestamp,
                                    changed.napStalkFollowDistanceTimestamp, params)
-  assert feedback.selected_follow_distance(3, changed.napStalkFollowDistanceTimestamp) == 7
+  assert feedback.selected_follow_distance(3, changed.napStalkFollowDistanceTimestamp, 0) == 7
   if poll_before_carstate:
     clock[0] = 2_020_000_000
     planner._frame = 19
@@ -592,14 +635,14 @@ def test_follow_request_order_uses_producer_detents_not_consumer_delay(monkeypat
     planner._frame = 19
   planner.update(inputs)
   expected = 3 if physical_before_poll else 7
-  assert feedback.selected_follow_distance(3, observed.napStalkFollowDistanceTimestamp) == expected
+  assert feedback.selected_follow_distance(3, observed.napStalkFollowDistanceTimestamp, 0) == expected
   assert planner.active_nap_follow_dist == expected
   assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=expected))
 
   observe(returned)
   clock[0] = 2_050_000_000
   planner.update(inputs)
-  assert feedback.selected_follow_distance(3, returned.napStalkFollowDistanceTimestamp) == 3
+  assert feedback.selected_follow_distance(3, returned.napStalkFollowDistanceTimestamp, 0) == 3
   assert planner.active_nap_follow_dist == 3
   params.nap_follow_dist = 7  # Neither late persistence nor replay may revive the tap.
   planner._frame = 19
@@ -609,7 +652,7 @@ def test_follow_request_order_uses_producer_detents_not_consumer_delay(monkeypat
 
 
 @pytest.mark.parametrize("order", ["request_first", "snapshot_first", "delayed_poll", "return_before_poll"])
-def test_unavailable_follow_request_waits_for_source_snapshot(monkeypatch, order):
+def test_unavailable_follow_request_waits_for_source_snapshot(monkeypatch, carstate_publisher, order):
   monkeypatch.setenv("SCALE", "1")
   from opendbc.can import CANPacker
   from opendbc.car import CanData
@@ -635,25 +678,21 @@ def test_unavailable_follow_request_waits_for_source_snapshot(monkeypatch, order
     "TESLA_MODEL_S_PREAP", {i: {} for i in range(8)}, [], alpha_long=False, is_release=False, docs=False,
   ))
   packer = CANPacker("tesla_preap")
+  _, publish_state = carstate_publisher
 
   def publish(raw, timestamp):
     address, data, bus = packer.make_can_msg("STW_ACTN_RQ", 0, {"DTR_Dist_Rq": raw})
     state, _ = car_interface.update([(timestamp, [CanData(address, data, bus)])])
-    message = messaging.new_message("carState")
-    message.carState = state
-    message.logMonoTime = timestamp + 5_000_000
-    message.valid = True
-    return message
+    state.canValid = True
+    return publish_state(state, timestamp + 5_000_000)
 
   def observe(sm, message):
-    sm["carState"].napStalkFollowDistance = message.carState.napStalkFollowDistance
-    sm["carState"].napStalkFollowDistanceTimestamp = message.carState.napStalkFollowDistanceTimestamp
-    sm.logMonoTime["carState"] = message.logMonoTime
-    sm.valid["carState"] = message.valid
+    _observe_follow_snapshot(sm, message)
 
   def selected():
     return feedback.selected_follow_distance(feedback.live_stalk_follow_distance(ui_inputs),
-                                             feedback.live_stalk_follow_timestamp(ui_inputs))
+                                             feedback.live_stalk_follow_timestamp(ui_inputs),
+                                             feedback.live_stalk_follow_valid_timestamp(ui_inputs))
 
   initial = publish(100, 1_500_000_000)
   observe(inputs, initial)
@@ -709,6 +748,107 @@ def test_unavailable_follow_request_waits_for_source_snapshot(monkeypatch, order
   assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=4))
 
 
+@pytest.mark.parametrize("missed_by", ["planner", "ui", "both"])
+@pytest.mark.parametrize("poll_before_return", [False, True])
+@pytest.mark.parametrize("outage_kind", ["sna", "invalid"])
+def test_follow_valid_return_survives_consumer_conflation(monkeypatch, carstate_publisher, missed_by, poll_before_return, outage_kind):
+  monkeypatch.setenv("SCALE", "1")
+  from openpilot.selfdrive.ui.onroad import follow_distance_indicator as feedback
+
+  clock = [1_000_000_000]
+  monkeypatch.setattr(longitudinal_planner.time, "monotonic_ns", lambda: clock[0])
+  monkeypatch.setattr(feedback, "ui_state", SimpleNamespace(started=True, started_frame=1))
+  feedback.reset_follow_distance_tap()
+  params = _MutablePlannerParams(4)
+  writes = []
+  params.put = lambda key, value: writes.append((key, value))
+  planner = LongitudinalPlanner(_make_preap_params(), _cp_sp(), init_v=FOLLOW_TEST_SPEED_MPS, params=params)
+  inputs = _make_planner_inputs(FOLLOW_TEST_SPEED_MPS)
+  ui_inputs = _make_planner_inputs(FOLLOW_TEST_SPEED_MPS)
+  _, publish = carstate_publisher
+  state = structs.CarState()
+  state.napStalkFollowDistance = 4
+  state.napStalkFollowDistanceTimestamp = 1_500_000_000
+  state.canValid = True
+
+  def selected():
+    return feedback.selected_follow_distance(feedback.live_stalk_follow_distance(ui_inputs),
+                                             feedback.live_stalk_follow_timestamp(ui_inputs),
+                                             feedback.live_stalk_follow_valid_timestamp(ui_inputs))
+
+  def unavailable(timestamp):
+    if outage_kind == "sna":
+      state.napStalkFollowDistance = 0
+    else:
+      state.canValid = False
+    return publish(state, timestamp)
+
+  initial = publish(state, 1_600_000_000)
+  for sm in (inputs, ui_inputs):
+    _observe_follow_snapshot(sm, initial)
+  clock[0] = 1_700_000_000
+  planner.update(inputs)
+  assert selected() == 4
+  outage = unavailable(2_000_000_000)
+  assert outage.carState.napStalkFollowDistanceValidTimestamp == initial.logMonoTime
+  for sm in (inputs, ui_inputs):
+    _observe_follow_snapshot(sm, outage)
+  clock[0] = 2_010_000_000
+  planner.update(inputs)
+  clock[0] = 2_100_000_000
+  feedback.request_follow_distance(7, feedback.live_stalk_follow_distance(ui_inputs),
+                                   feedback.live_stalk_follow_timestamp(ui_inputs), ui_inputs.logMonoTime["carState"], params)
+  params.follow_request = writes[0][1]
+  assert selected() == 7
+  if poll_before_return:
+    planner._frame = 19
+    planner.update(inputs)
+    assert planner.active_nap_follow_dist == 7
+    assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=7))
+
+  # No new STW sample or detent is required for overall carState validity to
+  # recover. The card publication itself must record this valid return.
+  state.napStalkFollowDistance = 4
+  state.canValid = True
+  returned = publish(state, 3_000_000_000)
+  assert returned.carState.napStalkFollowDistanceTimestamp == initial.carState.napStalkFollowDistanceTimestamp
+  assert returned.carState.napStalkFollowDistanceValidTimestamp == returned.logMonoTime
+  clock[0] = 3_010_000_000
+  if missed_by == "ui":
+    _observe_follow_snapshot(inputs, returned)
+    planner.update(inputs)
+    assert planner.active_nap_follow_dist == 4
+  elif missed_by == "planner":
+    _observe_follow_snapshot(ui_inputs, returned)
+    assert selected() == 4
+
+  # A conflated latest sample is unavailable again, but carries the producer's
+  # intervening valid publication. Neither consumer may revive the old tap.
+  outage = unavailable(3_100_000_000)
+  assert outage.carState.napStalkFollowDistanceValidTimestamp == returned.logMonoTime
+  for sm in (inputs, ui_inputs):
+    _observe_follow_snapshot(sm, outage)
+  clock[0] = 3_200_000_000
+  planner._frame = 19
+  planner.update(inputs)
+  assert selected() == planner.active_nap_follow_dist == 4
+  assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=4))
+  params.nap_follow_dist = 7
+  planner._frame = 19
+  planner.update(inputs)
+  assert selected() == planner.active_nap_follow_dist == 4
+
+
+def test_follow_valid_publication_metadata_stays_default_for_other_cars(carstate_publisher):
+  publisher, publish = carstate_publisher
+  publisher.CP.carFingerprint = "HONDA_CIVIC"
+  state = structs.CarState()
+  state.canValid = True
+  state.napStalkFollowDistance = 4
+  message = publish(state, 1_000_000_000)
+  assert message.carState.napStalkFollowDistanceValidTimestamp == 0
+
+
 @pytest.mark.parametrize("unavailable_flag", ["alive", "valid"])
 def test_unavailable_follow_tap_on_same_snapshot_waits_for_fresh_valid_sample(monkeypatch, unavailable_flag):
   monkeypatch.setenv("SCALE", "1")
@@ -727,10 +867,11 @@ def test_unavailable_follow_tap_on_same_snapshot_waits_for_fresh_valid_sample(mo
   for sm in (inputs, ui_inputs):
     sm["carState"].napStalkFollowDistance = 4
     sm["carState"].napStalkFollowDistanceTimestamp = 1_500_000_000
+    sm["carState"].napStalkFollowDistanceValidTimestamp = 1_600_000_000
     sm.logMonoTime["carState"] = 1_600_000_000
   clock[0] = 1_700_000_000
   planner.update(inputs)
-  feedback.selected_follow_distance(4, 1_500_000_000)
+  feedback.selected_follow_distance(4, 1_500_000_000, 1_600_000_000)
   getattr(ui_inputs, unavailable_flag)["carState"] = False
   clock[0] = 2_000_000_000
   feedback.request_follow_distance(7, feedback.live_stalk_follow_distance(ui_inputs),
@@ -739,7 +880,7 @@ def test_unavailable_follow_tap_on_same_snapshot_waits_for_fresh_valid_sample(mo
   planner._frame = 19
   planner.update(inputs)
   planner.update(inputs)  # The other consumer still regards this old snapshot as valid.
-  assert feedback.selected_follow_distance(feedback.live_stalk_follow_distance(ui_inputs), 1_500_000_000) == 7
+  assert feedback.selected_follow_distance(feedback.live_stalk_follow_distance(ui_inputs), 1_500_000_000, 1_600_000_000) == 7
   assert planner.active_nap_follow_dist == 7
   assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=7))
   # Once planner also marks the old snapshot unavailable, it must not revoke
@@ -748,10 +889,11 @@ def test_unavailable_follow_tap_on_same_snapshot_waits_for_fresh_valid_sample(mo
   planner.update(inputs)
   assert planner.active_nap_follow_dist == 7
   inputs.logMonoTime["carState"] = 2_500_000_000
+  inputs["carState"].napStalkFollowDistanceValidTimestamp = 2_500_000_000
   getattr(inputs, unavailable_flag)["carState"] = True
   clock[0] = 2_600_000_000
   planner.update(inputs)
-  assert feedback.selected_follow_distance(4, 1_500_000_000) == planner.active_nap_follow_dist == 4
+  assert feedback.selected_follow_distance(4, 1_500_000_000, 2_500_000_000) == planner.active_nap_follow_dist == 4
   assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=4))
 
 
@@ -773,8 +915,10 @@ def test_gui_request_while_wheel_unavailable_controls_mpc_until_wheel_returns(mo
   clock[0] += 1_000_000_000
   inputs["carState"].napStalkFollowDistanceTimestamp = clock[0]
   inputs.logMonoTime["carState"] = clock[0]
+  inputs["carState"].napStalkFollowDistanceValidTimestamp = clock[0]
   planner.update(inputs)
-  assert feedback.selected_follow_distance(4, inputs["carState"].napStalkFollowDistanceTimestamp) == 4
+  assert feedback.selected_follow_distance(4, inputs["carState"].napStalkFollowDistanceTimestamp,
+                                           inputs["carState"].napStalkFollowDistanceValidTimestamp) == 4
   inputs["carState"].napStalkFollowDistance = 0
   clock[0] += 1_000_000_000
   inputs.logMonoTime["carState"] = clock[0]
@@ -785,7 +929,8 @@ def test_gui_request_while_wheel_unavailable_controls_mpc_until_wheel_returns(mo
   clock[0] += 1_000_000_000
   planner._frame = 19
   planner.update(inputs)
-  assert feedback.selected_follow_distance(0, inputs["carState"].napStalkFollowDistanceTimestamp) == 7
+  assert feedback.selected_follow_distance(0, inputs["carState"].napStalkFollowDistanceTimestamp,
+                                           inputs["carState"].napStalkFollowDistanceValidTimestamp) == 7
   assert planner.active_nap_follow_dist == 7
   assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=7))
 
@@ -793,10 +938,12 @@ def test_gui_request_while_wheel_unavailable_controls_mpc_until_wheel_returns(mo
   inputs["carState"].napStalkFollowDistance = return_wheel
   clock[0] += 1_000_000_000
   inputs.logMonoTime["carState"] = clock[0]
+  inputs["carState"].napStalkFollowDistanceValidTimestamp = clock[0]
   if return_wheel != 4:
     inputs["carState"].napStalkFollowDistanceTimestamp = clock[0]
   planner.update(inputs)
-  assert feedback.selected_follow_distance(return_wheel, inputs["carState"].napStalkFollowDistanceTimestamp) == return_wheel
+  assert feedback.selected_follow_distance(return_wheel, inputs["carState"].napStalkFollowDistanceTimestamp,
+                                           inputs["carState"].napStalkFollowDistanceValidTimestamp) == return_wheel
   assert planner.active_nap_follow_dist == return_wheel
   assert np.all(planner.mpc.params[:, 4] == get_T_FOLLOW(nap_follow_dist=return_wheel))
   # A late replay of that request, even during another outage, cannot revive it.

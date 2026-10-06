@@ -103,7 +103,6 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self._nap_last_detent_ns = 0
     self._nap_last_wheel = 0
     self._nap_last_request_ns = 0
-    self._nap_last_valid_carstate_ns = 0
     self._nap_follow_request = None
     self._nap_follow_override: tuple[int, int, int] | None = None
 
@@ -131,7 +130,6 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
         self._nap_last_detent_ns = 0
         self._nap_last_wheel = 0
         self._nap_last_request_ns = 0
-        self._nap_last_valid_carstate_ns = 0
         self._nap_follow_override = None
 
     if len(sm['carControl'].orientationNED) == 3:
@@ -189,7 +187,8 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.active_nap_follow_dist = (
       self._select_nap_follow_distance(
         sm['carState'].napStalkFollowDistance if sm.alive['carState'] and sm.valid['carState'] else 0,
-        sm['carState'].napStalkFollowDistanceTimestamp, sm.logMonoTime['carState'], time.monotonic_ns(),
+        sm['carState'].napStalkFollowDistanceTimestamp, sm['carState'].napStalkFollowDistanceValidTimestamp,
+        sm.logMonoTime['carState'], time.monotonic_ns(),
       )
       if self._is_preap else None
     )
@@ -246,18 +245,17 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.output_a_target = np.clip(output_a_target, accel_clip[0], accel_clip[1])
     self.prev_accel_clip = accel_clip
 
-  def _select_nap_follow_distance(self, live: int, detent_ns: int, carstate_ns: int, now_ns: int) -> int | None:
+  def _select_nap_follow_distance(self, live: int, detent_ns: int, valid_ns: int, carstate_ns: int, now_ns: int) -> int | None:
     current_wheel = live if live in NAP_FOLLOW_DISTANCE_RANGE else 0
     wheel_returned = (
-      current_wheel and self._nap_follow_override is not None
-      and self._nap_follow_override[1] == 0 and carstate_ns > self._nap_follow_override[2]
+      self._nap_follow_override is not None
+      and self._nap_follow_override[1] == 0 and valid_ns > self._nap_follow_override[2]
     )
     if detent_ns > self._nap_last_detent_ns or wheel_returned:
       self._nap_follow_override = None
     self._nap_last_detent_ns = max(self._nap_last_detent_ns, detent_ns)
     if current_wheel:
       self._nap_last_wheel = current_wheel
-      self._nap_last_valid_carstate_ns = max(self._nap_last_valid_carstate_ns, carstate_ns)
 
     request = self._nap_follow_request
     if isinstance(request, dict) and self._nap_route and request.get("route") == self._nap_route:
@@ -276,12 +274,11 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
         self._nap_last_request_ns = timestamp_ns
         if (timestamp_ns > max(self._nap_started_ns, self._nap_last_detent_ns)
             and wheel_timestamp_ns == self._nap_last_detent_ns
-            and (wheel != 0 or request_carstate_ns >= self._nap_last_valid_carstate_ns)
-            and (wheel == current_wheel or current_wheel == 0
-                 or (wheel == 0 and carstate_ns == request_carstate_ns))):
-          # Availability can differ between subscribers of the same snapshot.
-          # A tap made while unavailable expires on a newer valid publication,
-          # not on another subscriber's still-valid view of the old snapshot.
+            and (wheel != 0 or request_carstate_ns >= valid_ns)
+            and (wheel == current_wheel or current_wheel == 0 or wheel == 0)):
+          # The producer retains valid returns even when this subscriber misses
+          # them between two unavailable samples. Same-snapshot availability
+          # differences between subscribers do not count as a new valid return.
           self._nap_follow_override = (distance, wheel, request_carstate_ns)
 
     selected = self._nap_follow_override[0] if self._nap_follow_override is not None else None

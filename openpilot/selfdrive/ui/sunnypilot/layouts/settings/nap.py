@@ -13,7 +13,7 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   pedal_calibration_entry_block_reason, pedal_calibration_entry_enabled,
 )
 from openpilot.selfdrive.ui.onroad.follow_distance_indicator import (
-  live_stalk_follow_distance, live_stalk_follow_timestamp, request_follow_distance, selected_follow_distance,
+  live_stalk_follow_distance, live_stalk_follow_timestamp, live_stalk_follow_valid_timestamp, request_follow_distance, selected_follow_distance,
 )
 from openpilot.selfdrive.ui.radar.radar_view import RadarMonitorDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -560,7 +560,8 @@ class NAPLayout(Widget):
 
   def _refresh_follow_distance(self):
     selected = (
-      selected_follow_distance(live_stalk_follow_distance(ui_state.sm), live_stalk_follow_timestamp(ui_state.sm))
+      selected_follow_distance(live_stalk_follow_distance(ui_state.sm), live_stalk_follow_timestamp(ui_state.sm),
+                               live_stalk_follow_valid_timestamp(ui_state.sm))
       if ui_state.started else 0
     )
     # Live driver selection must not wait for, or be rolled back by, queued disk writes.

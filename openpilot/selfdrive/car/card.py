@@ -92,6 +92,7 @@ class Car:
     self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks'] + ['carParamsSP', 'carStateSP'])
 
     self.can_rcv_cum_timeout_counter = 0
+    self.nap_last_valid_follow_timestamp = 0
 
     self.CC_prev = car.CarControl.new_message()
     self.CS_prev = car.CarState.new_message()
@@ -281,6 +282,10 @@ class Car:
     cs_send.carState = CS
     cs_send.carState.canErrorCounter = self.can_rcv_cum_timeout_counter
     cs_send.carState.cumLagMs = -self.rk.remaining * 1000.
+    if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP":
+      if cs_send.valid and 1 <= CS.napStalkFollowDistance <= 7:
+        self.nap_last_valid_follow_timestamp = cs_send.logMonoTime
+      cs_send.carState.napStalkFollowDistanceValidTimestamp = self.nap_last_valid_follow_timestamp
     self.pm.send('carState', cs_send)
 
     if RD is not None:
