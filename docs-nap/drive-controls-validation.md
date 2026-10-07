@@ -76,6 +76,7 @@ The radar overlay is farther right and reserves space for driver monitoring. Lar
 - Run opendbc model shards against the matching NotAutopilot parent branch and install their dependencies into that parent's virtual environment.
 - Collect shared safety tests only through configured variants, preserving the common angle-steering and MADS checks.
 - Preserve full unittest safety coverage and add the plain pytest radar suites. Remove unregistered callbacks and unreachable/write-only Pre-AP code rather than excluding it from coverage; the line-coverage requirement remains 100%.
+- Import replay's conversion helper directly rather than through `card`. The indirect import froze replay mode before the child environment was installed, mixing host monotonic time with recorded CAN time in GM steering transmission checks.
 
 ## Verification performed
 
@@ -91,9 +92,11 @@ The radar overlay is farther right and reserves space for driver monitoring. Lar
 - Complete safety gate: 8,857 unittest cases ran with 976 skipped, plus 25 passing radar pytest cases. All **3,099 measured lines have 100% coverage**, without lowering the threshold or adding exclusions.
 - Actual picker/native-Params/native-MPC smoke: delayed planner receipt selected 7 with 1.9-second headway; physical out-and-back movement restored 3 with 1.1-second headway. An unavailable-dial tap selected 7, then a valid return missed by both consumers restored 3 through the publisher's retained metadata. Production picker images show the settled selections.
 - Direct boundary smoke: both `handsOnPaused` values survive cereal-to-Python conversion. Standalone and integrated radar constructors retain explicit sunnypilot settings, use separate default settings when omitted, and leave the shared base constructor unchanged.
-- Complete shared-route replay: all 66 candidate outputs matched pre-feature parent `b688860729d5c9c1510f4902963ee119d6082040` with unchanged comparator settings. Both revisions differed from upstream reference `3323aafb5422cee72653206dc83a56e66c61799d`; the approved naponsp-specific reference set preserves all streams, including `carStateSP`. The matrix's Tesla route is Model Y, not Pre-AP.
-- Replay against the published `NotAutopilot/ci-artifacts` `process-replay-naponsp` endpoint and checked-in baseline pin passed all 66 cases at parent `f9e7386f3c`, without changing comparator settings or omitting streams.
-- Full local parent unit run at `5758742aa2`: **1,896 passed, 81 skipped, 1 xfailed, 90 subtests passed; 1 failed**. The remaining failure was the unchanged Qt-dependent PlotJuggler demo timing out on the host. The test was not skipped or relaxed; remote CI remains a separate required result.
+- Initial local shared-route replay matched all 66 pre-feature outputs, but hosted CI exposed a clock-domain error in the harness's eager `card` import. Those initial GM/card results depended on host uptime and are not a valid deterministic reference.
+- With the import corrected, all 66 candidate outputs matched unchanged pre-feature parent `b688860729d5c9c1510f4902963ee119d6082040` run with `REPLAY=1` set before startup. Only GM/card differs from the initially published reference set. Comparator settings and all streams, including `carStateSP`, are unchanged. The matrix's Tesla route is Model Y, not Pre-AP.
+- Complete replay against immutable artifact commit `cf63d45d9e26d55172f8bfc65664bf2d855833bc` passed all 66 cases after the harness correction. The artifact commit replaces only the baseline GM/card output; ordinary NAP references are untouched.
+- Hosted parent run [37547551269](https://github.com/NotAutopilot/openpilot/actions/runs/37547551269) passed unit tests, static analysis, Tesla Pre-AP regressions, release and macOS builds, and UI reporting. Replay completed 66 cases and failed only GM/card, leading to the clock correction above. Hosted opendbc run [37547529582](https://github.com/NotAutopilot/opendbc/actions/runs/37547529582) passed all nine enabled jobs.
+- Full local parent unit run at `5758742aa2`: **1,896 passed, 81 skipped, 1 xfailed, 90 subtests passed; 1 failed**. The unchanged Qt-dependent PlotJuggler demo timed out on the host. The test was not skipped or relaxed; the subsequent hosted full unit-test job passed.
 
 Not performed: deployment, road driving, or an instrument-cluster hardware test. Skipped and deselected tests are not counted as passing.
 
