@@ -26,7 +26,7 @@ from openpilot.common.timeout import Timeout
 from openpilot.common.realtime import DT_CTRL
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.system.manager.process_config import managed_processes
-from openpilot.selfdrive.car.helpers import convert_to_capnp
+from openpilot.selfdrive.car.card import convert_to_capnp
 from openpilot.selfdrive.test.process_replay.vision_meta import meta_from_camera_state, available_streams
 from openpilot.selfdrive.test.process_replay.migration import migrate_all
 from openpilot.selfdrive.test.process_replay.capture import ProcessOutputCapture
