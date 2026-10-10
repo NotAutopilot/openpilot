@@ -13,6 +13,7 @@ from openpilot.common.realtime import config_realtime_process, Priority, Ratekee
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
 
 from opendbc.car import DT_CTRL, structs
+from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
 from opendbc.car.carlog import carlog
 from opendbc.car.fw_versions import ObdCallback
@@ -20,7 +21,7 @@ from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.tesla.values import CAR
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
-from openpilot.selfdrive.car.cruise import VCruiseHelper
+from openpilot.selfdrive.car.cruise import VCruiseHelper, V_CRUISE_UNSET
 from openpilot.selfdrive.car.helpers import convert_carControlSP, convert_to_capnp
 
 from openpilot.sunnypilot.mads.helpers import set_alternative_experience, set_car_specific_params
@@ -92,7 +93,6 @@ class Car:
     self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks'] + ['carParamsSP', 'carStateSP'])
 
     self.can_rcv_cum_timeout_counter = 0
-    self.nap_last_valid_follow_timestamp = 0
 
     self.CC_prev = car.CarControl.new_message()
     self.CS_prev = car.CarState.new_message()
@@ -248,11 +248,29 @@ class Car:
     if can_rcv_valid and REPLAY:
       self.can_log_mono_time = messaging.log_from_bytes(can_strs[0]).logMonoTime
 
-    self.v_cruise_helper.update_speed_limit_assist(self.is_metric, self.sm['longitudinalPlanSP'])
-    self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric)
-    if self.sm['carControl'].enabled and not self.CC_prev.enabled:
-      # Use CarState w/ buttons from the step selfdrived enables on
-      self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.experimental_mode, self.dynamic_experimental_control)
+    preap_software_cruise = (
+      self.CP.brand == "tesla"
+      and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP"
+      and self.CP.openpilotLongitudinalControl
+      and not self.CP.pcmCruise
+    )
+
+    if not preap_software_cruise:
+      self.v_cruise_helper.update_speed_limit_assist(self.is_metric, self.sm['longitudinalPlanSP'])
+      self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric)
+      if self.sm['carControl'].enabled and not self.CC_prev.enabled:
+        # Use CarState w/ buttons from the step selfdrived enables on
+        self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.experimental_mode, self.dynamic_experimental_control)
+    elif getattr(CS, "enableLongControl", False):
+      # NAP FSM owns set-speed via pedal_speed_kph once long is requested.
+      preap_v_cruise_kph = float(CS.cruiseState.speed * CV.MS_TO_KPH)
+      self.v_cruise_helper.v_cruise_kph_last = self.v_cruise_helper.v_cruise_kph
+      self.v_cruise_helper.v_cruise_kph = preap_v_cruise_kph
+      self.v_cruise_helper.v_cruise_cluster_kph = preap_v_cruise_kph
+    else:
+      self.v_cruise_helper.v_cruise_kph_last = self.v_cruise_helper.v_cruise_kph
+      self.v_cruise_helper.v_cruise_kph = V_CRUISE_UNSET
+      self.v_cruise_helper.v_cruise_cluster_kph = V_CRUISE_UNSET
 
     # TODO: mirror the carState.cruiseState struct?
     CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
@@ -282,10 +300,6 @@ class Car:
     cs_send.carState = CS
     cs_send.carState.canErrorCounter = self.can_rcv_cum_timeout_counter
     cs_send.carState.cumLagMs = -self.rk.remaining * 1000.
-    if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP":
-      if cs_send.valid and 1 <= CS.napStalkFollowDistance <= 7:
-        self.nap_last_valid_follow_timestamp = cs_send.logMonoTime
-      cs_send.carState.napStalkFollowDistanceValidTimestamp = self.nap_last_valid_follow_timestamp
     self.pm.send('carState', cs_send)
 
     if RD is not None:

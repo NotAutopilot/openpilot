@@ -85,16 +85,10 @@ class HudRenderer(Widget):
     car_state = sm['carState']
 
     v_cruise_cluster = car_state.vCruiseCluster
-    cp = ui_state.CP
-    preap_zero_target = (
-      cp is not None and cp.brand == "tesla" and cp.carFingerprint == "TESLA_MODEL_S_PREAP"
-      and cp.openpilotLongitudinalControl and not cp.pcmCruise
-      and car_state.cruiseState.speed == 0.0 and car_state.vCruise == 0.0 and v_cruise_cluster == 0.0
-    )
     self.set_speed = (
-      controls_state.deprecated.vCruise if v_cruise_cluster == 0.0 and not preap_zero_target else v_cruise_cluster
+      controls_state.deprecated.vCruise if v_cruise_cluster == 0.0 else v_cruise_cluster
     )
-    self.is_cruise_set = preap_zero_target or 0 < self.set_speed < SET_SPEED_NA
+    self.is_cruise_set = 0 < self.set_speed < SET_SPEED_NA
     self.is_cruise_available = self.set_speed != -1
 
     if self.is_cruise_set and not ui_state.is_metric:

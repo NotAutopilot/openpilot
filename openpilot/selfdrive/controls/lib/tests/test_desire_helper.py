@@ -1,4 +1,3 @@
-from openpilot.cereal import log
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.controls.lib.desire_helper import (
@@ -110,98 +109,6 @@ def test_wheel_nudge_starts_lane_change():
   dh.update(_nudge_left(), True, 0.0)
 
   assert dh.lane_change_state == LaneChangeState.laneChangeStarting
-
-
-def test_nudge_during_hands_pause_is_remembered_without_command_desire():
-  dh = DesireHelper()
-  _arm_left(dh)
-  dh.update(_nudge_left(), False, 0.0, hands_on_paused=True)
-  assert dh.lane_change_state == LaneChangeState.preLaneChange
-  assert dh.desire == log.Desire.none
-  for _ in range(int(1.1 / DT_MDL)):
-    dh.update(FakeCarState(left=True), False, 0.0, hands_on_paused=True)
-    assert dh.lane_change_state == LaneChangeState.preLaneChange
-    assert dh.desire == log.Desire.none
-  dh.update(FakeCarState(left=True), True, 0.0)
-  assert dh.lane_change_state == LaneChangeState.laneChangeStarting
-
-
-def test_hands_pause_freezes_maneuver_progress_but_not_timeout():
-  dh = DesireHelper()
-  _arm_left(dh)
-  dh.update(_nudge_left(), True, 0.0)
-  prob = dh.lane_change_ll_prob
-  dh.update(FakeCarState(left=True), False, 0.0, hands_on_paused=True)
-  assert dh.lane_change_state == LaneChangeState.laneChangeStarting
-  assert dh.lane_change_ll_prob == prob
-  assert dh.desire == log.Desire.none
-  for _ in range(int(11 / DT_MDL)):
-    dh.update(FakeCarState(left=True), False, 0.0, hands_on_paused=True)
-  assert dh.lane_change_state == LaneChangeState.off
-
-
-def test_blindspot_cancels_frozen_maneuver_during_pause_or_on_resume():
-  for phase in (LaneChangeState.laneChangeStarting, LaneChangeState.laneChangeFinishing):
-    for right in (False, True):
-      for occupied_on_resume in (False, True):
-        dh = DesireHelper()
-        direction = LaneChangeDirection.right if right else LaneChangeDirection.left
-        clear = FakeCarState(left=not right, right=right)
-        dh.update(FakeCarState(), True, 0.0)
-        dh.update(clear, True, 0.0)
-        nudge = FakeCarState(left=not right, right=right, steering_pressed=True, steering_torque=-1.0 if right else 1.0)
-        dh.update(nudge, True, 0.0)
-        if phase == LaneChangeState.laneChangeFinishing:
-          _tick(dh, clear, n=int(0.6 / DT_MDL))
-        assert dh.lane_change_state == phase
-        assert dh.lane_change_direction == direction
-        dh.update(clear, False, 0.0, hands_on_paused=True)
-        occupied = FakeCarState(left=not right, right=right, left_blindspot=not right, right_blindspot=right)
-        dh.update(occupied, occupied_on_resume, 0.0, hands_on_paused=not occupied_on_resume)
-        assert dh.lane_change_state == LaneChangeState.off
-        assert dh.desire == log.Desire.none
-        assert dh.queued_changes == 0
-        dh.update(clear, True, 0.0)
-        assert dh.lane_change_state == LaneChangeState.off
-
-
-def test_lost_hands_pause_reason_cancels_retained_nudge():
-  # A hard disable, brake pause, or stale state is NOT hands_on_paused.
-  dh = DesireHelper()
-  _arm_left(dh)
-  dh.update(_nudge_left(), False, 0.0, hands_on_paused=True)
-  dh.update(FakeCarState(left=True), False, 0.0)
-  dh.update(FakeCarState(left=True), True, 0.0)
-  assert dh.lane_change_state == LaneChangeState.off
-  assert dh.queued_changes == 0
-
-
-def test_blindspot_invalidates_nudge_during_pause():
-  dh = DesireHelper()
-  _arm_left(dh)
-  dh.update(_nudge_left(), False, 0.0, hands_on_paused=True)
-  dh.update(FakeCarState(left=True, left_blindspot=True), False, 0.0, hands_on_paused=True)
-  dh.update(FakeCarState(left=True), True, 0.0)
-  assert dh.lane_change_state == LaneChangeState.preLaneChange
-  dh.update(_nudge_left(), True, 0.0)
-  assert dh.lane_change_state == LaneChangeState.laneChangeStarting
-
-
-def test_opposite_tap_cancels_nudge_during_hands_pause():
-  dh = DesireHelper()
-  _arm_left(dh)
-  dh.update(_nudge_left(), False, 0.0, hands_on_paused=True)
-  dh.update(FakeCarState(left=True, lever=2), False, 0.0, hands_on_paused=True)
-  dh.update(FakeCarState(left=True), True, 0.0)
-  assert dh.lane_change_state == LaneChangeState.off
-
-
-def test_pause_without_nudge_does_not_start_lane_change():
-  dh = DesireHelper()
-  _arm_left(dh)
-  dh.update(FakeCarState(left=True), False, 0.0, hands_on_paused=True)
-  dh.update(FakeCarState(left=True), True, 0.0)
-  assert dh.lane_change_state == LaneChangeState.preLaneChange
 
 
 def test_opposite_lever_tap_cancels_while_arming():

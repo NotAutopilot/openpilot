@@ -16,8 +16,6 @@ class _ManeuverParams:
     self.nap_follow_dist = nap_follow_dist
 
   def get(self, key, return_default=False):
-    if key in ("CurrentRoute", "NAPFollowDistanceRequest"):
-      return None
     assert return_default
     assert key == "NAPFollowDistance"
     return self.nap_follow_dist
@@ -26,11 +24,6 @@ class _ManeuverParams:
   def get_bool(key):
     assert key == "NAPAdaptiveAccel"
     return False
-
-
-class _PlannerInputs(dict):
-  alive = {"carState": True}
-  valid = {"carState": True}
 
 
 class Plant:
@@ -169,19 +162,16 @@ class Plant:
     car_control.carControl.orientationNED = [0., float(pitch), 0.]
 
     # ******** get controlsState messages for plotting ***
-    sm = _PlannerInputs({
-      'radarState': radar.radarState,
-      'carState': car_state.carState,
-      'carControl': car_control.carControl,
-      'controlsState': control.controlsState,
-      'selfdriveState': ss.selfdriveState,
-      'liveParameters': lp.liveParameters,
-      'modelV2': model.modelV2,
-      'carStateSP': car_state_sp.carStateSP,
-      'liveMapDataSP': live_map_data_sp.liveMapDataSP,
-      'gpsLocation': gps_data.gpsLocation,
-    })
-    sm.logMonoTime = {'carState': car_state.logMonoTime}
+    sm = {'radarState': radar.radarState,
+          'carState': car_state.carState,
+          'carControl': car_control.carControl,
+          'controlsState': control.controlsState,
+          'selfdriveState': ss.selfdriveState,
+          'liveParameters': lp.liveParameters,
+          'modelV2': model.modelV2,
+          'carStateSP': car_state_sp.carStateSP,
+          'liveMapDataSP': live_map_data_sp.liveMapDataSP,
+          'gpsLocation': gps_data.gpsLocation}
     self.planner.update(sm)
     self.acceleration = self.planner.output_a_target
     if self.planner.output_should_stop:

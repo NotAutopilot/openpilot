@@ -38,8 +38,6 @@ class VCruiseHelper(VCruiseHelperSP):
     self.v_cruise_kph_last = 0
     self.button_timers = {ButtonType.decelCruise: 0, ButtonType.accelCruise: 0}
     self.button_change_states = {btn: {"standstill": False, "enabled": False} for btn in self.button_timers}
-    self.preap_software_cruise = (CP.brand == "tesla" and CP.carFingerprint == "TESLA_MODEL_S_PREAP"
-                                  and CP.openpilotLongitudinalControl and not CP.pcmCruise)
 
   @property
   def v_cruise_initialized(self):
@@ -47,14 +45,6 @@ class VCruiseHelper(VCruiseHelperSP):
 
   def update_v_cruise(self, CS, enabled, is_metric):
     self.v_cruise_kph_last = self.v_cruise_kph
-    if self.preap_software_cruise:
-      # The stalk FSM owns the retained manual ceiling, not engagement state.
-      # Native SP planner arbitration applies SCC/SLA below that ceiling without
-      # feeding the effective target back into the driver's resume setting.
-      target = CS.cruiseState.speed
-      self.v_cruise_kph = target * CV.MS_TO_KPH if target >= 0 else V_CRUISE_UNSET
-      self.v_cruise_cluster_kph = self.v_cruise_kph
-      return
 
     self.get_minimum_set_speed(is_metric)
 
@@ -149,8 +139,8 @@ class VCruiseHelper(VCruiseHelperSP):
         self.button_change_states[b.type.raw] = {"standstill": CS.cruiseState.standstill, "enabled": enabled}
 
   def initialize_v_cruise(self, CS, experimental_mode: bool, dynamic_experimental_control: bool) -> None:
-    # Initializing is handled by the PCM or the Pre-AP stalk FSM.
-    if self.CP.pcmCruise or self.preap_software_cruise:
+    # initializing is handled by the PCM
+    if self.CP.pcmCruise:
       return
 
     initial_experimental_mode = experimental_mode and not dynamic_experimental_control

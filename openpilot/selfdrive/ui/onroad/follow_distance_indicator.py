@@ -34,8 +34,6 @@ _WHEELS = ((0.28, 0.70), (0.80, 0.70))
 # Picker taps never appear on STW DTR. Hold until the physical wheel actually moves.
 _pending_tap: int | None = None
 _wheel_at_tap: int = 0
-_wheel_timestamp_at_tap: int = 0
-_carstate_at_tap: int = 0
 _force_show: bool = False
 _last_wheel: int = 0
 _selection_started_frame: int | None = None
@@ -57,53 +55,22 @@ def live_stalk_follow_distance(sm) -> int:
   return 0
 
 
-def live_stalk_follow_timestamp(sm) -> int:
-  return int(sm["carState"].napStalkFollowDistanceTimestamp)
-
-
-def live_stalk_follow_valid_timestamp(sm) -> int:
-  return int(sm["carState"].napStalkFollowDistanceValidTimestamp)
-
-
-def note_follow_distance_tap(distance: int, wheel: int, wheel_timestamp_ns: int, carstate_mono_time: int) -> None:
+def note_follow_distance_tap(distance: int, wheel: int = 0) -> None:
   """Flash the overlay for a GUI tap until a new physical detent arrives."""
-  global _pending_tap, _wheel_at_tap, _wheel_timestamp_at_tap, _carstate_at_tap, _force_show
+  global _pending_tap, _wheel_at_tap, _force_show
   value = int(distance)
   if not (FOLLOW_DISTANCE_MIN <= value <= FOLLOW_DISTANCE_MAX):
     return
   _sync_selection_epoch()
   _pending_tap = value
   _wheel_at_tap = int(wheel) if FOLLOW_DISTANCE_MIN <= int(wheel) <= FOLLOW_DISTANCE_MAX else 0
-  _wheel_timestamp_at_tap = wheel_timestamp_ns
-  _carstate_at_tap = carstate_mono_time
   _force_show = True
 
 
-def request_follow_distance(distance: int, wheel: int, wheel_timestamp_ns: int, carstate_mono_time: int, params) -> None:
-  """Persist the picker value and separately identify this drive's live request."""
-  if not FOLLOW_DISTANCE_MIN <= distance <= FOLLOW_DISTANCE_MAX:
-    return
-  route = None
-  if ui_state.started:
-    route = params.get("CurrentRoute")
-    if route:
-      params.put("NAPFollowDistanceRequest", {
-        "distance": distance, "wheel": wheel, "wheelTimestampNs": wheel_timestamp_ns,
-        "carStateMonoTime": carstate_mono_time, "timestampNs": time.monotonic_ns(), "route": route,
-      })
-  params.put("NAPFollowDistance", distance)
-  # Without a drive identity, save the fallback but do not pretend the planner
-  # accepted a live override.
-  if not ui_state.started or route:
-    note_follow_distance_tap(distance, wheel, wheel_timestamp_ns, carstate_mono_time)
-
-
 def reset_follow_distance_tap() -> None:
-  global _pending_tap, _wheel_at_tap, _wheel_timestamp_at_tap, _carstate_at_tap, _force_show, _last_wheel, _selection_started_frame
+  global _pending_tap, _wheel_at_tap, _force_show, _last_wheel, _selection_started_frame
   _pending_tap = None
   _wheel_at_tap = 0
-  _wheel_timestamp_at_tap = 0
-  _carstate_at_tap = 0
   _force_show = False
   _last_wheel = 0
   _selection_started_frame = None
@@ -115,8 +82,8 @@ def pop_forced_follow_distance_show() -> bool:
   return forced
 
 
-def selected_follow_distance(wheel: int, wheel_timestamp_ns: int, valid_timestamp_ns: int) -> int:
-  """Producer detents and valid returns win even if intermediate samples were missed."""
+def selected_follow_distance(wheel: int) -> int:
+  """New 1..7 detent wins; same-wheel samples leave a pending GUI tap in place."""
   global _pending_tap, _wheel_at_tap, _last_wheel
   _sync_selection_epoch()
   wheel_value = int(wheel)
@@ -124,9 +91,8 @@ def selected_follow_distance(wheel: int, wheel_timestamp_ns: int, valid_timestam
   if wheel_live:
     _last_wheel = wheel_value
   if _pending_tap is not None:
-    detent_changed = wheel_timestamp_ns > _wheel_timestamp_at_tap
-    wheel_returned = _wheel_at_tap == 0 and valid_timestamp_ns > _carstate_at_tap
-    if not (detent_changed or wheel_returned):
+    detent_changed = wheel_live and (_wheel_at_tap == 0 or wheel_value != _wheel_at_tap)
+    if not detent_changed:
       return _pending_tap
     _pending_tap = None
     _wheel_at_tap = 0
@@ -141,8 +107,7 @@ def follow_distance_overlay_rect(content: rl.Rectangle) -> rl.Rectangle:
   height = 40.0 if compact else 88.0
   width = min(width, max(0.0, content.width * 0.52))
   height = min(height, max(0.0, content.height * 0.26))
-  # Keep feedback in the middle-lower view, not against the bottom controls.
-  bottom = content.y + content.height * 0.62
+  bottom = content.y + content.height
   if getattr(ui_state, "radar_hud", False):
     bottom = min(bottom, radar_hud_rect(content).y)
   margin = 6.0 if compact else 18.0
@@ -261,8 +226,7 @@ class FollowDistanceIndicator:
       self._reset()
       self._started_frame = ui_state.started_frame
 
-    selected = selected_follow_distance(live_stalk_follow_distance(ui_state.sm), live_stalk_follow_timestamp(ui_state.sm),
-                                        live_stalk_follow_valid_timestamp(ui_state.sm))
+    selected = selected_follow_distance(live_stalk_follow_distance(ui_state.sm))
     if pop_forced_follow_distance_show():
       self._have_sample = True
       self._last = 0

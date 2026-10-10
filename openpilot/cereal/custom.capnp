@@ -15,8 +15,6 @@ struct ModularAssistiveDrivingSystem {
   enabled @1 :Bool;
   active @2 :Bool;
   available @3 :Bool;
-  # Retain lane-change intent only for a fresh, hands-only steering pause.
-  handsOnPaused @4 :Bool;
 
   enum ModularAssistiveDrivingSystemState {
     disabled @0;

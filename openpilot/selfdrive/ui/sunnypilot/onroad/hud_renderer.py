@@ -4,10 +4,8 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
-import math
 import pyray as rl
 
-from openpilot.cereal import custom
 from openpilot.common.constants import CV
 from openpilot.selfdrive.ui.mici.onroad.torque_bar import TorqueBar
 from openpilot.selfdrive.ui.sunnypilot.onroad.developer_ui import DeveloperUiRenderer, DeveloperUiState, get_bottom_dev_ui_offset
@@ -45,10 +43,8 @@ class HudRendererSP(HudRenderer):
     self.icbm_active_counter: int = 0
     self.speed_cluster: float = 0.0
     self.speed_conv: float = CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH
-    self.effective_set_speed: float | None = None
 
   def _update_state(self) -> None:
-    self.effective_set_speed = None
     if ui_state.sm.recv_frame["carState"] < ui_state.started_frame:
       return
 
@@ -58,33 +54,12 @@ class HudRendererSP(HudRenderer):
     self.speed_cluster = ui_state.sm['carState'].cruiseState.speedCluster * self.speed_conv
 
     super()._update_state()
-    self._update_cruise_target()
     self.road_name_renderer.update()
     self.speed_limit_renderer.update()
     self.smart_cruise_control_renderer.update()
     self.turn_signal_controller.update()
     self.circular_alerts_renderer.update()
     self.speed_renderer.update()
-
-  def _update_cruise_target(self) -> None:
-    sm = ui_state.sm
-    cp = ui_state.CP
-    sources = custom.LongitudinalPlanSP.LongitudinalPlanSource
-    if (cp is None or cp.brand != "tesla" or cp.carFingerprint != "TESLA_MODEL_S_PREAP"
-        or not cp.openpilotLongitudinalControl or cp.pcmCruise or not self.is_cruise_set):
-      return
-    services = ["carState", "carControl", "longitudinalPlanSP"]
-    if not sm.all_checks(service_list=services) or any(sm.recv_frame[s] < ui_state.started_frame for s in services):
-      return
-    cc = sm['carControl']
-    plan = sm['longitudinalPlanSP']
-    if (not sm['carState'].enableLongControl or not cc.longActive or cc.cruiseControl.override
-        or plan.longitudinalPlanSource not in (sources.sccVision, sources.sccMap, sources.speedLimitAssist)):
-      return
-    # This is the very target fed to MPC, not an independently chosen SCC badge.
-    target = plan.vTarget * self.speed_conv
-    if math.isfinite(target) and 0 <= target < self.set_speed:
-      self.effective_set_speed = target
 
   def _get_icbm_status(self):
     if not self.pcm_cruise_speed and ui_state.sm['carControl'].enabled:
@@ -124,18 +99,11 @@ class HudRendererSP(HudRenderer):
           max_color = COLORS.DISENGAGED
         elif ui_state.status == UIStatus.OVERRIDE:
           max_color = COLORS.OVERRIDE
-      if self.effective_set_speed is not None:
-        set_speed_color = COLORS.ENGAGED
-        max_color = COLORS.ENGAGED
 
     max_str_size = 60 if self.show_icbm_status else 40
     max_str_y = 15 if self.show_icbm_status else 27
 
     max_text = str(round(self.speed_cluster)) if self.show_icbm_status else tr("MAX")
-    if self.effective_set_speed is not None:
-      max_text = f"{tr('MAX')} {round(self.set_speed)}"
-      max_str_size = 32
-      max_str_y = 27
     max_text_width = measure_text_cached(self._font_semi_bold, max_text, max_str_size).x
     rl.draw_text_ex(
       self._font_semi_bold,
@@ -146,8 +114,7 @@ class HudRendererSP(HudRenderer):
       max_color,
     )
 
-    display_speed = self.set_speed if self.effective_set_speed is None else self.effective_set_speed
-    set_speed_text = CRUISE_DISABLED_CHAR if not self.is_cruise_set else str(round(display_speed))
+    set_speed_text = CRUISE_DISABLED_CHAR if not self.is_cruise_set else str(round(self.set_speed))
     speed_text_width = measure_text_cached(self._font_bold, set_speed_text, FONT_SIZES.set_speed).x
     rl.draw_text_ex(
       self._font_bold,

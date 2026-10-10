@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import math
-import time
 import numpy as np
 
 import openpilot.cereal.messaging as messaging
@@ -98,13 +97,6 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.active_nap_follow_dist = self.nap_follow_dist if self._is_preap and self.nap_follow_dist in NAP_FOLLOW_DISTANCE_RANGE else None
     self.t_follow = get_T_FOLLOW(nap_follow_dist=self.active_nap_follow_dist)
     self._frame = 0
-    self._nap_route = self._params.get("CurrentRoute") if self._is_preap else None
-    self._nap_started_ns = time.monotonic_ns()
-    self._nap_last_detent_ns = 0
-    self._nap_last_wheel = 0
-    self._nap_last_request_ns = 0
-    self._nap_follow_request = None
-    self._nap_follow_override: tuple[int, int, int] | None = None
 
     self.a_desired = init_a
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
@@ -122,15 +114,6 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     if self._is_preap and self._frame % 20 == 0:
       self.nap_follow_dist = self._params.get("NAPFollowDistance", return_default=True)
       self.nap_adaptive_accel = self._params.get_bool("NAPAdaptiveAccel")
-      self._nap_follow_request = self._params.get("NAPFollowDistanceRequest")
-      route = self._params.get("CurrentRoute")
-      if route != self._nap_route:
-        self._nap_route = route
-        self._nap_started_ns = time.monotonic_ns()
-        self._nap_last_detent_ns = 0
-        self._nap_last_wheel = 0
-        self._nap_last_request_ns = 0
-        self._nap_follow_override = None
 
     if len(sm['carControl'].orientationNED) == 3:
       accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])
@@ -182,16 +165,7 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     if force_slow_decel:
       v_cruise = 0.0
 
-    # Live detents take effect now; only an explicit, newer GUI request may
-    # override an unchanged dial. Disk persistence is never a live request.
-    self.active_nap_follow_dist = (
-      self._select_nap_follow_distance(
-        sm['carState'].napStalkFollowDistance if sm.alive['carState'] and sm.valid['carState'] else 0,
-        sm['carState'].napStalkFollowDistanceTimestamp, sm['carState'].napStalkFollowDistanceValidTimestamp,
-        sm.logMonoTime['carState'], time.monotonic_ns(),
-      )
-      if self._is_preap else None
-    )
+    self.active_nap_follow_dist = self.nap_follow_dist if self._is_preap and self.nap_follow_dist in NAP_FOLLOW_DISTANCE_RANGE else None
     self.t_follow = get_T_FOLLOW(sm['selfdriveState'].personality, self.active_nap_follow_dist)
 
     # Pre-AP adaptive accel: only limit accel when the lead's obstacle-equivalent
@@ -244,47 +218,6 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
       accel_clip[idx] = np.clip(accel_clip[idx], self.prev_accel_clip[idx] - 0.05, self.prev_accel_clip[idx] + 0.05)
     self.output_a_target = np.clip(output_a_target, accel_clip[0], accel_clip[1])
     self.prev_accel_clip = accel_clip
-
-  def _select_nap_follow_distance(self, live: int, detent_ns: int, valid_ns: int, carstate_ns: int, now_ns: int) -> int | None:
-    current_wheel = live if live in NAP_FOLLOW_DISTANCE_RANGE else 0
-    wheel_returned = (
-      self._nap_follow_override is not None
-      and self._nap_follow_override[1] == 0 and valid_ns > self._nap_follow_override[2]
-    )
-    if detent_ns > self._nap_last_detent_ns or wheel_returned:
-      self._nap_follow_override = None
-    self._nap_last_detent_ns = max(self._nap_last_detent_ns, detent_ns)
-    if current_wheel:
-      self._nap_last_wheel = current_wheel
-
-    request = self._nap_follow_request
-    if isinstance(request, dict) and self._nap_route and request.get("route") == self._nap_route:
-      distance = request.get("distance")
-      wheel = request.get("wheel")
-      timestamp_ns = request.get("timestampNs")
-      wheel_timestamp_ns = request.get("wheelTimestampNs")
-      request_carstate_ns = request.get("carStateMonoTime")
-      if (type(distance) is int and distance in NAP_FOLLOW_DISTANCE_RANGE
-          and type(wheel) is int and 0 <= wheel <= 7
-          and type(wheel_timestamp_ns) is int and 0 <= wheel_timestamp_ns <= self._nap_last_detent_ns
-          and type(request_carstate_ns) is int and 0 <= request_carstate_ns <= carstate_ns
-          and type(timestamp_ns) is int and self._nap_last_request_ns < timestamp_ns <= now_ns):
-        # The request can arrive before its carState publication, even for SNA
-        # where the physical detent identity did not change.
-        self._nap_last_request_ns = timestamp_ns
-        if (timestamp_ns > max(self._nap_started_ns, self._nap_last_detent_ns)
-            and wheel_timestamp_ns == self._nap_last_detent_ns
-            and (wheel != 0 or request_carstate_ns >= valid_ns)
-            and (wheel == current_wheel or current_wheel == 0 or wheel == 0)):
-          # The producer retains valid returns even when this subscriber misses
-          # them between two unavailable samples. Same-snapshot availability
-          # differences between subscribers do not count as a new valid return.
-          self._nap_follow_override = (distance, wheel, request_carstate_ns)
-
-    selected = self._nap_follow_override[0] if self._nap_follow_override is not None else None
-    if selected is None:
-      selected = self._nap_last_wheel or self.nap_follow_dist
-    return selected if selected in NAP_FOLLOW_DISTANCE_RANGE else None
 
   def publish(self, sm, pm):
     plan_send = messaging.new_message('longitudinalPlan')

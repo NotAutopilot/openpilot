@@ -13,7 +13,7 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   pedal_calibration_entry_block_reason, pedal_calibration_entry_enabled,
 )
 from openpilot.selfdrive.ui.onroad.follow_distance_indicator import (
-  live_stalk_follow_distance, live_stalk_follow_timestamp, live_stalk_follow_valid_timestamp, request_follow_distance, selected_follow_distance,
+  live_stalk_follow_distance, note_follow_distance_tap, selected_follow_distance,
 )
 from openpilot.selfdrive.ui.radar.radar_view import RadarMonitorDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -230,9 +230,6 @@ class NAPLayout(Widget):
     self._add_toggle(NAPParamKeys.RADAR_IGNORE_HW_FAIL, tr("Ignore radar hardware fail"),
                      tr("Let's you engage when Bosch raises HWFail even though tracks are still live."),
                      dest=self._radar_items)
-    self._add_toggle(NAPParamKeys.RADAR_UPSIDE_DOWN, tr("Radar Mounted Upside Down"),
-                     tr("For an inverted radar mount: corrects lateral position and speed before tracking. Upright is the default. Requires reboot."),
-                     enabled=ui_state.is_offroad, needs_reboot=True, dest=self._radar_items)
 
     def on_radar_hud(state):
       self._params.put_bool(NAPParamKeys.RADAR_HUD, state)
@@ -251,12 +248,11 @@ class NAPLayout(Widget):
     self._radar_offset_btn = button_item_sp(
       lambda: tr("Radar Lateral Offset"), self._get_radar_offset_text,
       description=lambda: tr(
-        "Vehicle-frame lateral offset in meters, applied after mounting correction. Positive shifts leads left; "
-        + "negative shifts right. The offset does not flip with the mount. Requires reboot."
+        "Lateral offset in meters added to radar yRel. Negative shifts leads toward the left of current radar "
+        + "reading; positive shifts right. Example: -0.27 for the 3D-printed factory-location mount."
       ),
       callback=self._on_radar_offset_click,
     )
-    self._radar_offset_btn.action_item.set_enabled(ui_state.is_offroad)
     self._radar_items.append(self._radar_offset_btn)
 
     self._radar_vin_keyboard = Keyboard(max_text_size=17)
@@ -343,8 +339,8 @@ class NAPLayout(Widget):
 
   def _on_follow_distance(self, index: int):
     distance = index + 1
-    request_follow_distance(distance, live_stalk_follow_distance(ui_state.sm), live_stalk_follow_timestamp(ui_state.sm),
-                            ui_state.sm.logMonoTime["carState"], self._params)
+    self._params.put(NAPParamKeys.FOLLOW_DISTANCE, distance)
+    note_follow_distance_tap(distance, live_stalk_follow_distance(ui_state.sm))
 
   def _on_pedal_can_bus(self, index: int):
     self._params.put(NAPParamKeys.PEDAL_CAN_BUS, PEDAL_CAN_BUS_VALUES[index])
@@ -436,8 +432,6 @@ class NAPLayout(Widget):
       pass
 
   def _on_radar_offset_click(self):
-    if not ui_state.is_offroad():
-      return
     self._radar_offset_keyboard.reset(min_text_size=1)
     self._radar_offset_keyboard.set_title(tr("Radar Lateral Offset (m)"))
     self._radar_offset_keyboard.set_text(f"{self._get_radar_offset():.2f}")
@@ -445,7 +439,7 @@ class NAPLayout(Widget):
     gui_app.push_widget(self._radar_offset_keyboard)
 
   def _on_radar_offset_submit(self, result: DialogResult):
-    if result != DialogResult.CONFIRM or not ui_state.is_offroad():
+    if result != DialogResult.CONFIRM:
       return
     try:
       value = float((self._radar_offset_keyboard.text or "").strip())
@@ -455,8 +449,7 @@ class NAPLayout(Widget):
     try:
       self._params.put(NAPParamKeys.RADAR_OFFSET, value)
     except Exception:
-      return
-    self._show_reboot_modal()
+      pass
 
   def _confirm_tool(self, tool: str):
     if tool == "calibrate_pedal":
@@ -559,11 +552,7 @@ class NAPLayout(Widget):
     self._radar_epas_buttons.action_item.set_selected_button(max(0, min(4, radar_epas)))
 
   def _refresh_follow_distance(self):
-    selected = (
-      selected_follow_distance(live_stalk_follow_distance(ui_state.sm), live_stalk_follow_timestamp(ui_state.sm),
-                               live_stalk_follow_valid_timestamp(ui_state.sm))
-      if ui_state.started else 0
-    )
+    selected = selected_follow_distance(live_stalk_follow_distance(ui_state.sm)) if ui_state.started else 0
     # Live driver selection must not wait for, or be rolled back by, queued disk writes.
     follow_dist = selected or int(self._params.get(NAPParamKeys.FOLLOW_DISTANCE, return_default=True) or 4)
     self._follow_buttons.action_item.set_selected_button(max(0, min(6, follow_dist - 1)))

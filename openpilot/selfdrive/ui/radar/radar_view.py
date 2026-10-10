@@ -41,8 +41,8 @@ RANGE_RINGS = (
   (80.0, rl.Color(180, 120, 230, 230)),   # orchid
 )
 
-# Compact on-road strip leaves the left side clear for driving/DM controls.
-C4_HUD_W = 300.0
+# C4 on-road strip. Must fit inside 536x240 (content ~476x180 after 30px border).
+C4_HUD_W = 460.0
 C4_HUD_H = 44.0
 # Hidpi on-road panel: plot + chips + tracks table. Slightly bigger than 900x340.
 HIDPI_HUD_W = 980.0
@@ -104,19 +104,20 @@ def is_c4_screen(rect: rl.Rectangle) -> bool:
 
 
 def radar_hud_rect(content: rl.Rectangle) -> rl.Rectangle:
-  """Right-side HUD, reserving the large layout's bottom-corner DM icon."""
+  """On-road HUD that always fits inside `content`.
+
+  C4 536x240 / content ~476x180: 460x44 status strip.
+  Hidpi 2160x1080 / content ~2100x1020: 1200x400 chip + table panel.
+  """
   if is_c4_screen(content):
     margin = 8.0
     w = min(C4_HUD_W, max(0.0, content.width - margin * 2))
     h = min(C4_HUD_H, max(0.0, content.height - margin))
-    return rl.Rectangle(content.x + content.width - w - margin, content.y + content.height - h - margin, w, h)
-  margin_y = 20.0
-  # DM can occupy either bottom corner (LHD/RHD); keep both unobscured.
-  dm_gutter = min(240.0, content.width * 0.15)
-  w = min(HIDPI_HUD_W, max(0.0, content.width - dm_gutter * 2))
-  h = min(HIDPI_HUD_H, max(0.0, content.height - margin_y * 2))
-  return rl.Rectangle(content.x + content.width - dm_gutter - w,
-                      content.y + content.height - h - margin_y, w, h)
+    return rl.Rectangle(content.x + margin, content.y + content.height - h - margin, w, h)
+  margin_x, margin_y = 24.0, 20.0
+  w = min(HIDPI_HUD_W, max(0.0, content.width - margin_x * 2))
+  h = min(HIDPI_HUD_H, max(0.0, content.height - 24.0))
+  return rl.Rectangle(content.x + margin_x, content.y + content.height - h - margin_y, w, h)
 
 
 def _clamp_to_window(rect: rl.Rectangle) -> rl.Rectangle:

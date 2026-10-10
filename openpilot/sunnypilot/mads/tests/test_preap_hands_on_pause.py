@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from typing import Any, cast
 
 from openpilot.cereal import custom, log
@@ -116,64 +116,6 @@ def _step_mads(mads, sd, cs, *, allowed=True, inhibited=False, panda_valid=True,
 
 
 class TestPreAPHandsOnPause(unittest.TestCase):
-  def test_deliberate_entry_with_hands_starts_paused_without_active_frame(self):
-    for safety_param, level in ((11, 3), (8 | (1 << 8), 1), (8 | (3 << 8), 3)):
-      with self.subTest(safety_param=safety_param, level=level):
-        mads, sd = make_mads(safety_param=safety_param)
-        _disengage(mads)
-        _step_mads(mads, sd, FakeCS(hands_on_level=level), inhibited=True, enable=True)
-        self.assertTrue(mads.enabled)
-        self.assertFalse(mads.active)
-        self.assertTrue(mads.hands_on_paused)
-        self.assertEqual(mads.state_machine.state, State.paused)
-        _step_mads(mads, sd, FakeCS(hands_on_level=level), inhibited=True, enable=True)
-        self.assertFalse(mads.active)
-
-  def test_admitted_pause_resumes_only_after_fresh_clear_hold(self):
-    mads, sd = make_mads(safety_param=11)
-    _disengage(mads)
-    with patch("openpilot.sunnypilot.mads.mads.time.monotonic_ns") as now:
-      now.return_value = 0
-      _step_mads(mads, sd, FakeCS(hands_on_level=3), inhibited=True, enable=True)
-      _step_mads(mads, sd, FakeCS(), inhibited=True)
-      now.return_value = (HANDS_ON_RESUME_US - 1) * 1000
-      _step_mads(mads, sd, FakeCS(), inhibited=False)
-      self.assertFalse(mads.active)
-      self.assertTrue(mads.hands_on_paused)
-      now.return_value = HANDS_ON_RESUME_US * 1000
-      _step_mads(mads, sd, FakeCS(), inhibited=False)
-      # Resume event is evaluated before the hands-clear latch is updated.
-      _step_mads(mads, sd, FakeCS(), inhibited=False)
-      self.assertTrue(mads.active)
-      self.assertFalse(mads.hands_on_paused)
-
-  def test_stale_panda_blocks_new_admission_with_hands(self):
-    mads, sd = make_mads()
-    _disengage(mads)
-    _step_mads(mads, sd, FakeCS(hands_on_level=3), inhibited=True, enable=True, panda_valid=False)
-    self.assertFalse(mads.enabled)
-    self.assertFalse(mads.hands_on_paused)
-
-  def test_brake_invalidates_hands_only_reason_without_restoring_commands(self):
-    mads, sd = make_mads()
-    _step_mads(mads, sd, FakeCS(hands_on_level=3), inhibited=True)
-    self.assertTrue(mads.hands_on_paused)
-    cs = FakeCS(hands_on_level=3)
-    cs.brakePressed = True
-    _step_mads(mads, sd, cs, inhibited=True)
-    self.assertFalse(mads.hands_on_paused)
-    self.assertFalse(mads.active)
-
-  def test_terminal_events_invalidate_hands_only_reason(self):
-    for event in (EventName.driverUnresponsive3, EventName.driverDistracted3, EventName.steerUnavailable):
-      with self.subTest(event=event):
-        mads, sd = make_mads()
-        _step_mads(mads, sd, FakeCS(hands_on_level=3), inhibited=True)
-        sd.events.add(event)
-        mads.update(FakeCS(hands_on_level=3))
-        self.assertFalse(mads.hands_on_paused)
-        self.assertFalse(mads.enabled)
-
   def test_hands_on_level_pauses_not_steering_pressed(self):
     mads, sd = make_mads()
     cs = FakeCS(hands_on_level=0, steering_pressed=True)

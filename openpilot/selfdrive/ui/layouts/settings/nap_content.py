@@ -16,7 +16,6 @@ DEFAULTS = {
   NAPParamKeys.RADAR_ENABLED: False,
   NAPParamKeys.RADAR_HUD: False,
   NAPParamKeys.RADAR_IGNORE_HW_FAIL: False,
-  NAPParamKeys.RADAR_UPSIDE_DOWN: False,
   NAPParamKeys.RADAR_OFFSET: 0.0,
   NAPParamKeys.RADAR_DONOR_VIN: "",
   NAPParamKeys.RADAR_EPAS_TYPE: 0,
@@ -34,9 +33,9 @@ PEDAL_CAN_BUS_VALUES = [0, 2]
 FOLLOW_DISTANCE_MIN = 1
 FOLLOW_DISTANCE_MAX = 7
 
-# Radar lateral offset bounds (meters). Added to oriented yRel in
-# radar_interface.py after the upside-down sign. Positive = left; negative = right.
-# Upside-down does not negate this vehicle-frame value.
+# Radar lateral offset bounds (meters). Added to radar yRel in
+# radar_interface.py. Negative = shift toward left; positive = toward right.
+# ~0.27 is typical for the 3D-printed factory-location mount.
 RADAR_OFFSET_MIN = -2.0
 RADAR_OFFSET_MAX = 2.0
 
@@ -62,6 +61,7 @@ CALIBRATE_RADAR_INSTRUCTIONS = """\
 NAP Radar Calibrator
 
 This script displays filtered radar points to help align the Bosch radar.
+
 PRECONDITIONS:
   1. Vehicle must be safely parked
   2. Radar must be properly mounted and connected

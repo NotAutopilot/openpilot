@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - master
-      - naponsp-dev
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -56,7 +55,6 @@ jobs:
           openpilot/selfdrive/car/tests/test_car_specific_tesla_preap.py \
           openpilot/selfdrive/car/tests/test_card_startup_preap.py \
           openpilot/selfdrive/car/tests/test_preap_radar_e2e.py \
-          openpilot/selfdrive/car/tests/test_tesla_preap_params.py \
           openpilot/sunnypilot/mads/tests/ \
           openpilot/sunnypilot/selfdrive/car/tests/ \
           openpilot/sunnypilot/sunnylink/tests/
