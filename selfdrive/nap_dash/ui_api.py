@@ -186,6 +186,10 @@ def _match_choice(value: Any, allowed: list[Any]) -> Any:
 
 
 def _needs_confirm(params, ctrl: dict[str, Any], turning_on: bool, confirm: bool) -> bool:
+  # Force Offroad has no settings confirm on the comma either; its only prompt is
+  # the on-road "Ready to resume steering control?" Yes/No (force_offroad_api).
+  if ctrl.get("writer") == "force_offroad":
+    return False
   if confirm or not ctrl.get("confirm"):
     return False
   if ctrl["kind"] == "action":

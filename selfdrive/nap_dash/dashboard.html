@@ -498,14 +498,15 @@ function renderControl(ctrl) {
 
 function commit(ctrl, value, confirmed) {
   var turningOn = !(value === false || value === 0 || value === "0");
-  if (!confirmed && ctrl.confirm && (ctrl.kind === "action" || turningOn)) {
+  // Force Offroad: no settings confirm; the only prompt is the steering Yes/No.
+  if (!confirmed && ctrl.confirm && ctrl.writer !== "force_offroad" && (ctrl.kind === "action" || turningOn)) {
     askConfirm(ctrl, value);
     return;
   }
   setStatus("Saving…");
   postJSON("/api/set", {param: ctrl.param, value: value, confirm: !!confirmed}, function (err, data) {
     if (err) {
-      if (!confirmed && data && data.error && String(data.error).indexOf("confirmation") >= 0) {
+      if (!confirmed && ctrl.writer !== "force_offroad" && data && data.error && String(data.error).indexOf("confirmation") >= 0) {
         askConfirm(ctrl, value);
         return;
       }
@@ -513,6 +514,7 @@ function commit(ctrl, value, confirmed) {
       return;
     }
     snap = data;
+    if (data && data.force_offroad_ack) foRender(data.force_offroad_ack);
     setStatus("Saved");
     renderMain();
   });
