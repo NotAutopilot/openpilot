@@ -618,7 +618,7 @@ def fetch_and_install(
   cleanup_incomplete(dest, keep_resume=same and bool(zst_hash))
   os.makedirs(stage, exist_ok=True)
   if os.path.isfile(packed) and not os.path.isfile(packed + ".partial"):
-    # A finished zst from a run that died before install: resume (Range → 416) re-uses it.
+    # A finished zst from a run that died before install: resume (Range → 416) reuses it.
     os.replace(packed, packed + ".partial")
   staged = os.path.getsize(packed + ".partial") if os.path.isfile(packed + ".partial") else 0
   if staged:

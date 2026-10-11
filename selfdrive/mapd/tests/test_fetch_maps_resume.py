@@ -8,6 +8,7 @@ import http.server
 import os
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -80,7 +81,7 @@ def test_timeout_mid_stream_retries_and_resumes_with_range(tmp_path, small_budge
   finally:
     srv.close()
   assert n == len(data)
-  assert open(dest, "rb").read() == data
+  assert Path(dest).read_bytes() == data
   assert srv.ranges[0] is None and srv.ranges[1] == "bytes=100000-"
   assert len(sleeps) == 1 and sleeps[0] > 0
   out = capsys.readouterr().out
@@ -106,7 +107,7 @@ def test_error_only_after_all_retries_and_partial_kept(tmp_path, small_budget, c
 
 def test_second_tap_resumes_from_partial_and_installs(tmp_path, small_budget):
   _src, zst = _make_zst(tmp_path)
-  data = open(zst, "rb").read()
+  data = Path(zst).read_bytes()
   sha = hashlib.sha256(data).hexdigest()
   dest = str(tmp_path / "osm" / "speed_limits.sqlite")
   cut = len(data) // 2
@@ -134,7 +135,7 @@ def test_second_tap_resumes_from_partial_and_installs(tmp_path, small_budget):
 
 def test_hash_mismatch_deletes_staged_download(tmp_path, small_budget):
   _src, zst = _make_zst(tmp_path)
-  data = open(zst, "rb").read()
+  data = Path(zst).read_bytes()
   dest = str(tmp_path / "osm" / "speed_limits.sqlite")
   srv = _Server(data)
   try:
@@ -149,7 +150,7 @@ def test_hash_mismatch_deletes_staged_download(tmp_path, small_budget):
 
 def test_partial_for_a_different_asset_is_not_resumed(tmp_path, small_budget):
   _src, zst = _make_zst(tmp_path)
-  data = open(zst, "rb").read()
+  data = Path(zst).read_bytes()
   sha = hashlib.sha256(data).hexdigest()
   dest = str(tmp_path / "osm" / "speed_limits.sqlite")
   stage = staging_dir(dest)
