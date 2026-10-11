@@ -1,7 +1,11 @@
 """Download a prebuilt NAP OSM speed-limit sqlite from a GitHub Release.
 
 Stages on the destination filesystem (not /tmp). US pack peak is the zst plus
-the sqlite.partial before the zst is deleted: ~200 MiB + ~541 MiB.
+the sqlite.partial before the zst is deleted: ~204 MiB + ~570 MiB.
+
+Downloads retry (DOWNLOAD_ATTEMPTS, backoff) and resume with HTTP Range from
+.download/<asset>.partial, also across taps. Only a SHA-256 mismatch throws
+the staged bytes away.
 """
 from __future__ import annotations
 
@@ -11,6 +15,8 @@ import hashlib
 import json
 import os
 import shutil
+import time
+import http.client
 import urllib.error
 import urllib.request
 from urllib.parse import unquote, urlparse
@@ -45,6 +51,21 @@ from openpilot.selfdrive.mapd.osm_db import OsmSpeedLimitDB
 
 CHUNK = 256 * 1024
 STAGING_DIRNAME = ".download"
+# Wi-Fi drops / slow GitHub CDN: retry with backoff and resume via HTTP Range.
+DOWNLOAD_ATTEMPTS = 8
+READ_TIMEOUT_S = 60.0
+BACKOFF_BASE_S = 2.0
+BACKOFF_MAX_S = 30.0
+# Records which zst digest a resumable partial belongs to.
+EXPECT_SUFFIX = ".expect"
+
+
+class HashMismatchError(RuntimeError):
+  pass
+
+
+class _Retryable(Exception):
+  pass
 
 
 def _p(msg: str) -> None:
@@ -264,8 +285,12 @@ def staging_dir(dest: str) -> str:
   return os.path.join(os.path.dirname(os.path.abspath(dest)) or ".", STAGING_DIRNAME)
 
 
-def cleanup_incomplete(dest: str) -> None:
-  """Remove leftover partials/staging from a failed or interrupted fetch."""
+def cleanup_incomplete(dest: str, *, keep_resume: bool = False) -> None:
+  """Remove leftover partials/staging from a failed or interrupted fetch.
+
+  keep_resume keeps the staged download (*.zst.partial / *.zst and its
+  .expect tag) so the next Download US Maps tap resumes with HTTP Range.
+  """
   victims = [dest + ".partial"]
   stage = staging_dir(dest)
   if os.path.isdir(stage):
@@ -274,6 +299,8 @@ def cleanup_incomplete(dest: str) -> None:
     except OSError:
       names = []
     for name in names:
+      if keep_resume and name.endswith((".partial", EXPECT_SUFFIX, ".zst")):
+        continue
       victims.append(os.path.join(stage, name))
   for p in victims:
     try:
@@ -320,10 +347,12 @@ def required_free_bytes(zst_bytes: int | None = None, *, us_pack: bool = True) -
   return max(need, MIN_FREE_BYTES)
 
 
-def assert_free_space(dest: str, zst_bytes: int | None = None, *, us_pack: bool = True) -> int:
+def assert_free_space(dest: str, zst_bytes: int | None = None, *, us_pack: bool = True,
+                      already_staged: int = 0) -> int:
   dest_dir = os.path.dirname(os.path.abspath(dest)) or "."
   os.makedirs(dest_dir, exist_ok=True)
-  free = int(shutil.disk_usage(dest_dir).free)
+  # A resumable partial already sits on this filesystem; it counts toward the budget.
+  free = int(shutil.disk_usage(dest_dir).free) + max(0, int(already_staged))
   need = required_free_bytes(zst_bytes, us_pack=us_pack)
   _p(f"Free on {dest_dir}: {free / (1024 * 1024):.0f} MiB (need {need / (1024 * 1024):.0f} MiB)")
   if free < need:
@@ -339,28 +368,77 @@ def _raise_if_enospc(exc: OSError, dest: str) -> None:
   raise exc
 
 
-def download_url(url: str, dest: str, progress: bool = True) -> int:
-  req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+def _backoff_s(attempt: int) -> float:
+  return min(BACKOFF_MAX_S, BACKOFF_BASE_S * (2 ** max(0, attempt - 1)))
+
+
+def _content_range_start(value: str | None) -> int | None:
+  # "bytes 1000-1999/213762114"
   try:
-    resp_cm = urllib.request.urlopen(req, timeout=60)
+    return int(str(value).split()[1].split("-")[0])
+  except (IndexError, ValueError, AttributeError):
+    return None
+
+
+def _content_range_total(value: str | None) -> int:
+  try:
+    tot = str(value).rsplit("/", 1)[1]
+    return 0 if tot == "*" else int(tot)
+  except (IndexError, ValueError, AttributeError):
+    return 0
+
+
+def _download_once(url: str, tmp: str, progress: bool, timeout: float) -> int:
+  """One HTTP attempt, appending to tmp from its current size. Returns total bytes in tmp.
+
+  Raises _Retryable on timeouts / connection drops / 5xx / 429.
+  """
+  have = os.path.getsize(tmp) if os.path.isfile(tmp) else 0
+  headers = {"User-Agent": USER_AGENT}
+  if have > 0:
+    headers["Range"] = f"bytes={have}-"
+  req = urllib.request.Request(url, headers=headers)
+  try:
+    resp_cm = urllib.request.urlopen(req, timeout=timeout)
   except urllib.error.HTTPError as e:
+    if e.code == 416 and have > 0:
+      # Range starts at/after EOF: the partial is already complete.
+      return have
+    if e.code >= 500 or e.code in (408, 429):
+      raise _Retryable(f"HTTP {e.code}") from e
     raise RuntimeError(
       f"Download failed HTTP {e.code} for {url}. " +
       "Publish the OSM sqlite as a GitHub Release asset (see docs-nap/map-speed.md)."
     ) from e
-  except urllib.error.URLError as e:
-    raise RuntimeError(f"Download failed: {e}. Need Wi-Fi to GitHub.") from e
+  except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as e:
+    raise _Retryable(str(getattr(e, "reason", e))) from e
 
   with resp_cm as resp:
-    total = int(resp.headers.get("Content-Length") or 0)
-    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-    tmp = dest + ".partial"
-    n = 0
-    last = 0
+    status = getattr(resp, "status", None) or resp.getcode()
+    if have > 0 and status == 206 and _content_range_start(resp.headers.get("Content-Range")) == have:
+      mode = "ab"
+      total = _content_range_total(resp.headers.get("Content-Range"))
+      if progress:
+        _p(f"Resuming at {have / 1e6:.1f} MB")
+    else:
+      # Server ignored Range (200) or answered a different range: start over.
+      mode, have = "wb", 0
+      total = int(resp.headers.get("Content-Length") or 0)
+    n = have
+    last = n
+    read = getattr(resp, "read1", None) or resp.read
     try:
-      with open(tmp, "wb") as f:
+      with open(tmp, mode) as f:
         while True:
-          chunk = resp.read(CHUNK)
+          try:
+            # read1: return what has arrived, so a stall keeps every received byte for the resume.
+            chunk = read(CHUNK)
+          except (TimeoutError, ConnectionError, http.client.HTTPException) as e:
+            raise _Retryable(str(e) or type(e).__name__) from e
+          except OSError as e:
+            if e.errno == errno.ENOSPC:
+              raise
+            raise _Retryable(str(e)) from e
           if not chunk:
             break
           f.write(chunk)
@@ -368,15 +446,42 @@ def download_url(url: str, dest: str, progress: bool = True) -> int:
           if progress and (n - last >= 5 * 1024 * 1024 or (total and n == total)):
             _progress("Downloading", n, total)
             last = n
-      os.replace(tmp, dest)
+    except _Retryable:
+      raise
     except OSError as e:
-      try:
-        if os.path.isfile(tmp):
-          os.remove(tmp)
-      except OSError:
-        pass
-      _raise_if_enospc(e, dest)
+      _raise_if_enospc(e, tmp)
+    if total and n < total:
+      raise _Retryable(f"connection closed at {n}/{total} bytes")
     return n
+
+
+def download_url(url: str, dest: str, progress: bool = True, *, attempts: int = DOWNLOAD_ATTEMPTS,
+                 timeout: float = READ_TIMEOUT_S, sleep=time.sleep) -> int:
+  """Download url → dest with retries and HTTP Range resume from dest + '.partial'.
+
+  The partial is kept on failure so a later call (second tap) resumes. Only a
+  hash mismatch (caller) deletes it.
+  """
+  os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+  tmp = dest + ".partial"
+  last_err = ""
+  for attempt in range(1, max(1, attempts) + 1):
+    try:
+      n = _download_once(url, tmp, progress, timeout)
+      os.replace(tmp, dest)
+      return n
+    except _Retryable as e:
+      last_err = str(e) or "connection error"
+      if attempt >= attempts:
+        break
+      wait = _backoff_s(attempt)
+      have = os.path.getsize(tmp) if os.path.isfile(tmp) else 0
+      _p(f"Retrying… ({attempt}) {last_err}; {have / 1e6:.1f} MB kept, next try in {wait:.0f}s")
+      sleep(wait)
+  raise RuntimeError(
+    f"Download failed after {attempts} attempts: {last_err}. Need Wi-Fi to GitHub. " +
+    "Tap Download again to resume."
+  )
 
 
 def _decompress_zst(src: str, dest_partial: str) -> None:
@@ -432,7 +537,7 @@ def _hash_requested(value: str | None) -> str:
 def _verify_sha256(path: str, sha256: str, *, kind: str) -> None:
   got = _sha256_file(path)
   if got.lower() != sha256.lower():
-    raise RuntimeError(f"SHA-256 mismatch for {path} ({kind}): got {got}, expected {sha256}")
+    raise HashMismatchError(f"SHA-256 mismatch for {path} ({kind}): got {got}, expected {sha256}")
 
 
 def install_from_file(
@@ -496,19 +601,34 @@ def fetch_and_install(
 
   dest_dir = os.path.dirname(dest) or "."
   os.makedirs(dest_dir, exist_ok=True)
-  cleanup_incomplete(dest)
-  # Default Settings path (HTTPS + ASSET_SHA256) needs the US-pack budget.
-  # file:// / empty sha256 (tests, Overpass copies) skip the 822 MiB check.
   zst_hash = _hash_requested(sha256)
-  us_pack = not url.startswith("file:") and bool(zst_hash)
-  assert_free_space(dest, us_pack=us_pack)
-
   stage = staging_dir(dest)
-  os.makedirs(stage, exist_ok=True)
   packed_name = os.path.basename(url.split("?", 1)[0]) or ASSET_NAME
   if not packed_name or packed_name in (".", "/"):
     packed_name = ASSET_NAME
   packed = os.path.join(stage, packed_name)
+  # Keep a staged download from an earlier tap only if it is for the same asset.
+  expect = f"{url}\n{zst_hash.lower()}\n"
+  expect_path = packed + EXPECT_SUFFIX
+  try:
+    with open(expect_path, encoding="utf-8") as f:
+      same = f.read() == expect
+  except OSError:
+    same = False
+  cleanup_incomplete(dest, keep_resume=same and bool(zst_hash))
+  os.makedirs(stage, exist_ok=True)
+  if os.path.isfile(packed) and not os.path.isfile(packed + ".partial"):
+    # A finished zst from a run that died before install: resume (Range → 416) re-uses it.
+    os.replace(packed, packed + ".partial")
+  staged = os.path.getsize(packed + ".partial") if os.path.isfile(packed + ".partial") else 0
+  if staged:
+    _p(f"Resuming earlier download ({staged / 1e6:.1f} MB already on device)")
+  with open(expect_path, "w", encoding="utf-8") as f:
+    f.write(expect)
+  # Default Settings path (HTTPS + ASSET_SHA256) needs the US-pack budget.
+  # file:// / empty sha256 (tests, Overpass copies) skip the US-pack check.
+  us_pack = not url.startswith("file:") and bool(zst_hash)
+  assert_free_space(dest, us_pack=us_pack, already_staged=staged)
   prev_tmpdir = os.environ.get("TMPDIR")
   os.environ["TMPDIR"] = stage
 
@@ -529,8 +649,12 @@ def fetch_and_install(
         os.remove(packed)
       except OSError:
         pass
-  except Exception:
+  except HashMismatchError:
+    # Corrupt or stale bytes: the only case that throws the staged download away.
     cleanup_incomplete(dest)
+    raise
+  except Exception:
+    cleanup_incomplete(dest, keep_resume=bool(zst_hash))
     raise
   finally:
     if prev_tmpdir is None:
