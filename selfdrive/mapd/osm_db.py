@@ -108,6 +108,15 @@ class SpeedLimitMatch:
   next_speed_limit_ms: float = 0.0
   next_distance_m: float = 0.0
   coords: tuple[tuple[float, float], ...] = ()
+  # True when the limit is a NAP state-default estimate (no posted maxspeed in OSM).
+  estimated: bool = False
+
+
+def _row_estimated(row) -> bool:
+  try:
+    return bool(row["estimated"])
+  except (IndexError, KeyError):
+    return False
 
 
 def _pack_coords(coords: list[tuple[float, float]]) -> bytes:
@@ -442,7 +451,8 @@ class OsmSpeedLimitDB:
         min_lon REAL NOT NULL,
         max_lon REAL NOT NULL,
         coords BLOB NOT NULL,
-        junction TEXT
+        junction TEXT,
+        estimated INTEGER NOT NULL DEFAULT 0
       );
       CREATE VIRTUAL TABLE ways_rtree USING rtree(
         way_id, min_lat, max_lat, min_lon, max_lon
@@ -491,11 +501,14 @@ class OsmSpeedLimitDB:
     cols = {str(r[1]) for r in con.execute("PRAGMA table_info(ways)")}
     if "junction" not in cols:
       con.execute("ALTER TABLE ways ADD COLUMN junction TEXT")
+    if "estimated" not in cols:
+      # 1 = NAP state-default estimate (MN_169.14 / <ST>_default), 0 = OSM maxspeed.
+      con.execute("ALTER TABLE ways ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0")
 
   @staticmethod
   def insert_way(con: sqlite3.Connection, way_id: int, name: str, highway: str,
                  maxspeed_ms: float, coords: list[tuple[float, float]],
-                 junction: str = "") -> None:
+                 junction: str = "", estimated: bool = False) -> None:
     OsmSpeedLimitDB.ensure_junction_column(con)
     coords = simplify_coords(coords)
     if len(coords) < 2 or maxspeed_ms <= 0:
@@ -506,8 +519,10 @@ class OsmSpeedLimitDB:
     min_lon, max_lon = min(lons), max(lons)
     blob = _pack_coords(coords)
     con.execute(
-      "INSERT OR REPLACE INTO ways(way_id, name, highway, maxspeed_ms, min_lat, max_lat, min_lon, max_lon, coords, junction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      (int(way_id), name or "", highway or "", float(maxspeed_ms), min_lat, max_lat, min_lon, max_lon, blob, junction or ""),
+      "INSERT OR REPLACE INTO ways(way_id, name, highway, maxspeed_ms, min_lat, max_lat, min_lon, max_lon, coords, junction, estimated) "
+      + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      (int(way_id), name or "", highway or "", float(maxspeed_ms), min_lat, max_lat, min_lon, max_lon, blob, junction or "",
+       1 if estimated else 0),
     )
     con.execute(
       "INSERT OR REPLACE INTO ways_rtree(way_id, min_lat, max_lat, min_lon, max_lon) VALUES (?, ?, ?, ?, ?)",
@@ -741,6 +756,7 @@ class OsmSpeedLimitDB:
           highway=highway,
           distance_m=float(dist),
           coords=tuple((float(c[0]), float(c[1])) for c in coords),
+          estimated=_row_estimated(row),
         )
     return best
 
@@ -1138,4 +1154,5 @@ class OsmSpeedLimitDB:
       distance_m=match.distance_m,
       next_speed_limit_ms=next_limit,
       next_distance_m=next_dist,
+      estimated=match.estimated,
     )

@@ -24,7 +24,7 @@ MN_EAST = -89.483
 FILL_SOURCE = "MN_169.14"
 FILL_NOTES = (
   "Unmarked fills are NAP statutory estimates (Minn. Stat. 169.14 / MnDOT), "
-  "not surveyed OSM maxspeed. Never upload these tags to osm.org."
+  + "not surveyed OSM maxspeed. Never upload these tags to osm.org."
 )
 
 ALLEY_MPH = 10
@@ -45,7 +45,7 @@ SKIP_HIGHWAYS = frozenset({
 # Overpass regex: fillable highway classes only (keeps metro payloads smaller).
 FILLABLE_HIGHWAY_REGEX = (
   "^(motorway(_link)?|trunk(_link)?|primary(_link)?|secondary(_link)?"
-  r"|tertiary(_link)?|unclassified|residential|living_street|alley)$"
+  + r"|tertiary(_link)?|unclassified|residential|living_street|alley)$"
 )
 
 ALLEY_LIKE = frozenset({"alley", "living_street"})
