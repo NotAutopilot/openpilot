@@ -24,7 +24,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware.power_monitoring import PowerMonitoring
 from openpilot.system.hardware.fan_controller import FanController
 from openpilot.system.hardware.loop_timing import HardwareLoopTimer, slow_loop_fields
-from openpilot.system.hardware.thermal_reader import ThermalCache, conservative_thermal_status, thermal_reader_thread
+from openpilot.system.hardware.thermal_reader import ThermalCache, stale_thermal_status, thermal_reader_thread
 from openpilot.system.hardware.nap_force_offroad import (
   PARAM as NAP_FORCE_OFFROAD_PARAM,
   HANDOFF_READY_PARAM as NAP_FORCE_OFFROAD_HANDOFF_READY_PARAM,
@@ -367,8 +367,11 @@ def hardware_thread(end_event, hw_queue, thermal_queue=None) -> None:
         thermal_status = list(THERMAL_BANDS.keys())[band_idx - 1]
       elif current_band.max_temp is not None and all_comp_temp > current_band.max_temp:
         thermal_status = list(THERMAL_BANDS.keys())[band_idx + 1]
-    # Stale temps: fail hot, never cool.
-    thermal_status = conservative_thermal_status(thermal_status, thermal_cache.stale, ThermalStatus.overheated)
+    # Stale temps: hold last status; fail hot if it was already yellow or
+    # stale > 60 s. While stale all_comp_temp is computed from held temps.
+    thermal_status = stale_thermal_status(
+      thermal_status, thermal_cache.stale, thermal_cache.stale_s, all_comp_temp,
+      THERMAL_BANDS[ThermalStatus.overheated].min_temp, ThermalStatus.ok, ThermalStatus.overheated)
 
     # **** starting logic ****
 

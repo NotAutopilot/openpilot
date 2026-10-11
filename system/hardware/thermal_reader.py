@@ -7,9 +7,11 @@ thread; the publish loop only takes the latest snapshot from a queue and
 never blocks on a sensor.
 
 If no fresh snapshot arrives for STALE_AFTER_S, the cache reports stale.
-hardwared then keeps the last temperatures (never zeros them), runs the fan
-at full and holds thermalStatus at least `overheated`, i.e. it fails toward
-"hot", never toward "cool".
+hardwared then keeps the last temperatures and thermalStatus (never zeros
+or cools them) and runs the fan at full. It escalates to at least
+`overheated` (fail hot) only if the last good reading was already "yellow"
+(max temp at or above the overheated band's entry temperature, or status
+already above ok), or once stale time passes STALE_ESCALATE_S.
 """
 
 import queue
@@ -20,6 +22,7 @@ from openpilot.common.realtime import DT_HW
 from openpilot.common.swaglog import cloudlog
 
 STALE_AFTER_S = 10.0
+STALE_ESCALATE_S = 60.0  # stale time (after STALE_AFTER_S) before failing hot
 SLOW_ZONE_S = 0.25
 
 
@@ -90,6 +93,7 @@ class ThermalCache:
     self._start = clock()
     self.snapshot: ThermalSnapshot | None = None
     self.stale = False
+    self.stale_since: float | None = None
 
   def poll(self) -> bool:
     try:
@@ -99,19 +103,39 @@ class ThermalCache:
       pass
     ref = self.snapshot.t if self.snapshot is not None else self._start
     stale = (self._clock() - ref) > self._stale_after_s
+    now = self._clock()
     if stale != self.stale:
       if stale:
-        cloudlog.event("hardwared thermal stale", error=True, age_s=round(self._clock() - ref, 1))
+        self.stale_since = now
+        cloudlog.event("hardwared thermal stale start", error=True, age_s=round(now - ref, 1))
       else:
-        cloudlog.warning("hardwared thermal fresh again")
+        cloudlog.event("hardwared thermal stale end", error=True,
+                       stale_s=round(now - (self.stale_since or now), 1))
+        self.stale_since = None
     self.stale = stale
     return stale
+
+  @property
+  def stale_s(self) -> float:
+    """Seconds since the cache went stale (0 when fresh)."""
+    return 0.0 if self.stale_since is None else self._clock() - self.stale_since
 
   @property
   def temps(self) -> dict:
     return {} if self.snapshot is None else self.snapshot.temps
 
 
-def conservative_thermal_status(status, stale: bool, overheated):
-  """While temps are stale, never report cooler than `overheated`."""
-  return max(status, overheated) if stale else status
+def stale_thermal_status(status, stale: bool, stale_s: float, last_temp: float, yellow_temp: float,
+                         ok, overheated, escalate_s: float = STALE_ESCALATE_S):
+  """thermalStatus to publish given cache staleness.
+
+  Fresh: unchanged. Stale: keep the last status (never cooler), but fail hot
+  (at least `overheated`) if the last good reading was already yellow or
+  worse, or once stale for longer than escalate_s.
+  """
+  if not stale:
+    return status
+  was_yellow = status > ok or last_temp >= yellow_temp
+  if was_yellow or stale_s > escalate_s:
+    return max(status, overheated)
+  return status
