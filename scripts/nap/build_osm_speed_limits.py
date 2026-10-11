@@ -245,10 +245,11 @@ def _rb_rows_from_pyosmium(pbf: str, *, bbox: tuple[float, float, float, float] 
       generic.append({"way_id": int(w.id), "tags": tags, "node_ids": got[0], "coords": got[1]})
 
   print(f"Reading roundabout rings from {pbf}…", file=sys.stderr, flush=True)
-  Rings().apply_file(pbf, locations=True)
+  # Only objects with a highway key reach Python (big speedup on large PBFs).
+  Rings().apply_file(pbf, locations=True, filters=[osmium.filter.KeyFilter("highway")])
   if ring_nodes:
     print(f"Reading approach roads for {len(generic)} ring ways…", file=sys.stderr, flush=True)
-    Approaches().apply_file(pbf, locations=True)
+    Approaches().apply_file(pbf, locations=True, filters=[osmium.filter.KeyFilter("highway")])
   return roundabout_rows(generic)
 
 
