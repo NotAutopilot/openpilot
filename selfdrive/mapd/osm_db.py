@@ -30,6 +30,7 @@ from openpilot.selfdrive.mapd.constants import (
 )
 from openpilot.selfdrive.mapd.roundabout import (
   RB_FUNNEL_M,
+  rb_decel_onset_m,
   RB_FUNNEL_MIN_M,
   RB_ON_WAY_M,
   RB_SEARCH_PAD_DEG,
@@ -930,8 +931,14 @@ class OsmSpeedLimitDB:
   def find_roundabout(
     self, lat: float, lon: float, bearing_deg: float | None = None,
     current_highway: str | None = None,
+    v_ego_ms: float | None = None,
   ) -> RoundaboutHint:
-    """Upcoming / current OSM circulating ring within the ~200 m funnel.
+    """Upcoming / current OSM circulating ring within the speed-based funnel.
+
+    Funnel = rb_decel_onset_m(v_ego): 140 m at town speed, ~340 m from
+    55 mph, max 450 m. Once a ring is hinted it stays latched out to the
+    450 m reach so slowing down (which shrinks the onset) cannot drop the
+    hint mid-approach and fire an early "exit" MAX restore.
 
     Does not apply MIN_ZONE_LENGTH_M — a typical RB is a short along-heading
     stub and would otherwise be dropped as cross-street bleed. Sharp corners
@@ -960,7 +967,9 @@ class OsmSpeedLimitDB:
       if not way_is_roundabout(coords, _row_junction(row), row["highway"] or ""):
         continue
       east_m, north_m, dist = _closest_xy_on_polyline(float(lat), float(lon), coords)
-      if dist > RB_FUNNEL_M:
+      way_id = int(row["way_id"])
+      latched = way_id == getattr(self, "_rb_latch_way", 0)
+      if dist > (RB_FUNNEL_M if latched else rb_decel_onset_m(v_ego_ms)):
         continue
       if bearing_deg is not None and dist > RB_ON_WAY_M:
         along = _along_heading_m(east_m, north_m, float(bearing_deg))
@@ -983,6 +992,7 @@ class OsmSpeedLimitDB:
       if best is None or rank < best_rank:
         best = hint
         best_dist = dist
+    self._rb_latch_way = best.way_id if best is not None else 0
     return best if best is not None else RoundaboutHint()
 
   def _reset_way_memory(self) -> None:

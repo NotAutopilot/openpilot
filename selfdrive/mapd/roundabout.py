@@ -20,14 +20,28 @@ from dataclasses import dataclass
 from openpilot.common.constants import CV
 from openpilot.selfdrive.mapd.constants import LOOKAHEAD_NORMAL
 
+# Speed-based decel onset (Oct 11, Watertown SD): the fixed 140 m was tuned
+# for 35->18 mph and was late / abrupt from a 55 mph approach (needs ~340 m
+# at 0.7 m/s²). Onset = (v² − v_ring²)/(2·0.7) + 30 m, clamped 140–450 m.
+RB_ONSET_A_MS2 = 0.7
+RB_ONSET_MARGIN_M = 30.0
+RB_ONSET_MIN_M = 140.0
+RB_ONSET_MAX_M = 450.0
+# MAX profile reaches ring speed this far before the ring line.
+RB_PROFILE_BUFFER_M = 15.0
+# Kinematic −a ceiling: never brick-wall.
+RB_A_MAX_DECEL_MS2 = -1.5
+# Planner jerk limit on the ring −a onset (m/s³).
+RB_DECEL_JERK_MS3 = 1.5
 # Detect / start ease by this distance (the decel onset). Must still have fired by MIN.
 # Oct 1: 200 m (first fire 187 m in the field) braked ~0.2 m/s² earlier than needed and had the car crawling at 18 mph well before the ring
 # (0000013c); 140 m keeps 35→18 mph at ~0.64 m/s² average. 100 m was too late (Willmar 10:11 / 10:14).
-RB_DECEL_ONSET_M = 140.0
-RB_FUNNEL_M = RB_DECEL_ONSET_M
+RB_DECEL_ONSET_M = RB_ONSET_MIN_M  # low-speed onset (35->18 mph); see rb_decel_onset_m
+# Search / latch reach: the longest speed-based onset.
+RB_FUNNEL_M = RB_ONSET_MAX_M
 RB_FUNNEL_MIN_M = 80.0
-# ~0.0035° ≈ 280 m EW at 45°N so a 200 m westbound approach is in the rtree.
-RB_SEARCH_PAD_DEG = 0.0035
+# ~0.0065° ≈ 510 m EW at 45°N (720 m N-S) so a 450 m approach is in the rtree.
+RB_SEARCH_PAD_DEG = 0.0065
 
 # Circulating target. OSM maxspeed on the RB way wins when present (often 20).
 # Sep 30: entry was a little slow. Soco ring pass speeds were 17-19 mph (R126 17.8, R128 19.3, R130 17.5 median); the
@@ -39,7 +53,7 @@ RB_V_DEFAULT_MS = 20.0 * CV.MPH_TO_MS
 
 # Kinematic ease. Lookahead Early comfort is only 0.55 — that is why tip
 # aTarget sat at −0.55 at 37–45 mph. Plan to ring speed from remaining d.
-RB_A_MIN_MS2 = -2.0
+RB_A_MIN_MS2 = RB_A_MAX_DECEL_MS2
 RB_A_FLOOR_MS2 = -1.0
 RB_A_FLOOR_V_MS = 40.0 * CV.MPH_TO_MS
 RB_NEAR_SPEED_MS = 2.5 * CV.MPH_TO_MS
@@ -85,6 +99,22 @@ class RoundaboutHint:
   distance_m: float = 0.0
   speed_limit_ms: float = 0.0
   way_id: int = 0
+
+
+def rb_decel_onset_m(v_ego_ms: float | None, v_ring_ms: float | None = None) -> float:
+  """Distance before the ring to start easing: (v² − v_ring²)/(2·0.7) + 30 m, 140–450 m."""
+  if v_ego_ms is None:
+    return RB_ONSET_MIN_M
+  vr = RB_V_MIN_MS if v_ring_ms is None else float(v_ring_ms)
+  v = max(float(v_ego_ms), 0.0)
+  d = max(0.0, v * v - vr * vr) / (2.0 * RB_ONSET_A_MS2) + RB_ONSET_MARGIN_M
+  return max(RB_ONSET_MIN_M, min(RB_ONSET_MAX_M, d))
+
+
+def rb_profile_v_ms(distance_m: float, target_ms: float) -> float:
+  """MAX ceiling on approach: reach target RB_PROFILE_BUFFER_M before the ring at 0.7 m/s²."""
+  d = max(0.0, float(distance_m) - RB_PROFILE_BUFFER_M)
+  return math.sqrt(float(target_ms) ** 2 + 2.0 * RB_ONSET_A_MS2 * d)
 
 
 def junction_is_roundabout(junction: str | None) -> bool:
@@ -176,7 +206,11 @@ def roundabout_ease_v_ms(
   _ = v_ego_ms, current_ms, lookahead
   if not roundabout_hint_active(hint):
     return None
-  return roundabout_target_ms(hint.speed_limit_ms)
+  target = roundabout_target_ms(hint.speed_limit_ms)
+  if hint.on_roundabout or float(hint.distance_m) <= 0.0:
+    return target
+  # Oct 11: smooth MAX ramp down the 0.7 m/s² profile (no 35->18 step).
+  return rb_profile_v_ms(hint.distance_m, target)
 
 
 def roundabout_decel_ms2(hint: RoundaboutHint | None, v_ego_ms: float) -> float | None:
@@ -196,11 +230,16 @@ def roundabout_decel_ms2(hint: RoundaboutHint | None, v_ego_ms: float) -> float 
     d = max(float(hint.distance_m), RB_DECEL_D_MIN_M)
   if v0 <= target + RB_NEAR_SPEED_MS:
     return 0.0
+  if not hint.on_roundabout and float(hint.distance_m) > 0.0:
+    d = max(d - RB_PROFILE_BUFFER_M, RB_DECEL_D_MIN_M)
   a_kin = (target * target - v0 * v0) / (2.0 * d)
   a = max(RB_A_MIN_MS2, min(0.0, a_kin))
-  if v0 >= RB_A_FLOOR_V_MS:
+  # Willmar floor only for a late hint (inside the speed-based onset by
+  # more than the margin). On a normal early onset the 0.7 profile rules.
+  late = float(hint.distance_m) < rb_decel_onset_m(v0, target) - RB_ONSET_MARGIN_M
+  if v0 >= RB_A_FLOOR_V_MS and (hint.on_roundabout or late):
     a = min(a, RB_A_FLOOR_MS2)
-  return a
+  return max(a, RB_A_MAX_DECEL_MS2)
 
 
 def apply_roundabout_plan(
