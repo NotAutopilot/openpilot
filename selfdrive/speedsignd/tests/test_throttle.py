@@ -34,8 +34,13 @@ from openpilot.selfdrive.speedsignd.speedsignd import (
   format_read_timing,
   infer_overran,
   join_reasons,
+  BURST_EXTRA,
+  DUTY_WINDOW_S,
   next_detect_mono,
   parse_detect_hz,
+  schedule_after_read,
+  sign_burst_trigger,
+  window_compute,
   parse_proc_stat_jiffies,
   parse_proc_thread_count,
   pressure_reason,
@@ -427,3 +432,98 @@ def test_cpu_share_meter_and_budget():
   assert not cpu_over_budget(0.27)
   assert cpu_over_budget(0.29)
   assert not cpu_over_budget(None)
+
+
+def _sched(**kwargs):
+  base = dict(
+    now=10.0, infer_s=0.627, period_s=1.0, budget_s=0.100, cap_s=0.0, backoff_s=0.0,
+    sign_like=False, window_used=0, window_count=2, burst_left=0, burst_window=0,
+    burst_cluster_s=0.0, spans=[],
+  )
+  base.update(kwargs)
+  return schedule_after_read(**base)
+
+
+def test_steady_gap_stays_four_times_infer_without_a_burst():
+  """Route 00000181: 627 ms infer, read gap about 2.5 s, duty 0.25."""
+  infer = 0.627
+  nxt, left, _bwin, win, cluster, bursting = _sched(infer_s=infer, sign_like=False)
+  assert not bursting and left == 0 and cluster == 0.0
+  assert abs(nxt - (10.0 - infer + infer * 4.0)) < 1e-6
+  assert win == 1
+  assert DUTY_WINDOW_S == 10.0
+  assert BURST_EXTRA == 2
+  assert abs(infer / (infer * 4.0) - CPU_BUDGET) < 1e-9
+
+
+def test_burst_rereads_the_same_tile_then_idles_the_window_back():
+  """Three back-to-back frames fit in 10 s × 25%. The next paced read waits."""
+  infer = 0.627
+  assert 3.0 * infer <= DUTY_WINDOW_S * CPU_BUDGET
+  spans: list[tuple[float, float]] = []
+  now = 10.0
+  nxt, left, bwin, win, cluster, bursting = _sched(
+    now=now, infer_s=infer, sign_like=True, spans=spans,
+  )
+  assert bursting and left == 2 and bwin == 0 and win == 0
+  assert abs(nxt - now) < 1e-9
+  spans.append((now, infer))
+  now = now + infer
+  nxt, left, bwin, win, cluster, bursting = _sched(
+    now=now, infer_s=infer, sign_like=True, burst_left=left, burst_window=bwin,
+    burst_cluster_s=cluster, spans=spans, window_used=0,
+  )
+  assert bursting and left == 1 and win == 0
+  spans.append((now, infer))
+  now = now + infer
+  nxt, left, _bwin, win, _cluster, bursting = _sched(
+    now=now, infer_s=infer, sign_like=True, burst_left=left, burst_window=0,
+    burst_cluster_s=cluster, spans=spans, window_used=0,
+  )
+  assert not bursting and left == 0
+  assert win == 1
+  paced = (now - infer) + infer * 4.0
+  assert nxt + 1e-9 >= paced
+  finish = nxt + infer
+  used = window_compute(spans + [(now, infer)], finish, DUTY_WINDOW_S)
+  assert used + infer <= DUTY_WINDOW_S * CPU_BUDGET + 1e-6
+
+
+def test_burst_on_a_full_window_is_repaid_by_idle():
+  infer = 0.627
+  gap = infer * 4.0
+  now = 30.0
+  spans = [(now - 3 * gap, infer), (now - 2 * gap, infer), (now - gap, infer)]
+  nxt, left, bwin, win, _cluster, bursting = _sched(
+    now=now, infer_s=infer, sign_like=True, spans=spans,
+  )
+  assert bursting and left == BURST_EXTRA and win == bwin
+  assert abs(nxt - now) < 1e-9
+  # After the cluster, do not start again until the trailing 10 s is ≤ 25%.
+  cluster_end = now + 2 * infer
+  spans2 = spans + [(now, infer), (now + infer, infer)]
+  nxt2, left2, _b, win2, _c, bursting2 = _sched(
+    now=cluster_end, infer_s=infer, sign_like=False, burst_left=1, burst_window=0,
+    burst_cluster_s=2 * infer, spans=spans2, window_used=0,
+  )
+  assert not bursting2 and left2 == 0 and win2 == 1
+  assert nxt2 > cluster_end + infer
+  finish = nxt2 + infer
+  used = window_compute(spans2 + [(cluster_end, infer)], finish, DUTY_WINDOW_S)
+  assert used + infer <= DUTY_WINDOW_S * CPU_BUDGET + 1e-6
+
+
+def test_model_guard_cancels_a_burst():
+  nxt, left, _b, win, cluster, bursting = _sched(
+    sign_like=True, backoff_s=10.0, burst_left=2, burst_cluster_s=0.627,
+  )
+  assert not bursting and left == 0 and cluster == 0.0
+  assert nxt >= 10.0 + 10.0 - 1e-6
+  assert win == 1
+
+
+def test_sign_burst_trigger_is_the_speed_class_not_a_negative():
+  assert sign_burst_trigger({"sl_peak_conf": 0.15, "sl_peak_name": "sl_45"})
+  assert not sign_burst_trigger({"sl_peak_conf": 0.14, "peak_conf": 0.20, "peak_name": "neg_yellow"})
+  assert sign_burst_trigger({"peak_conf": 0.20, "peak_name": "sl_unreadable", "sl_peak_conf": 0.0})
+  assert not sign_burst_trigger({"sl_peak_conf": 0.0, "peak_conf": 0.0})

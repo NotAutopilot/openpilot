@@ -131,6 +131,12 @@ SPEEDSIGND_CORES = (SPEEDSIGND_CORE,)
 IDLE_FACTOR = 3.0
 CPU_BUDGET = 1.0 / (1.0 + IDLE_FACTOR)
 CPU_BUDGET_SLACK = 0.03
+# Duty is averaged over this window. A 2–3 frame burst may run back-to-back;
+# the idle after it brings the trailing average back to 25%.
+DUTY_WINDOW_S = 10.0
+# Extra YOLO reads after the frame that scored ≥ SIGN_LIKE_CONF. Two extra
+# reads is three frames total, still on the tile that saw the sign.
+BURST_EXTRA = 2
 # modelV2.frameDropPerc. The lag alert fires near 20; back off earlier.
 MODEL_DROP_PERC = 5.0
 # modelV2.modelExecutionTime is seconds (perf_counter in modeld). 22–26 ms
@@ -399,6 +405,130 @@ def next_detect_mono(infer_end: float, infer_s: float, period_s: float, budget_s
     raise ValueError("budget and cap must be finite")
   gap = read_gap_s(infer_s, period_s, backoff_s)
   return (float(infer_end) - float(infer_s)) + gap
+
+
+def window_compute(spans: list[tuple[float, float]], t: float, window: float = DUTY_WINDOW_S) -> float:
+  """Infer seconds overlapping [t-window, t]. spans are (end, duration)."""
+  lo = float(t) - float(window)
+  total = 0.0
+  for end, dur in spans:
+    end_f = float(end)
+    dur_f = max(0.0, float(dur))
+    start = end_f - dur_f
+    a = max(start, lo)
+    b = min(end_f, float(t))
+    if b > a:
+      total += b - a
+  return total
+
+
+def earliest_budget_start(
+  spans: list[tuple[float, float]], now: float, next_dur: float,
+  window: float = DUTY_WINDOW_S, budget: float = CPU_BUDGET,
+) -> float:
+  """Earliest t ≥ now such that the infer [t, t+next_dur] keeps the window ≤ budget.
+
+  Past spans age out of the trailing window. A burst that already spent the
+  allowance waits here until idle has repaid it.
+  """
+  now_f = float(now)
+  next_dur = max(0.0, float(next_dur))
+  allowance = float(window) * float(budget)
+
+  def fits(t: float) -> bool:
+    finish = t + next_dur
+    used = window_compute(spans, finish, window)
+    return used + next_dur <= allowance + 1e-6
+
+  if fits(now_f):
+    return now_f
+  candidates = [now_f]
+  for end, _dur in spans:
+    candidates.append(float(end) + float(window) - next_dur)
+  for t in sorted(candidates):
+    t = max(now_f, t)
+    if fits(t):
+      return t
+  newest = max((float(end) for end, _dur in spans), default=now_f)
+  return max(now_f, newest + float(window) - next_dur)
+
+
+def sign_burst_trigger(diag: dict | None, signs=None) -> bool:
+  """True when any speed-sign class scored ≥ SIGN_LIKE_CONF.
+
+  sl_peak covers sl_NN below YOLO_MIN_CONF. A decoded sign, or an
+  sl_unreadable peak, counts too. neg_* does not.
+  """
+  diag = diag or {}
+  try:
+    if float(diag.get("sl_peak_conf") or 0.0) >= SIGN_LIKE_CONF:
+      return True
+  except (TypeError, ValueError):
+    pass
+  peak_name = str(diag.get("peak_name") or "")
+  try:
+    peak = float(diag.get("peak_conf") or 0.0)
+  except (TypeError, ValueError):
+    peak = 0.0
+  if peak >= SIGN_LIKE_CONF and peak_name.startswith(("sl_", "speedLimit")):
+    return True
+  for s in signs or []:
+    try:
+      if float(getattr(s, "conf", 0.0) or 0.0) >= SIGN_LIKE_CONF:
+        return True
+    except (TypeError, ValueError):
+      continue
+  return False
+
+
+def schedule_after_read(
+  *,
+  now: float,
+  infer_s: float,
+  period_s: float,
+  budget_s: float,
+  cap_s: float,
+  backoff_s: float,
+  sign_like: bool,
+  window_used: int,
+  window_count: int,
+  burst_left: int,
+  burst_window: int,
+  burst_cluster_s: float,
+  spans: list[tuple[float, float]],
+) -> tuple[float, int, int, int, float, bool]:
+  """Next detect time plus burst state.
+
+  Returns (next_mono, burst_left, burst_window, next_window, cluster_s, bursting_next).
+
+  Steady reads keep max(period, 4× infer). A sign-like score schedules up to
+  BURST_EXTRA more reads on the same tile, immediately, while that cluster
+  still fits in the 10 s × 25% allowance. The following non-burst start waits
+  until the trailing window is back at 25%. A model-guard backoff cancels the
+  burst. `budget_s` and `cap_s` stay on next_detect_mono; they do not add a
+  second wait.
+  """
+  infer_s = max(0.0, float(infer_s))
+  spans_now = list(spans) + [(float(now), infer_s)]
+  paced = next_detect_mono(float(now), infer_s, period_s, budget_s, cap_s, backoff_s)
+  duty_t = earliest_budget_start(spans_now, float(now), infer_s)
+  steady = max(paced, duty_t)
+  nwin = max(1, int(window_count))
+  next_window = (int(window_used) + 1) % nwin
+  allowance = DUTY_WINDOW_S * CPU_BUDGET
+  if float(backoff_s) > 0.0:
+    return steady, 0, int(window_used), next_window, 0.0, False
+  if int(burst_left) > 0:
+    cluster = float(burst_cluster_s) + infer_s
+    left = int(burst_left) - 1
+    if left > 0 and cluster + infer_s <= allowance + 1e-6:
+      return float(now), left, int(burst_window), int(burst_window), cluster, True
+    return steady, 0, int(burst_window), next_window, 0.0, False
+  if sign_like:
+    cluster = infer_s
+    if BURST_EXTRA > 0 and cluster + infer_s <= allowance + 1e-6:
+      return float(now), BURST_EXTRA, int(window_used), int(window_used), cluster, True
+  return steady, 0, int(window_used), next_window, 0.0, False
 
 
 @dataclass(frozen=True)
@@ -1272,6 +1402,12 @@ def main():
   second_look: PendingSecondLook | None = None
   model_extended = False
   last_infer_s = period_s
+  window_i = 0
+  pending_window = 0
+  burst_left = 0
+  burst_window = 0
+  burst_cluster_s = 0.0
+  duty_spans: list[tuple[float, float]] = []
 
   while True:
     sm.update(0)
@@ -1295,6 +1431,9 @@ def main():
       # A frameDropPerc backoff still only extends a schedule that already exists.
       if next_detect > 0.0 or hard_now:
         next_detect = max(next_detect, now_mono + extra_now)
+      # A model pause is not a burst. Do not dump the extra reads when it ends.
+      burst_left = 0
+      burst_cluster_s = 0.0
       model_extended = True
       cloudlog.warning(
         "%s",
@@ -1400,12 +1539,30 @@ def main():
               backend=detector.backend_name(),
             ),
           )
-        next_detect = max(
-          next_detect,
-          next_detect_mono(now_mono, outcome.infer_s, period_s, budget_s, cap_s, backoff_s=extra_s),
-        )
         raw = list(getattr(debounce, "last_raw", []))
         diag = outcome.diag if outcome.diag is not None else detector.diag_dict()
+        (
+          next_mono, burst_left, burst_window, window_i, burst_cluster_s, bursting_next,
+        ) = schedule_after_read(
+          now=now_mono,
+          infer_s=outcome.infer_s,
+          period_s=period_s,
+          budget_s=budget_s,
+          cap_s=cap_s,
+          backoff_s=extra_s,
+          sign_like=sign_burst_trigger(diag, raw),
+          window_used=pending_window,
+          window_count=2,
+          burst_left=burst_left,
+          burst_window=burst_window,
+          burst_cluster_s=burst_cluster_s,
+          spans=duty_spans,
+        )
+        duty_spans.append((now_mono, outcome.infer_s))
+        duty_spans = [(end, dur) for end, dur in duty_spans if now_mono - float(end) <= DUTY_WINDOW_S]
+        next_detect = max(next_detect, next_mono)
+        if bursting_next and not scheduled_backoff:
+          scheduled_reason = "burst"
         err = f" err={outcome.error}" if outcome.error else ""
         if outcome.error and not diag.get("error"):
           diag = dict(diag)
@@ -1422,15 +1579,20 @@ def main():
         last_infer_done = now_mono
         last_infer_s = outcome.infer_s
         last_skip_reason = "ok"
-        box = sign_like_bbox(outcome.signs, diag)
-        if box is not None:
-          second_look = PendingSecondLook(
-            bbox=box,
-            frames_left=SECOND_LOOK_FRAMES,
-            deadline=now_mono + SECOND_LOOK_DEADLINE_S,
-          )
-        else:
+        # A burst re-reads the same tile with YOLO. The OCR second look would
+        # spend those frames and push the confirm past the sign.
+        if bursting_next:
           second_look = None
+        else:
+          box = sign_like_bbox(outcome.signs, diag)
+          if box is not None:
+            second_look = PendingSecondLook(
+              bbox=box,
+              frames_left=SECOND_LOOK_FRAMES,
+              deadline=now_mono + SECOND_LOOK_DEADLINE_S,
+            )
+          else:
+            second_look = None
         if not raw and now_mono - last_empty_raw_log >= INFER_LOG_PERIOD_S:
           cloudlog.info(
             "speedsignd empty-raw %s",
@@ -1496,7 +1658,8 @@ def main():
       if not sample.allow_detect:
         slot.pause()
       else:
-        nv12 = copy_nv12_detect_crop(buf) if buf is not None else None
+        which = window_i
+        nv12 = copy_nv12_detect_crop(buf, which) if buf is not None else None
         if buf is None:
           last_skip_reason = detect_skip_reason(
             connected=True, onnx=detector.onnx is not None, busy=False, holdoff=False,
@@ -1561,6 +1724,7 @@ def main():
               )
               last_gate_log = now_mono
           elif slot.start(_run):
+            pending_window = which
             now_start = time.monotonic()
             pending_interval_ms = 0.0 if last_read_start <= 0.0 else (now_start - last_read_start) * 1000.0
             pending_backoff = scheduled_backoff

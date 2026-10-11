@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 from openpilot.selfdrive.speedsignd.detect_types import SpeedSign
-from openpilot.selfdrive.speedsignd.hud import AGREE_READS, frame_reads, note_read
+from openpilot.selfdrive.speedsignd.hud import AGREE_READS, frame_reads, note_read, solo_candidate
 from openpilot.selfdrive.speedsignd.weights_manifest import DEBOUNCE_HITS, DEBOUNCE_WINDOW_S, YOLO_MIN_CONF
 
 
@@ -43,6 +43,9 @@ class SignDebounce:
     for s in self.last_raw:
       pending, _pair = frame_reads(s)
       if not pending:
+        # Class-only at the solo floor reaches the plate. It is not a JSONL vote.
+        if solo_candidate(s) is not None:
+          hud.append(s)
         continue
       hud.append(s)
       for mph, conf in pending:

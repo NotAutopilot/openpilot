@@ -5,6 +5,9 @@ from dataclasses import dataclass, replace
 
 # US R2-1 posted speeds. School-zone 15/25 and freeway 70/75/80 included.
 MUTCD_MPH = frozenset(list(range(5, 90, 5)) + [100])
+# OCR may replace a class only with these. 100 stays a class label, not a
+# digit-read override: a dropped digit must not become the plate.
+US_POSTED_MPH = frozenset(range(5, 90, 5))
 
 
 @dataclass(frozen=True)

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from openpilot.selfdrive.speedsignd.detect_types import MUTCD_MPH, SpeedSign
+from openpilot.selfdrive.speedsignd.detect_types import MUTCD_MPH, US_POSTED_MPH, SpeedSign
 from openpilot.selfdrive.speedsignd.weights_manifest import YOLO_MIN_CONF
 from openpilot.selfdrive.speedsignd.yolo import REFINE_OVERRIDE_CONF
 
@@ -21,6 +21,11 @@ HUD_HOLD_S = 45.0
 # reads when infer is up to ~3 s.
 AGREE_READS = 2
 AGREE_WINDOW_S = 12.0
+# One real posted limit at this confidence lights the plate. Route 00000181
+# had 45@0.77, 30@0.75, 45@0.89, and 30@0.81 with no second read inside 12 s.
+# 0.60 still needs the second read. A different limit within 3 s clears it.
+SOLO_CONF = 0.70
+SOLO_CONTRADICT_S = 3.0
 HUD_LABEL = "SIGN"
 # Logger On + ONNX missing: show this instead of a blank plate or a fake mph.
 HUD_MISSING_WEIGHTS_TEXT = "NO WT"
@@ -297,6 +302,7 @@ def frame_reads(sign: SpeedSign | None) -> tuple[list[tuple[int, float]], tuple[
   - class and OCR differ, both above their floors: no vote. A correct OCR
     beside a wrong class is a miss, not a misread.
   - class only: no vote. That is how route 17a posted 60 as 30.
+    LiveSignHold may still light one class-only read at SOLO_CONF.
   - OCR only (second look, or refine with no in-threshold class): one vote.
   - bare mph with neither field set (numpy tests): one vote.
   sl_unreadable and neg_* have no MUTCD mph here, so they never vote.
@@ -354,6 +360,67 @@ def note_read(obs: list, now: float, mph: int, conf: float, extra=None) -> None:
   obs.append((now, mph, conf) if extra is None else (now, mph, conf, extra))
 
 
+def posted_reads(sign: SpeedSign | None) -> list[tuple[int, float]]:
+  """Posted limits at the detect floor, including a class-only hit.
+
+  Used to cancel a provisional solo. Below YOLO_MIN_CONF is not a read.
+  """
+  if sign is None:
+    return []
+  out: list[tuple[int, float]] = []
+  pending, _pair = frame_reads(sign)
+  for mph, conf in pending:
+    if int(mph) in US_POSTED_MPH:
+      out.append((int(mph), float(conf)))
+  explicit = getattr(sign, "class_mph", None)
+  if explicit is None:
+    return out
+  try:
+    class_i = int(explicit)
+    class_conf = float(getattr(sign, "class_conf", 0.0) or 0.0)
+  except (TypeError, ValueError):
+    return out
+  if class_i in US_POSTED_MPH and class_conf >= YOLO_MIN_CONF:
+    if not any(mph == class_i for mph, _conf in out):
+      out.append((class_i, class_conf))
+  return out
+
+
+def solo_candidate(sign: SpeedSign | None) -> tuple[int, float] | None:
+  """One real posted limit at ≥ SOLO_CONF. A class/OCR clash is not one.
+
+  Class-only counts here even though frame_reads does not vote it. That is
+  how a lone 45@0.89 lights the plate. 0.60 does not. JSONL still needs
+  two frame_reads votes.
+  """
+  if sign is None:
+    return None
+  pending, _pair = frame_reads(sign)
+  if pending:
+    mph, conf = int(pending[0][0]), float(pending[0][1])
+    if mph in US_POSTED_MPH and conf >= SOLO_CONF:
+      return mph, conf
+    return None
+  explicit = getattr(sign, "class_mph", None)
+  if explicit is None:
+    return None
+  refine = getattr(sign, "refine_mph", None)
+  if refine is not None:
+    try:
+      if int(refine) in US_POSTED_MPH:
+        return None
+    except (TypeError, ValueError):
+      pass
+  try:
+    class_i = int(explicit)
+    class_conf = float(getattr(sign, "class_conf", 0.0) or 0.0)
+  except (TypeError, ValueError):
+    return None
+  if class_i in US_POSTED_MPH and class_conf >= SOLO_CONF:
+    return class_i, class_conf
+  return None
+
+
 def accepted_hud_sign(sign: SpeedSign | None) -> SpeedSign | None:
   """One frame never lights the HUD, even when class and OCR agree.
 
@@ -370,15 +437,30 @@ class LiveSignHold:
   mph: int = 0
   conf: float = 0.0
   until: float = 0.0
+  provisional: bool = False
+  provisional_until: float = 0.0
   _obs: list = field(default_factory=list)
+
+  def _clear(self) -> None:
+    self.mph = 0
+    self.conf = 0.0
+    self.until = 0.0
+    self.provisional = False
+    self.provisional_until = 0.0
 
   def update(self, signs, now: float) -> tuple[bool, int, float]:
     fresh_mphs: set[int] = set()
+    solos: list[tuple[int, float]] = []
+    seen: list[tuple[int, float]] = []
     for s in signs or []:
       pending, _pair = frame_reads(s)
       for mph, conf in pending:
         note_read(self._obs, now, int(mph), float(conf))
         fresh_mphs.add(int(mph))
+      seen.extend(posted_reads(s))
+      solo = solo_candidate(s)
+      if solo is not None:
+        solos.append(solo)
     self._obs = [o for o in self._obs if now - o[0] <= AGREE_WINDOW_S]
     buckets: dict[int, list[float]] = {}
     for _t, mph, conf in self._obs:
@@ -388,6 +470,18 @@ class LiveSignHold:
     # this frame voted for something else. Only a mph read this call can.
     fresh_winners = [item for item in winners if item[0] in fresh_mphs]
     holding = now < self.until and self.mph > 0
+    cancelled: int | None = None
+    if self.provisional and holding and now <= self.provisional_until:
+      if any(mph != self.mph for mph, _conf in seen):
+        cancelled = self.mph
+        self._clear()
+        holding = False
+      elif seen:
+        # A second read of the same limit locks the 45 s hold.
+        self.provisional = False
+        self.until = now + self.hold_s
+    if self.provisional and now > self.provisional_until:
+      self.provisional = False
     if fresh_winners:
       new_mph, new_conf = max(fresh_winners, key=lambda item: item[1])
       if (not holding) or should_replace_held_mph(self.mph, self.conf, new_mph, new_conf):
@@ -396,6 +490,17 @@ class LiveSignHold:
         self.until = now + self.hold_s
       else:
         self.until = now + self.hold_s
+      self.provisional = False
+    elif not holding and solos:
+      # A locked hold is not replaced by one class-only read. An empty plate is.
+      choices = [item for item in solos if item[0] != cancelled]
+      if choices:
+        new_mph, new_conf = max(choices, key=lambda item: item[1])
+        self.mph = int(new_mph)
+        self.conf = float(new_conf)
+        self.until = now + self.hold_s
+        self.provisional = True
+        self.provisional_until = now + SOLO_CONTRADICT_S
     elif holding and any(is_speed_limit_sighting(s) for s in (signs or [])):
       self.until = now + self.hold_s
     live = now < self.until and self.mph > 0

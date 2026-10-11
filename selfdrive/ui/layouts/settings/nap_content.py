@@ -199,7 +199,9 @@ SPEED_SIGN_LOG_DESCRIPTION = (
   + "python -m scripts.nap.install_speed_sign_weights. "
   + "That button also installs the CPU runtime into /data/media/0/nap/pylib. "
   + "If the weights are present and the runtime is not, the plate shows NO RT "
-  + "and Settings says runtime missing."
+  + "and Settings says runtime missing. "
+  + "One read at 0.70 or higher on a real limit can light SIGN; a different "
+  + "limit within 3 s clears it. Detect alternates a lower tile and an upper tile."
 )
 
 INSTALL_SPEED_SIGN_WEIGHTS_INSTRUCTIONS = """\

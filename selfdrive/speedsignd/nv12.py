@@ -124,6 +124,16 @@ NATIVE_WINDOW_X = 1300
 NATIVE_WINDOW_Y = 520
 NATIVE_WINDOW_W = 628
 NATIVE_WINDOW_H = 320
+# Town routes put plates at y 340–795, x 968–1928. The lower tile starts at
+# y=520, so y=340 is above it. This upper tile is y 260–580 (includes 340,
+# overlaps the lower tile through y=580) and x 1288–1928 (the right cluster,
+# still inside the 1928-wide frame). All four numbers are even for NV12.
+# A third tile over x 960–1300 is not used: two tiles already spend the 25%
+# budget, and at a 627 ms infer a third tile would see each band ~7.5 s apart.
+NATIVE_UPPER_X = 1288
+NATIVE_UPPER_Y = 260
+NATIVE_UPPER_W = 640
+NATIVE_UPPER_H = 320
 # Unit-test tiles and a tight second-look crop are already small.
 _SMALL_FRAME = 320
 
@@ -171,6 +181,58 @@ def native_detect_window(h: int, w: int) -> tuple[int, int, int, int]:
   return x, y, max(2, ww), max(2, hh)
 
 
+def _even_rect(x: int, y: int, w: int, h: int, iw: int, ih: int) -> tuple[int, int, int, int]:
+  x -= x % 2
+  y -= y % 2
+  w -= w % 2
+  h -= h % 2
+  w = max(2, w)
+  h = max(2, h)
+  if x + w > iw:
+    x = max(0, iw - w)
+    x -= x % 2
+  if y + h > ih:
+    y = max(0, ih - h)
+    y -= y % 2
+  w = max(2, min(w, iw - x))
+  h = max(2, min(h, ih - y))
+  w -= w % 2
+  h -= h % 2
+  return x, y, max(2, w), max(2, h)
+
+
+def native_upper_window(h: int, w: int) -> tuple[int, int, int, int]:
+  """Upper right tile. On 1928×1208 this is (1288, 260, 640, 320)."""
+  ih, iw = int(h), int(w)
+  if iw == 1928 and ih == 1208:
+    return (NATIVE_UPPER_X, NATIVE_UPPER_Y, NATIVE_UPPER_W, NATIVE_UPPER_H)
+  if iw <= _SMALL_FRAME and ih <= _SMALL_FRAME:
+    return native_detect_window(h, w)
+  sx = iw / 1928.0
+  sy = ih / 1208.0
+  return _even_rect(
+    int(round(NATIVE_UPPER_X * sx)),
+    int(round(NATIVE_UPPER_Y * sy)),
+    int(round(NATIVE_UPPER_W * sx)),
+    int(round(NATIVE_UPPER_H * sy)),
+    iw, ih,
+  )
+
+
+def native_detect_windows(h: int, w: int) -> tuple[tuple[int, int, int, int], ...]:
+  """Lower tile, then the upper tile. Small frames stay one tile.
+
+  The live loop alternates these. A burst re-reads the tile that scored.
+  """
+  lower = native_detect_window(h, w)
+  if int(w) <= _SMALL_FRAME and int(h) <= _SMALL_FRAME:
+    return (lower,)
+  upper = native_upper_window(h, w)
+  if upper == lower:
+    return (lower,)
+  return (lower, upper)
+
+
 def upscale_gray(img: np.ndarray, min_side: int = 96) -> np.ndarray:
   """Upscale a tight plate crop so digit OCR has something to match."""
   if img.ndim != 2 or img.shape[0] < 2 or img.shape[1] < 2:
@@ -200,17 +262,19 @@ def copy_nv12_rect(buf, rect: tuple[int, int, int, int]) -> Nv12DetectCrop | Non
   return Nv12DetectCrop(y=y, uv=uv, frame_w=frame_w, frame_h=frame_h, crop=(cx, cy, cw, ch))
 
 
-def copy_nv12_detect_crop(buf) -> Nv12DetectCrop | None:
-  """Copy the native upper-right window only. No full-frame RGB.
+def copy_nv12_detect_crop(buf, which: int = 0) -> Nv12DetectCrop | None:
+  """Copy one detect tile. which=0 is the lower window, 1 is the upper.
 
-  The 628×320 window is ~200 KB of Y versus a 1208² crop (~1.5 MB) or a
-  full 1928×1208 RGB frame (~7 MB).
+  No full-frame RGB. The 628×320 window is ~200 KB of Y versus a 1208²
+  crop (~1.5 MB) or a full 1928×1208 RGB frame (~7 MB).
   """
   y_full = y_plane_from_nv12(buf, copy=False)
   if y_full is None:
     return None
   frame_h, frame_w = int(y_full.shape[0]), int(y_full.shape[1])
-  return copy_nv12_rect(buf, native_detect_window(frame_h, frame_w))
+  rects = native_detect_windows(frame_h, frame_w)
+  rect = rects[int(which) % len(rects)]
+  return copy_nv12_rect(buf, rect)
 
 
 def _copy_uv_crop(buf, frame_w: int, frame_h: int, cx: int, cy: int, cw: int, ch: int) -> np.ndarray | None:
