@@ -12,6 +12,7 @@ from openpilot.selfdrive.speedsignd.hud import (
   HUD_DETECT_PAUSED_TEXT,
   HUD_HOLD_S,
   HUD_MISSING_WEIGHTS_TEXT,
+  HUD_RUNTIME_MISSING_TEXT,
   LiveSignHold,
   is_speed_limit_sighting,
   should_replace_held_mph,
@@ -24,6 +25,7 @@ from openpilot.selfdrive.speedsignd.hud import (
   hud_confirm_visible,
   plate_digit_size,
   apply_live_sign,
+  apply_runtime_plate,
   hud_should_show,
   hud_should_show_detect_paused,
   hud_should_show_missing_weights,
@@ -115,6 +117,31 @@ def test_hud_missing_weights_plate_when_logger_on():
   assert not ev_blank.show
   ev_mph = live_sign_from_event(True, SimpleNamespace(mph=60, valid=True, weightsMissing=False), True)
   assert ev_mph.show_mph and ev_mph.plate_text == "60"
+
+
+def test_hud_runtime_missing_plate():
+  assert HUD_RUNTIME_MISSING_TEXT == "NO RT"
+  assert plate_digit_size("NO RT", 120) < plate_digit_size("55", 120)
+  missing_rt = live_sign_view(
+    enabled=True, msg_valid=True, mph=55, valid=True, runtime_missing=True,
+  )
+  assert missing_rt.show_runtime_missing and missing_rt.plate_text == "NO RT"
+  assert not missing_rt.show_mph
+  assert not hud_confirm_visible(missing_rt)
+  # NO WT wins when the ONNX itself is absent. Install gets both.
+  both = live_sign_view(
+    enabled=True, msg_valid=True, mph=55, valid=True,
+    weights_missing=True, runtime_missing=True,
+  )
+  assert both.plate_text == "NO WT"
+  mph_view = live_sign_view(enabled=True, msg_valid=True, mph=60, valid=True)
+  overlaid = apply_runtime_plate(mph_view, runtime_missing=True)
+  assert overlaid.plate_text == "NO RT"
+  kept = apply_runtime_plate(
+    live_sign_view(enabled=True, msg_valid=True, mph=0, valid=False, weights_missing=True),
+    runtime_missing=True,
+  )
+  assert kept.plate_text == "NO WT"
 
 
 def test_hud_wait_plate_when_detect_paused():
@@ -628,6 +655,8 @@ def test_ui_and_cereal_wire_live_sign():
   assert "SpeedSignHud" in mici
   onroad = (root / "selfdrive" / "ui" / "onroad" / "speed_sign_hud.py").read_text(encoding="utf-8")
   assert "NO WT" in onroad
+  assert "NO RT" in onroad
+  assert "runtime_missing" in onroad
   assert "WAIT" in onroad
   assert "bug" in onroad.lower() or "swaglog" in onroad.lower()
   assert "live_sign_from_event" in onroad

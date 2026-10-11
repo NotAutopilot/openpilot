@@ -1,18 +1,33 @@
 """Install-path helper: local copy and checksummed fetch onto /data."""
+import zipfile
 from pathlib import Path
 
 import pytest
 
 from openpilot.selfdrive.speedsignd.install import (
   MIN_ONNX_BYTES,
+  clear_runtime_status_cache,
   fetch_and_install,
+  install_runtime_wheel,
+  install_status_summary,
   install_weights,
+  runtime_status_summary,
   sha256_file,
+  vendored_runtime_ready,
+  vendored_sys_path,
   weights_present,
   weights_sha_matches,
   weights_status_summary,
 )
-from openpilot.selfdrive.speedsignd.weights_manifest import ASSET_SHA256, release_asset_url
+from openpilot.selfdrive.speedsignd.weights_manifest import (
+  ASSET_SHA256,
+  ORT_BYTES,
+  ORT_SHA256,
+  ORT_URL,
+  ORT_VERSION,
+  ORT_WHEEL,
+  release_asset_url,
+)
 from scripts.nap.install_speed_sign_weights import main
 from scripts.nap.script_lifecycle import script_reboots_on_exit
 
@@ -29,7 +44,7 @@ def test_cli_install(tmp_path):
   src = tmp_path / "m.onnx"
   src.write_bytes(b"abc")
   dest = tmp_path / "out.onnx"
-  assert main([str(src), "--out", str(dest)]) == 0
+  assert main([str(src), "--out", str(dest), "--skip-runtime"]) == 0
   assert dest.read_bytes() == b"abc"
 
 
@@ -55,7 +70,9 @@ def test_cli_download_file_url(tmp_path):
   src.write_bytes(b"from-url")
   dest = tmp_path / "installed.onnx"
   digest = sha256_file(str(src))
-  assert main(["--url", src.resolve().as_uri(), "--out", str(dest), "--sha256", digest]) == 0
+  assert main([
+    "--url", src.resolve().as_uri(), "--out", str(dest), "--sha256", digest, "--skip-runtime",
+  ]) == 0
   assert dest.read_bytes() == b"from-url"
 
 
@@ -118,3 +135,101 @@ def test_install_script_does_not_reboot_and_settings_wire_it():
   assert "weights_status_summary" in nap
   assert "weights_status_summary" in mici
   assert "NO WT" in content
+  assert "runtime missing" in content
+  assert "NO RT" in content
+  assert "pylib" in content
+
+
+def test_runtime_wheel_pin():
+  assert ORT_VERSION == "1.31.0"
+  assert "cp312" in ORT_WHEEL
+  assert ORT_WHEEL.endswith("manylinux_2_28_aarch64.whl")
+  assert ORT_SHA256 == "35758d7606d578ec5b9d65f6e8a1f488013194c3f6097038a3223cb26d35ef9a"
+  assert ORT_BYTES == 21420804
+  assert ORT_URL.endswith(ORT_WHEEL)
+  assert "pythonhosted.org" in ORT_URL
+
+
+def _fake_wheel(path: Path, payload: str = "vendored = True\n") -> str:
+  with zipfile.ZipFile(path, "w") as zf:
+    zf.writestr("onnxruntime/__init__.py", payload)
+    zf.writestr("onnxruntime-9.9.9.dist-info/METADATA", "Name: onnxruntime\n")
+    zf.writestr("../evil.py", "pwned")
+    zf.writestr("onnxruntime/../../outside.py", "pwned")
+    zf.writestr("numpy/__init__.py", "nope")
+  return sha256_file(str(path))
+
+
+def test_runtime_wheel_unzips_off_the_venv(tmp_path):
+  wheel = tmp_path / "ort.whl"
+  digest = _fake_wheel(wheel)
+  pylib = tmp_path / "pylib"
+  out = install_runtime_wheel(str(wheel), str(pylib), sha256=digest, version="9.9.9")
+  assert out == str(pylib)
+  assert (pylib / "onnxruntime" / "__init__.py").read_text(encoding="utf-8").startswith("vendored")
+  assert (pylib / "onnxruntime-9.9.9.dist-info" / "METADATA").is_file()
+  assert not (pylib / "evil.py").exists()
+  assert not (pylib / "outside.py").exists()
+  assert not (pylib / "numpy").exists()
+  assert vendored_runtime_ready(str(pylib), expected_sha=digest)
+  assert not vendored_runtime_ready(str(pylib))  # stamp is not the pinned 3X sha
+  assert "pylib" in (pylib / "onnxruntime.stamp").read_text(encoding="utf-8")
+
+
+def test_runtime_wheel_rejects_bad_sha(tmp_path):
+  wheel = tmp_path / "ort.whl"
+  _fake_wheel(wheel)
+  with pytest.raises(RuntimeError, match="SHA-256"):
+    install_runtime_wheel(str(wheel), str(tmp_path / "pylib"), sha256="0" * 64)
+
+
+def test_vendored_path_is_aarch64_only(tmp_path):
+  wheel = tmp_path / "ort.whl"
+  digest = _fake_wheel(wheel)
+  pylib = tmp_path / "pylib"
+  install_runtime_wheel(str(wheel), str(pylib), sha256=digest)
+  # x86 must not put the aarch64 wheel on sys.path, even when system ORT is absent.
+  assert vendored_sys_path("x86_64", str(pylib), False) is None
+  assert vendored_sys_path("aarch64", str(pylib), True) is None
+  # Default expected sha is the pinned wheel, so a fake stamp does not load.
+  assert vendored_sys_path("aarch64", str(pylib), False) is None
+  (pylib / "onnxruntime.stamp").write_text("onnxruntime 1.31.0\n" + ORT_SHA256 + "\npylib\n", encoding="utf-8")
+  assert vendored_sys_path("aarch64", str(pylib), False) == str(pylib)
+  assert vendored_sys_path("arm64", str(pylib), False) == str(pylib)
+  assert vendored_sys_path("x86_64", str(pylib), False) is None
+
+
+def test_runtime_missing_label(monkeypatch):
+  monkeypatch.setattr(
+    "openpilot.selfdrive.speedsignd.install.ensure_vendored_runtime", lambda: False,
+  )
+  monkeypatch.setattr(
+    "openpilot.selfdrive.speedsignd.install.cv2_dnn_importable", lambda: False,
+  )
+  clear_runtime_status_cache()
+  assert runtime_status_summary() == "runtime missing"
+  assert install_status_summary("/no/such/speed_sign.onnx") == "Missing · runtime missing"
+  clear_runtime_status_cache()
+
+
+def test_cli_also_installs_runtime(tmp_path, monkeypatch):
+  called = {}
+
+  def _fake(pylib=None, url=None, sha256=None):
+    called["yes"] = True
+    called["sha"] = sha256
+    return str(tmp_path / "pylib")
+
+  monkeypatch.setattr(
+    "scripts.nap.install_speed_sign_weights.fetch_and_install_runtime", _fake,
+  )
+  monkeypatch.setattr(
+    "scripts.nap.install_speed_sign_weights.runtime_status_summary",
+    lambda: "runtime onnxruntime 1.31.0",
+  )
+  src = tmp_path / "m.onnx"
+  src.write_bytes(b"abc")
+  dest = tmp_path / "out.onnx"
+  assert main([str(src), "--out", str(dest)]) == 0
+  assert called["yes"] is True
+  assert called["sha"] == ORT_SHA256

@@ -196,11 +196,14 @@ SPEED_SIGN_LOG_DESCRIPTION = (
   "roadside detection needs the compact YOLO ONNX on "
   "/data/media/0/nap/speed_sign.onnx. If that file is missing, onroad SIGN "
   "shows NO WT — use Install weights (Wi-Fi, offroad / Force Offroad), or: "
-  "python -m scripts.nap.install_speed_sign_weights."
+  + "python -m scripts.nap.install_speed_sign_weights. "
+  + "That button also installs the CPU runtime into /data/media/0/nap/pylib. "
+  + "If the weights are present and the runtime is not, the plate shows NO RT "
+  + "and Settings says runtime missing."
 )
 
 INSTALL_SPEED_SIGN_WEIGHTS_INSTRUCTIONS = """\
-Install speed-sign ONNX weights
+Install speed-sign ONNX weights and the CPU runtime
 
 Downloads the published YOLOv8n ONNX (~12 MB) from GitHub Release
 speed-sign-onnx-v2 / speed_sign.onnx and writes
@@ -208,20 +211,27 @@ speed-sign-onnx-v2 / speed_sign.onnx and writes
 file at that path. Settings → Speed Sign Weights shows Out of date when
 the sha does not match — tap Install weights again. Do not keep the v1 file.
 
-Without this file, Speed Sign Logger On still starts speedsignd, but the
+The same tap downloads pinned onnxruntime 1.31.0 (CPU, cp312, aarch64,
+SHA-256 checked) and unzips it into /data/media/0/nap/pylib. It does not
+pip-install and does not modify the system venv. speedsignd loads that
+directory via sys.path only when the image has no onnxruntime. Until
+that import works, Settings says runtime missing and the onroad plate
+shows NO RT.
+
+Without the ONNX, Speed Sign Logger On still starts speedsignd, but the
 onroad SIGN plate shows NO WT and will not read real roadside signs.
 
 PRECONDITIONS:
   1. Device is offroad / parked (Force Offroad if you are in the car)
-  2. Wi-Fi that can reach GitHub Releases
-  3. ~20 MiB free on /data
+  2. Wi-Fi that can reach GitHub Releases and files.pythonhosted.org
+  3. ~40 MiB free on /data
 
-Takes less than a minute. speedsignd retries the ONNX onroad without a
-reboot. Leave Logger On while disengaged until the first CPU compile
-finishes (reason=compile-wait while engaged), then engage. That compile
+Takes a couple of minutes. speedsignd retries the ONNX onroad without a
+reboot. Leave Logger On while disengaged until the first CPU session
+finishes (reason=compile-wait while engaged), then engage. That session
 is cached per weights sha under /data. A clear MUTCD R2-1 needs two
-agreeing reads. Inference stays on CPU: opencv-dnn or onnxruntime when
-the image has them, never the GPU.
+agreeing reads. Inference stays on CPU: the vendored onnxruntime, never
+the GPU. The stock 3X image has neither onnxruntime nor cv2.dnn.
 
 Does not write sqlite, does not change cruise / HUD MAX, and does not
 query osm.org.

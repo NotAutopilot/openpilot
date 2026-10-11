@@ -32,7 +32,8 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
 )
 from openpilot.selfdrive.ui.mici.layouts.settings.driving_mannerisms import DrivingMannerismsLayoutMici
 from openpilot.selfdrive.ui.mici.layouts.settings.map_speed import MapSpeedLimitLayoutMici
-from openpilot.selfdrive.speedsignd.install import weights_status_summary
+# Button value is install_status_summary. weights_status_summary is the weights-only label.
+from openpilot.selfdrive.speedsignd.install import install_status_summary
 from openpilot.selfdrive.car.tesla.preap_body_controls import (
   NAP_HIGH_LOW_BEAM,
   NAP_WIPER_SENSITIVITY,
@@ -227,7 +228,7 @@ class NAPLayoutMici(NavScroller):
 
     speed_sign_log = BigParamControl("speed sign logger", NAP_SPEED_SIGN_LOG)
 
-    self._weights_status = BigButton("speed sign weights", weights_status_summary())
+    self._weights_status = BigButton("speed sign weights", install_status_summary())
     install_weights_btn = BigButton("install weights", "start")
     install_weights_btn.set_click_callback(
       lambda: launch_script("Install weights", INSTALL_SPEED_SIGN_WEIGHTS_INSTRUCTIONS,
@@ -350,5 +351,5 @@ class NAPLayoutMici(NavScroller):
 
   def show_event(self):
     super().show_event()
-    self._weights_status.set_value(weights_status_summary())
+    self._weights_status.set_value(install_status_summary())
 

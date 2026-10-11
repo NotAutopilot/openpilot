@@ -10,6 +10,7 @@ import os
 PARAM_KEY = "NAPSpeedSignLog"
 LOG_FILENAME = "speed_signs.jsonl"
 ONNX_FILENAME = "speed_sign.onnx"
+PYLIB_DIRNAME = "pylib"
 
 
 def nap_data_dir() -> str:
@@ -30,3 +31,11 @@ def default_onnx_path() -> str:
   if override:
     return override
   return os.path.join(nap_data_dir(), ONNX_FILENAME)
+
+
+def default_pylib_dir() -> str:
+  """Vendored wheels. Not the system venv and not site-packages."""
+  override = os.environ.get("NAP_SPEED_SIGN_PYLIB")
+  if override:
+    return override
+  return os.path.join(nap_data_dir(), PYLIB_DIRNAME)

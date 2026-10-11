@@ -407,6 +407,11 @@ def test_model_skip_or_exec_over_50ms_pauses_at_least_10s():
   assert drop.reason() == "model-drop"
   assert not drop.hard_guard()
   assert model_guard_rest_s(4.0, 1.0, drop.reason(), False) == 12.0
+  # Route 0000017f: 177 s infer × 3 = 531 s. model-skip rest caps at 60 s.
+  assert model_guard_rest_s(177.0, 1.0, "model-skip", True) == 60.0
+  assert model_guard_rest_s(177.0, 1.0, "model-skip", False) == 60.0
+  assert model_guard_rest_s(177.0, 1.0, "model-skip+cpu-load", True) == 60.0
+  assert model_guard_rest_s(0.2, 1.0, "model-skip", True) == 10.0
 
 
 def test_cpu_share_meter_and_budget():

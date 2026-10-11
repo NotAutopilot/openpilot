@@ -24,6 +24,9 @@ AGREE_WINDOW_S = 12.0
 HUD_LABEL = "SIGN"
 # Logger On + ONNX missing: show this instead of a blank plate or a fake mph.
 HUD_MISSING_WEIGHTS_TEXT = "NO WT"
+# Weights are on disk but the CPU runtime is not. Install weights also
+# installs it. NO WT still wins when the ONNX itself is missing.
+HUD_RUNTIME_MISSING_TEXT = "NO RT"
 # WAIT plate if detectPaused is set. Engaged driving does not set it —
 # the mph hold stays up. Cereal-unknown is not WAIT.
 HUD_DETECT_PAUSED_TEXT = "WAIT"
@@ -72,16 +75,19 @@ def hud_should_show_detect_paused(enabled: bool, detect_paused: bool, weights_mi
 
 
 def hud_confirm_visible(view: LiveSignView | None = None, *, show_mph: bool = False, mph: int = 0,
-                        show_missing_weights: bool = False, show_detect_paused: bool = False) -> bool:
-  """Yes/No accuracy overlay: only when a real mph is on the plate, never for NO WT / WAIT."""
+                        show_missing_weights: bool = False, show_detect_paused: bool = False,
+                        show_runtime_missing: bool = False) -> bool:
+  """Yes/No accuracy overlay: only when a real mph is on the plate, never for NO WT / NO RT / WAIT."""
   if view is not None:
     show_mph = view.show_mph
     mph = view.mph
     show_missing_weights = view.show_missing_weights
     show_detect_paused = view.show_detect_paused
+    show_runtime_missing = view.show_runtime_missing
   return (
     bool(show_mph) and int(mph) > 0
     and not bool(show_missing_weights) and not bool(show_detect_paused)
+    and not bool(show_runtime_missing)
   )
 
 
@@ -144,15 +150,18 @@ class LiveSignView:
   mph: int = 0
   show_missing_weights: bool = False
   show_detect_paused: bool = False
+  show_runtime_missing: bool = False
 
   @property
   def show(self) -> bool:
-    return self.show_mph or self.show_missing_weights or self.show_detect_paused
+    return self.show_mph or self.show_missing_weights or self.show_detect_paused or self.show_runtime_missing
 
   @property
   def plate_text(self) -> str:
     if self.show_missing_weights:
       return HUD_MISSING_WEIGHTS_TEXT
+    if self.show_runtime_missing:
+      return HUD_RUNTIME_MISSING_TEXT
     if self.show_detect_paused:
       return HUD_DETECT_PAUSED_TEXT
     if self.show_mph:
@@ -186,12 +195,19 @@ def live_sign_view(
   valid: bool,
   weights_missing: bool = False,
   detect_paused: bool = False,
+  runtime_missing: bool = False,
 ) -> LiveSignView:
-  """What the on-road SIGN plate should show. No false mph when weights are missing."""
+  """What the on-road SIGN plate should show. No false mph when weights are missing.
+
+  runtime_missing is a disk check (the CPU wheel), not a cereal field.
+  NO WT wins over NO RT. NO RT wins over a tinygrad mph.
+  """
   if not enabled:
     return LiveSignView()
   if hud_should_show_missing_weights(True, weights_missing):
     return LiveSignView(show_missing_weights=True)
+  if runtime_missing:
+    return LiveSignView(show_runtime_missing=True)
   if hud_should_show_detect_paused(True, detect_paused, weights_missing):
     return LiveSignView(show_detect_paused=True)
   if not msg_valid:
@@ -199,6 +215,13 @@ def live_sign_view(
   if hud_should_show(True, valid, mph):
     return LiveSignView(show_mph=True, mph=int(mph))
   return LiveSignView()
+
+
+def apply_runtime_plate(view: LiveSignView, *, runtime_missing: bool) -> LiveSignView:
+  """Overlay NO RT from disk. Missing weights stay NO WT."""
+  if view.show_missing_weights or not runtime_missing:
+    return view
+  return LiveSignView(show_runtime_missing=True)
 
 
 def apply_live_sign(

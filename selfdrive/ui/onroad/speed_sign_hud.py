@@ -4,12 +4,15 @@ Large opaque MUTCD-style plate on the driver / left side of the onroad UI.
 TICI: below MAX. Mici: top-left.
 
 When the logger is On and ONNX weights failed to load, the plate shows
-NO WT instead of staying blank (and never a fake mph). When openpilot is
+NO WT instead of staying blank (and never a fake mph). When the weights
+are present but the CPU runtime is not installed, the plate shows NO RT
+(Install weights also installs that runtime). When openpilot is
 actively controlling, YOLO is skipped and the plate shows WAIT. If WAIT
 appears while the UI looks disengaged, that is a bug — report swaglog
 lines matching speedsignd. Manual driving (moving OK) still runs detect.
 
-Yes/No ("is this accurate?") appears only with a live mph — not for NO WT.
+Yes/No ("is this accurate?") appears only with a live mph — not for NO WT
+or NO RT.
 Those buttons are stubs: they do not change cruise, HUD MAX, or map speed.
 """
 from __future__ import annotations
@@ -32,6 +35,7 @@ from openpilot.selfdrive.speedsignd.hud import (
   TICI_SIGN_H,
   TICI_SIGN_W,
   accuracy_button_rects,
+  apply_runtime_plate,
   hit_accuracy_button,
   hud_confirm_visible,
   live_sign_from_event,
@@ -39,6 +43,7 @@ from openpilot.selfdrive.speedsignd.hud import (
   plate_digit_size,
   tici_sign_origin,
 )
+from openpilot.selfdrive.speedsignd.install import runtime_missing
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -82,7 +87,9 @@ def live_sign_from_sm(sm, enabled: bool) -> LiveSignView:
     msg_valid = bool(sm.valid["liveSpeedSignNAP"])
   except Exception:
     msg_valid = False
-  return live_sign_from_event(True, d, msg_valid)
+  view = live_sign_from_event(True, d, msg_valid)
+  # Disk, not a new cereal field. NO WT from the message still wins.
+  return apply_runtime_plate(view, runtime_missing=runtime_missing())
 
 
 def logger_enabled() -> bool:
@@ -197,7 +204,7 @@ def _draw_live_sign(rect_fn, rect: rl.Rectangle, font_bold, font_label, digit_si
   view = live_sign_from_sm(ui_state.sm, logger_enabled())
   if not view.show:
     return view
-  if view.show_missing_weights:
+  if view.show_missing_weights or view.show_runtime_missing:
     ink = _SIGN_MISSING_INK
   elif view.show_detect_paused:
     ink = _SIGN_PAUSED_INK

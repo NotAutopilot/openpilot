@@ -138,6 +138,9 @@ MODEL_DROP_PERC = 5.0
 # or the model itself stalled. Pause at least 10 s. Same for any frameId skip.
 MODEL_EXEC_LIMIT_S = 0.050
 MODEL_GUARD_PAUSE_S = 10.0
+# Route 0000017f: a 177 s infer times IDLE_FACTOR made extra_ms 531828.
+# model-skip rest is capped so one slow compile cannot hide the plate for 9 min.
+MODEL_SKIP_BACKOFF_CAP_S = 60.0
 SECOND_LOOK_FRAMES = 2
 SECOND_LOOK_DEADLINE_S = 0.30
 VISION_TIMEOUT_MS = 200
@@ -492,10 +495,16 @@ def backoff_extra_s(infer_s: float, period_s: float, reason: str) -> float:
 
 
 def model_guard_rest_s(infer_s: float, period_s: float, reason: str, hard: bool) -> float:
-  """Frame-drop backoff, with a 10 s floor on a frame skip or modeld > 50 ms."""
+  """Frame-drop backoff, with a 10 s floor on a frame skip or modeld > 50 ms.
+
+  Any reason that includes model-skip is also capped at 60 s, hard or not.
+  model-drop and model-exec keep the uncapped 3× rest.
+  """
   extra = backoff_extra_s(infer_s, period_s, reason)
   if hard:
-    return max(extra, MODEL_GUARD_PAUSE_S)
+    extra = max(extra, MODEL_GUARD_PAUSE_S)
+  if reason and "model-skip" in reason:
+    return min(extra, MODEL_SKIP_BACKOFF_CAP_S)
   return extra
 
 
@@ -1082,13 +1091,16 @@ def format_backoff_timing(
   )
 
 
-def _log_infer_timing(cloudlog, infer_ms: list[float], skip_count: int, hz: float, engaged: bool) -> None:
+def _log_infer_timing(cloudlog, infer_ms: list[float], skip_count: int, hz: float, engaged: bool,
+                      threads: int = 1) -> None:
   n = len(infer_ms)
   mean_ms = sum(infer_ms) / n if n else 0.0
   max_ms = max(infer_ms) if n else 0.0
+  os_n = read_proc_thread_count()
+  os_s = "na" if os_n is None else str(int(os_n))
   cloudlog.info(
-    "speedsignd timing hz=%.2f infer_ms mean=%.1f max=%.1f n=%d skip=%d engaged=%d",
-    hz, mean_ms, max_ms, n, skip_count, int(bool(engaged)),
+    "speedsignd timing hz=%.2f infer_ms mean=%.1f max=%.1f n=%d skip=%d engaged=%d threads=%d os_threads=%s",
+    hz, mean_ms, max_ms, n, skip_count, int(bool(engaged)), int(threads), os_s,
   )
 
 
@@ -1194,6 +1206,9 @@ def main():
   if detector.onnx is not None and detector.onnx.session is not None:
     backend = assert_cpu_backend(detector.onnx.session)
   runtimes = describe_infer_runtimes()
+  os_threads = read_proc_thread_count()
+  from openpilot.selfdrive.speedsignd.install import runtime_missing, runtime_status_summary
+  runtime_label = runtime_status_summary()
   cloudlog.info(
     "speedsignd cpu-only asserted backend=%s runtimes=%s dev=%s qcom=%s gpu=%s cpu_count=%s",
     backend, runtimes, os.environ.get("DEV", ""), os.environ.get("QCOM", ""),
@@ -1201,11 +1216,19 @@ def main():
   )
   cloudlog.info(
     "speedsignd starting log=%s backend=%s onnx=%s sha=%s sm_hz=%.1f detect_hz=%.2f "
-    + "budget_ms=%.0f cap_ms=%.0f threads=%d cores=%s nice=%d sched=%s "
-    + "detect_while_engaged=1 crop_rgb=1 duty=%.2f",
+    + "budget_ms=%.0f cap_ms=%.0f threads=%d os_threads=%s cores=%s nice=%d sched=%s "
+    + "detect_while_engaged=1 crop_rgb=1 duty=%.2f runtime=%s",
     log_path, backend, onnx_path, weights_sha, SM_HZ, hz, INFER_BUDGET_MS, cap_ms, threads,
+    "na" if os_threads is None else str(int(os_threads)),
     ",".join(str(c) for c in SPEEDSIGND_CORES), SPEEDSIGND_NICE, sched_name, CPU_BUDGET,
+    runtime_label,
   )
+  if runtime_missing():
+    cloudlog.warning(
+      "speedsignd runtime missing — Settings → NAP → Install weights also installs "
+      + "onnxruntime into /data/media/0/nap/pylib (not the system venv). "
+      + "The plate shows NO RT. CLANG will not run while engaged.",
+    )
   if detector.onnx is None:
     cloudlog.warning(
       "speedsignd: no ONNX at %s — numpy fallback will not see real roadside signs. "
@@ -1255,6 +1278,15 @@ def main():
     observe_model(model_watch, sm)
     now_mono = time.monotonic()
     sample = engagement_from_sm(sm, now=now_mono, started_at=started_at)
+    # Refresh every tick, before any infer starts. The first frame of a boot
+    # that is already engaged sees controlling=True and does not compile.
+    # Unknown cereal is not permission either. The worker re-reads this flag
+    # inside run(), so a flip before realize still aborts.
+    detector.allow_compile(compile_allowed(
+      known=bool(sample.known),
+      controlling=bool(sample.controlling),
+      ready=detector.compile_ready(),
+    ))
     live_model = model_watch.reason()
     if live_model and not model_extended:
       hard_now = model_watch.hard_guard()
@@ -1285,9 +1317,10 @@ def main():
         next_detect = 0.0
         in_holdoff = False
       slot.resume()
-      # A compile that started disengaged must not keep running after engage.
-      # pause() drops the result. The clang call already in flight can still
-      # finish; the next start is refused until known-disengaged.
+      # Engaged + not yet compiled: drop a queued result. The worker also
+      # re-reads allow_compile before realize, so boot-already-engaged never
+      # enters clang. A realize that has already entered clang cannot be
+      # killed; that only happens after a known-disengaged start.
       if sample.controlling and slot.busy and not detector.compile_ready():
         slot.pause()
     if last_allow != sample.allow_detect or last_paused != sample.detect_paused:
@@ -1305,7 +1338,7 @@ def main():
       )
       last_unknown_warn = now_mono
     if now_mono - last_timing_log >= INFER_LOG_PERIOD_S:
-      _log_infer_timing(cloudlog, infer_ms, skip_count, hz, sample.controlling)
+      _log_infer_timing(cloudlog, infer_ms, skip_count, hz, sample.controlling, threads)
       infer_ms = []
       skip_count = 0
       last_timing_log = now_mono
@@ -1504,8 +1537,9 @@ def main():
           detector.allow_compile(permitted)
 
           def _run(nv12=nv12, lat=lat, lon=lon, bearing=bearing, gps_ok=gps_ok,
-                   engaged_now=engaged_now, stalled=stalled, permitted=permitted):
-            if not permitted and not detector.compile_ready():
+                   engaged_now=engaged_now, stalled=stalled):
+            # Live flag, not the value captured when this read was scheduled.
+            if not detector.compile_allowed_now():
               raise RuntimeError("compile-blocked while driving")
             signs_w = detect_if_allowed(
               nv12.y, lat, lon, bearing, gps_ok, detector, logger, time.monotonic(),

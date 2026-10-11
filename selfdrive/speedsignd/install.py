@@ -1,16 +1,29 @@
-"""Install the compact speed-sign ONNX onto /data. No osm.org, no sqlite."""
+"""Install the compact speed-sign ONNX onto /data. No osm.org, no sqlite.
+
+The same offroad action installs a pinned aarch64 CPU onnxruntime wheel
+into /data/media/0/nap/pylib. That directory is added to sys.path only
+when the system import fails and the machine is aarch64. The system
+venv is not modified.
+"""
 from __future__ import annotations
 
 import hashlib
 import os
+import platform
 import shutil
+import sys
+import time
 import urllib.error
 import urllib.request
+import zipfile
 from urllib.parse import unquote, urlparse
 
-from openpilot.selfdrive.speedsignd.paths import default_onnx_path
+from openpilot.selfdrive.speedsignd.paths import default_onnx_path, default_pylib_dir
 from openpilot.selfdrive.speedsignd.weights_manifest import (
   ASSET_SHA256,
+  ORT_SHA256,
+  ORT_URL,
+  ORT_VERSION,
   USER_AGENT,
   release_asset_url,
 )
@@ -151,3 +164,199 @@ def fetch_and_install(
       pass
     raise
   return dest
+
+
+RUNTIME_STAMP = "onnxruntime.stamp"
+_AARCH64 = ("aarch64", "arm64")
+_status_cache: dict[str, float | str] = {"t": 0.0, "s": ""}
+
+
+def host_is_aarch64(machine: str | None = None) -> bool:
+  name = platform.machine() if machine is None else machine
+  return name.lower() in _AARCH64
+
+
+def runtime_stamp_path(pylib: str | None = None) -> str:
+  return os.path.join(pylib or default_pylib_dir(), RUNTIME_STAMP)
+
+
+def clear_runtime_status_cache() -> None:
+  _status_cache["t"] = 0.0
+  _status_cache["s"] = ""
+
+
+def vendored_runtime_ready(pylib: str | None = None, expected_sha: str | None = None) -> bool:
+  """True when pylib has the onnxruntime package and a matching stamp."""
+  pylib = pylib or default_pylib_dir()
+  expected = ORT_SHA256 if expected_sha is None else expected_sha
+  init = os.path.join(pylib, "onnxruntime", "__init__.py")
+  stamp = runtime_stamp_path(pylib)
+  if not expected or not os.path.isfile(init) or not os.path.isfile(stamp):
+    return False
+  try:
+    with open(stamp, encoding="utf-8") as f:
+      text = f.read()
+  except OSError:
+    return False
+  return expected.lower() in text.lower()
+
+
+def _wheel_members(zf: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
+  """onnxruntime package and its dist-info only. No path traversal."""
+  out: list[zipfile.ZipInfo] = []
+  for info in zf.infolist():
+    name = info.filename.replace("\\", "/")
+    if name.startswith(("/", "../")) or "/../" in name:
+      continue
+    parts = [p for p in name.split("/") if p and p != "."]
+    if not parts or ".." in parts:
+      continue
+    top = parts[0]
+    pkg = top == "onnxruntime"
+    dist = top.startswith("onnxruntime-") and top.endswith(".dist-info")
+    if pkg or dist:
+      info.filename = "/".join(parts)
+      out.append(info)
+  return out
+
+
+def install_runtime_wheel(
+  wheel: str,
+  pylib: str | None = None,
+  sha256: str | None = ORT_SHA256,
+  version: str = ORT_VERSION,
+) -> str:
+  """Unzip a wheel into pylib. Does not call pip and does not touch the venv."""
+  if not os.path.isfile(wheel):
+    raise FileNotFoundError("runtime wheel not found: " + wheel)
+  if sha256:
+    verify_sha256(wheel, sha256)
+  pylib = pylib or default_pylib_dir()
+  os.makedirs(pylib, exist_ok=True)
+  pkg = os.path.join(pylib, "onnxruntime")
+  if os.path.isdir(pkg):
+    shutil.rmtree(pkg)
+  for name in os.listdir(pylib):
+    if name.startswith("onnxruntime-") and name.endswith(".dist-info"):
+      shutil.rmtree(os.path.join(pylib, name), ignore_errors=True)
+  with zipfile.ZipFile(wheel) as zf:
+    members = _wheel_members(zf)
+    if not any(m.filename.startswith("onnxruntime/") for m in members):
+      raise RuntimeError("wheel has no onnxruntime package: " + wheel)
+    zf.extractall(pylib, members)
+  init = os.path.join(pylib, "onnxruntime", "__init__.py")
+  if not os.path.isfile(init):
+    raise RuntimeError("wheel extract missed onnxruntime/__init__.py")
+  stamp = runtime_stamp_path(pylib)
+  body = "onnxruntime " + version + "\n" + (sha256 or "") + "\n" + "pylib\n"
+  tmp = stamp + ".tmp"
+  with open(tmp, "w", encoding="utf-8") as f:
+    f.write(body)
+  os.replace(tmp, stamp)
+  clear_runtime_status_cache()
+  return pylib
+
+
+def fetch_and_install_runtime(
+  pylib: str | None = None,
+  url: str | None = None,
+  sha256: str | None = ORT_SHA256,
+) -> str:
+  """Download the pinned CPU wheel and unzip it under pylib.
+
+  A matching stamp skips the download. The system venv is not modified.
+  """
+  pylib = pylib or default_pylib_dir()
+  if sha256 and vendored_runtime_ready(pylib, expected_sha=sha256):
+    return pylib
+  url = url or os.environ.get("NAP_SPEED_SIGN_RUNTIME_URL") or ORT_URL
+  os.makedirs(pylib, exist_ok=True)
+  wheel = os.path.join(pylib, "onnxruntime.whl.partial")
+  try:
+    download_url(url, wheel)
+    return install_runtime_wheel(wheel, pylib, sha256=sha256)
+  finally:
+    try:
+      if os.path.isfile(wheel):
+        os.remove(wheel)
+    except OSError:
+      pass
+
+
+def system_ort_importable() -> bool:
+  """True when onnxruntime imports without the vendored pylib on sys.path."""
+  try:
+    import onnxruntime  # noqa: F401
+    return True
+  except Exception:
+    return False
+
+
+def cv2_dnn_importable() -> bool:
+  try:
+    import cv2
+  except Exception:
+    return False
+  dnn = getattr(cv2, "dnn", None)
+  return dnn is not None and hasattr(dnn, "readNetFromONNX")
+
+
+def vendored_sys_path(machine: str, pylib: str, system_ok: bool) -> str | None:
+  """Directory to insert, or None. Never shadow a working system import.
+
+  The wheel is aarch64. Putting it first on sys.path on x86 would hide
+  a working CPU wheel with an ELF the host cannot load.
+  """
+  if system_ok:
+    return None
+  if not host_is_aarch64(machine):
+    return None
+  if not vendored_runtime_ready(pylib):
+    return None
+  return pylib
+
+
+def ensure_vendored_runtime() -> bool:
+  """Import onnxruntime, using /data pylib only as the aarch64 fallback."""
+  if system_ort_importable():
+    return True
+  pylib = vendored_sys_path(platform.machine(), default_pylib_dir(), False)
+  if pylib is None:
+    return False
+  if pylib not in sys.path:
+    sys.path.insert(0, pylib)
+  return system_ort_importable()
+
+
+def _runtime_status_uncached() -> str:
+  if ensure_vendored_runtime():
+    try:
+      import onnxruntime as ort
+      ver = str(getattr(ort, "__version__", "") or ORT_VERSION)
+    except Exception:
+      ver = ORT_VERSION
+    return "runtime onnxruntime " + ver
+  if cv2_dnn_importable():
+    return "runtime opencv-dnn"
+  return "runtime missing"
+
+
+def runtime_status_summary() -> str:
+  """Settings/HUD label. 'runtime missing' until ORT or cv2.dnn can import."""
+  now = time.monotonic()
+  cached = _status_cache.get("s") or ""
+  if cached and now - float(_status_cache.get("t") or 0.0) < 2.0:
+    return str(cached)
+  text = _runtime_status_uncached()
+  _status_cache["t"] = now
+  _status_cache["s"] = text
+  return text
+
+
+def runtime_missing() -> bool:
+  return runtime_status_summary() == "runtime missing"
+
+
+def install_status_summary(path: str | None = None) -> str:
+  """Weights label plus the runtime. Weights strings stay on their own helper."""
+  return weights_status_summary(path) + " · " + runtime_status_summary()

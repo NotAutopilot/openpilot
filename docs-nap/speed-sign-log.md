@@ -4,7 +4,7 @@ On-drive MUTCD numeric speed-sign logger for comma 3X. **Default off.** Log-only
 
 Stock `modelV2` has no `speedSign` head. This is a separate process (`speedsignd`) that reads the ROAD camera + GNSS and runs a compact **YOLOv8 ONNX** (US traffic-sign classes, including 55/60). The old numpy template matcher is tests/dev only — it does not see real roadside signs.
 
-**Driving model first.** Route 0000017a showed the failure was the GPU, not the CPU budget. modeld sat at 22–26 ms until speedsignd's tinygrad realize dispatched onto the same Adreno (QCOM) modeld uses, and modeld jumped to 300–710 ms. Inference is now CPU only: `onnxruntime` `CPUExecutionProvider` with `intra_op_num_threads=1` when that package is installed, otherwise tinygrad `DEV=CPU` (CLANG/LLVM renderer, `CPU_COUNT=1`, GPU and QCOM forced off). A startup assertion refuses any other device. The first realize compiles (~108 s on the road test) and is refused while engaged (`reason=compile-wait`). 4 Hz YOLO can still show “driving model is lagging”, ~35% `modeld` frame drops, **TAKE CONTROL IMMEDIATELY**, or “Communication Issue Between Processes.”
+**Driving model first.** Route 0000017a showed the failure was the GPU, not the CPU budget. modeld sat at 22–26 ms until speedsignd's tinygrad realize dispatched onto the same Adreno (QCOM) modeld uses, and modeld jumped to 300–710 ms. Inference is CPU only. The stock 3X image has neither `onnxruntime` nor `cv2.dnn` (route 00000180 logged `onnxruntime-absent(ModuleNotFoundError)` and `cv2-dnn-absent` and fell back to tinygrad CLANG). **Install weights** also installs pinned onnxruntime **1.31.0** CPU (`cp312`, `manylinux_2_28_aarch64`) into `/data/media/0/nap/pylib` and speedsignd loads it with `sys.path`. That wheel is not pip-installed and does not touch the system venv. Session options stay `CPUExecutionProvider`, `intra_op_num_threads=1`. Tinygrad `DEV=CPU` / CLANG remains the slow fallback only, and its first realize is refused while engaged (`reason=compile-wait`), including when the first frame arrives already engaged at boot. 4 Hz YOLO can still show “driving model is lagging”, ~35% `modeld` frame drops, **TAKE CONTROL IMMEDIATELY**, or “Communication Issue Between Processes.”
 
 **Logger On keeps running YOLO while openpilot is engaged** (`selfdriveState.active`, or state in enabled / softDisabling / overriding). The process and SIGN / NO WT HUD still start. The plate shows the held mph while engaged. It does **not** show **WAIT** for that — WAIT was the old pause, and it is why a drive that was engaged 95% of the time never read a sign.
 
@@ -18,7 +18,7 @@ Detect is **1 Hz** or slower, `SCHED_IDLE` (else nice 19), little **core 2** onl
 
 ## Enable
 
-1. **Install weights** (once, Wi-Fi) — Settings → NAP → **Install weights** (offroad / Force Offroad), or SSH below. Without `/data/media/0/nap/speed_sign.onnx` the onroad SIGN plate shows **NO WT** and will not light mph on real signs.
+1. **Install weights** (once, Wi-Fi) — Settings → NAP → **Install weights** (offroad / Force Offroad), or SSH below. That installs the ONNX and the CPU runtime. Without `/data/media/0/nap/speed_sign.onnx` the onroad SIGN plate shows **NO WT**. With the ONNX but without the runtime, Settings says **runtime missing** and the plate shows **NO RT**. Neither will light mph on real signs.
 2. **Settings → NAP → Speed Sign Logger** → On  
    (comma 4 / mici: **Settings → NAP → speed sign logger**)
 3. Or: `Params().put_bool("NAPSpeedSignLog", True)` / `echo -n 1 > /data/params/d/NAPSpeedSignLog`
@@ -34,14 +34,22 @@ Optional detect rate (default 1 Hz, clamped 0.2–4): `NAP_SPEED_SIGN_HZ=0.5` in
 Manual detect is **cheap-path** so Logger On is less likely to starve `modeld`:
 
 - one right-side window of the 1928×1208 ROAD frame, **x=1300, y=520, 628×320** (through x=1928, y=840), letterboxed into the 320 ONNX — never a full-frame RGB convert, and not the old 1208² letterbox (that left an 80 ft sign at about 20 px). Route 0000017a signs sat at about y=557–805, x=1110–1914. Scale is 320/628 ≈ 0.51. The v2 detector was trained on 640 crops resized to 320 (scale 0.5), so this window stays. A sign ≥ 60 px tall stays ≥ 30 px in the model.
-- **CPU only.** Order: `onnxruntime` `CPUExecutionProvider` if that package is installed (it is not in the stock 3X image), else `cv2.dnn` with `DNN_BACKEND_OPENCV` and `DNN_TARGET_CPU` when `cv2.dnn.readNetFromONNX` exists, else tinygrad on `DEV=CPU` with the CLANG renderer, `CPU_COUNT=1`, `BEAM=0`, `NOOPT=0`, and `GPU`/`QCOM` set to 0. Startup logs `speedsignd cpu-only asserted backend=...` and raises if the device is not CPU. OpenCL is forced off.
-- **No compile while engaged.** The first realize runs only when `selfdriveState` is known and not controlling. Unknown cereal is not that window. Engaged reads wait (`reason=compile-wait`). The kernels are written under `/data/media/0/nap/speed_sign_cache/<sha>/` so that clang compile happens once per weights sha.
+- **CPU only.** Order: vendored or system `onnxruntime` `CPUExecutionProvider` (the 3X install puts 1.31.0 on `sys.path` from `/data/media/0/nap/pylib`), else `cv2.dnn` with `DNN_BACKEND_OPENCV` and `DNN_TARGET_CPU` when `cv2.dnn.readNetFromONNX` exists (it does not on this 3X), else tinygrad on `DEV=CPU` with the CLANG renderer, `CPU_COUNT=1`, `BEAM=0`, `NOOPT=0`, and `GPU`/`QCOM` set to 0. Startup logs `speedsignd cpu-only asserted backend=...` plus `threads=` (the BLAS pool, must be 1) and `os_threads=` (every OS thread) and raises if the device is not CPU. OpenCL is forced off.
+- **No compile while engaged.** The first realize runs only when `selfdriveState` is known and not controlling. Unknown cereal is not that window. A boot whose first frame is already engaged does not compile. The worker re-reads that flag before realize. Engaged reads wait (`reason=compile-wait`). The kernels are written under `/data/media/0/nap/speed_sign_cache/<sha>/` so that clang compile happens once per weights sha. `model-skip` rest is capped at **60 s** (route 0000017f logged a 531828 ms backoff after a 177 s compile).
 - **1 ONNX / BLAS thread** (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `TINYGRAD_NUM_THREADS`, `CPU_COUNT`, and the rest, all forced to 1)
 - pinned to **little core 2** (modeld stays FIFO on core 7)
 - `NAP_SPEED_SIGN_INFER_CAP_MS` default **800** is logged only. It does **not** add a second wait. Pressure adds another 3× infer of rest. `modelV2.frameDropPerc` backs off before the lag alert. Any skipped `frameId`, or `modelExecutionTime` above 0.050 s, pauses at least 10 s.
 - `os.sched_yield()` while an infer is busy
 
-YOLOv8n-320 is about **2.2 GFLOP**. Route 0000017e measured tinygrad CLANG at about **5800 ms** (0.38 GFLOP/s) after a ~3 minute first compile. That steady time is the kernel, not a per-call recompile: ClangJITCompiler emits freestanding C at `-O2` and does not run LLVM's loop/SLP vectorizer, so the kernels stay scalar. `BEAM` and `NOOPT` were already off. A one-thread bench on an AVX-512 Xeon at 2.4 GHz measured **onnxruntime 12 ms** and **cv2.dnn 25 ms** for this same file. One A55 at 1.8 GHz peaks near 14 GFLOP/s (8 FP32 FLOP/cycle). Scaling that cv2.dnn result by peak (about 14/150) is about **270 ms** if the 3X OpenCV build keeps a similar fraction of peak; a more conservative 30% of peak is about **500 ms**. Expect about **300 ms** when `backend=opencv-dnn-cpu` or `onnxruntime-cpu`, and a start-to-start gap of **max(1 s, 4× infer)** so about **1.2 s** (`read_interval_ms` ≈ 1200, `cpu_share` ≤ 0.250, `reason=pace`). The tinygrad CLANG fallback stays multi-second. The first compile still waits until disengaged (`reason=compile-wait`) and then is cached for that weights sha.
+YOLOv8n-320 is about **2.2 GFLOP**. Expected timing on one Cortex-A55 after Install weights:
+
+| backend | where it exists | expected infer | read gap |
+|---|---|---|---|
+| `onnxruntime-cpu` | vendored 1.31.0 wheel (this is the 3X path) | **~300 ms** (plan **150–400 ms**) | **~1.2 s** |
+| `opencv-dnn-cpu` | not in the stock 3X image | **~300–500 ms** if some other image has it | **~1.2–2 s** |
+| `tinygrad-clang` | always, slow fallback | **~5800 ms** steady, first compile **~177 s** | multi-second, and the compile must not run while engaged |
+
+Route 0000017e measured tinygrad CLANG at about **5800 ms** (0.38 GFLOP/s) after a ~3 minute first compile. Route 0000017f (nap-dev) measured the first compile at **177 s**, finished while engaged, `threads=11`, then a false `model-skip` backoff of **531828 ms**. That steady CLANG time is the kernel, not a per-call recompile: ClangJITCompiler emits freestanding C at `-O2` and does not run LLVM's loop/SLP vectorizer, so the kernels stay scalar. `BEAM` and `NOOPT` were already off. A one-thread bench of this same file on onnxruntime **1.31.0** `CPUExecutionProvider` (AVX-512 Xeon at 2.4 GHz) measured **12 ms** (~180 GFLOP/s). **cv2.dnn** on that host was **25 ms**. One A55 at 1.8 GHz peaks near 14 GFLOP/s (8 FP32 FLOP/cycle). The Xeon peak is on the order of 150 GFLOP/s, so scaling the 12 ms ORT result by peak (14/150) is about **130 ms** if the A55 build keeps the same fraction of peak. ORT was near peak on x86; an A55 at 30–50% of its peak is about **300–500 ms**. Plan **~300 ms** and a start-to-start gap of **max(1 s, 4× infer)** so about **1.2 s** (`read_interval_ms` ≈ 1200, `cpu_share` ≤ 0.250, `threads=1`, `reason=pace`) when `backend=onnxruntime-cpu`. The 3X does not have cv2.dnn, so do not expect `opencv-dnn-cpu` there. The tinygrad CLANG fallback stays multi-second and is not the path after Install weights. The first session still waits until disengaged (`reason=compile-wait`), including a boot that is already engaged, and is then cached for that weights sha. `model-skip` extra rest is capped at 60 s.
 
 Onroad, `swaglog` prints `speedsignd detect paused (controlling=True enabled=… active=… state=… alive=… valid=…)` when you SET, `speedsignd abandon in-flight ONNX` if a YOLO was still running, and every infer:
 
@@ -70,7 +78,7 @@ A 15 s summary still prints `speedsignd timing hz=… infer_ms mean=… max=… 
 
 No large weights in git (~12 MB ONNX). Same idea as the OSM map pack: fetch onto `/data` with a SHA-256 check. A new sha replaces the file at the same path. The old v1 weights must not stay.
 
-On the 3X (parked / Force Offroad, Wi-Fi): **Settings → NAP → Install weights** → Start. Settings shows **Speed Sign Weights: Installed**, **Out of date**, or **Missing**. **Out of date** means the file is present but the sha is not v2 — tap Install weights again; the download replaces it. Progress and errors stay on that runner screen (does not block the rest of the UI, does not reboot). speedsignd will not load a mismatched sha (the plate stays **NO WT** until the file matches).
+On the 3X (parked / Force Offroad, Wi-Fi): **Settings → NAP → Install weights** → Start. That downloads both files. Settings shows **Speed Sign Weights: Installed**, **Out of date**, or **Missing**, and **runtime onnxruntime 1.31.0** or **runtime missing**. **Out of date** means the ONNX is present but the sha is not v2 — tap Install weights again; the download replaces it. **runtime missing** means the wheel is not importable yet — the same button installs it; the onroad plate shows **NO RT** (NO WT still wins when the ONNX itself is missing). Progress and errors stay on that runner screen (does not block the rest of the UI, does not reboot). speedsignd will not load a mismatched sha (the plate stays **NO WT** until the file matches).
 
 Or SSH:
 
@@ -82,9 +90,12 @@ That downloads GitHub Release `speed-sign-onnx-v2` / `speed_sign.onnx` and write
 
 | | |
 |---|---|
-| Install path | `/data/media/0/nap/speed_sign.onnx` |
-| Override | env `NAP_SPEED_SIGN_ONNX` or `--out` |
-| SHA-256 | `weights_manifest.ASSET_SHA256` (checked on download) |
+| ONNX path | `/data/media/0/nap/speed_sign.onnx` |
+| Runtime path | `/data/media/0/nap/pylib` (unzipped wheel, not the system venv) |
+| Override | env `NAP_SPEED_SIGN_ONNX` or `--out`; pylib via `NAP_SPEED_SIGN_PYLIB` |
+| ONNX SHA-256 | `1131200b7fe2d400596e09d7680fc3a26a08dcd8952acfdf261170bdb22d3d28` |
+| Runtime | onnxruntime `1.31.0` `cp312` `manylinux_2_28_aarch64`, 21420804 bytes |
+| Runtime SHA-256 | `35758d7606d578ec5b9d65f6e8a1f488013194c3f6097038a3223cb26d35ef9a` |
 
 If the Release asset is not up yet, export once on a PC (needs `pip install ultralytics onnx`), then copy:
 
@@ -99,7 +110,7 @@ python -m scripts.nap.install_speed_sign_weights /tmp/speed_sign.onnx
 
 Or pass `--url` at a local `file://` / HTTP path. `--sha256 ''` skips the digest (local experiments only).
 
-Shipped detector: GitHub Release `speed-sign-onnx-v2`, file `speed_sign.onnx`, YOLOv8n, imgsz 320, opset 12, input `images` 1×3×320×320, output `[1, 17, 2100]`. Classes, in order: `sl_25`, `sl_30`, `sl_35`, `sl_40`, `sl_45`, `sl_50`, `sl_55`, `sl_60`, `sl_65`, `sl_70`, `sl_unreadable`, `neg_yellow`, `neg_other`. SHA-256 `1131200b7fe2d400596e09d7680fc3a26a08dcd8952acfdf261170bdb22d3d28`, 12658953 bytes. Runtime: `onnxruntime` CPUExecutionProvider if that package is installed (it is not in the stock 3X image), else `cv2.dnn` on the CPU target when the image has `readNetFromONNX`, else tinygrad `OnnxRunner` on `DEV=CPU` / CLANG with GPU and QCOM off and the kernel cache under `/data`. The startup log names which one loaded. Prefer `opencv-dnn-cpu` on the 3X. `tinygrad-clang` is the slow fallback.
+Shipped detector: GitHub Release `speed-sign-onnx-v2`, file `speed_sign.onnx`, YOLOv8n, imgsz 320, opset 12, input `images` 1×3×320×320, output `[1, 17, 2100]`. Classes, in order: `sl_25`, `sl_30`, `sl_35`, `sl_40`, `sl_45`, `sl_50`, `sl_55`, `sl_60`, `sl_65`, `sl_70`, `sl_unreadable`, `neg_yellow`, `neg_other`. SHA-256 `1131200b7fe2d400596e09d7680fc3a26a08dcd8952acfdf261170bdb22d3d28`, 12658953 bytes. Runtime: pinned CPU wheel `onnxruntime-1.31.0-cp312-cp312-manylinux_2_28_aarch64.whl` (SHA-256 `35758d7606d578ec5b9d65f6e8a1f488013194c3f6097038a3223cb26d35ef9a`, 21420804 bytes), unzipped into `/data/media/0/nap/pylib` and imported via `sys.path` when the system package is absent. The ELF is AArch64, needs only glibc 2.28 (AGNOS 18.4 is newer), and does not link CUDA. Else `cv2.dnn` on the CPU target when the image has `readNetFromONNX` (this 3X does not), else tinygrad `OnnxRunner` on `DEV=CPU` / CLANG with GPU and QCOM off and the kernel cache under `/data`. The startup log names which one loaded. After Install weights the 3X path is `onnxruntime-cpu`. `tinygrad-clang` is the slow fallback and must not compile while engaged.
 
 ## What Justin should see
 
@@ -161,7 +172,7 @@ When the logger is **On**, a large opaque **SIGN** plate shows the mph the camer
 
 White MUTCD-style plate, black digits, red border, **SIGN** label so it is not confused with HUD MAX or OSM LIMIT.
 
-If the logger is On and ONNX failed to load, the same left-side plate shows **NO WT** (not a mph) — **no Yes/No**. If the logger is On and openpilot is **controlling**, the plate still shows the mph when a sign is read — detect is not paused. A blank plate with weights Installed means no confirmed detection yet — that is normal. Report `swaglog | grep "speedsignd timing"` if reads are many seconds apart or `engaged=0` for the whole drive.
+If the logger is On and ONNX failed to load, the same left-side plate shows **NO WT** (not a mph) — **no Yes/No**. If the ONNX is installed and the CPU runtime is not, the plate shows **NO RT** and Settings says **runtime missing** — tap Install weights again (it installs the runtime too). If the logger is On and openpilot is **controlling**, the plate still shows the mph when a sign is read — detect is not paused. A blank plate with weights Installed and the runtime present means no confirmed detection yet — that is normal. Report `swaglog | grep "speedsignd timing"` if reads are many seconds apart or `engaged=0` for the whole drive. `threads=` must be 1. `os_threads=` is the whole process.
 
 Yes/No do not write params, JSONL, or sqlite in this revision. The hook is `on_confirm_accuracy(mph, yes)` — future work may JSONL-confirm a good read and optionally push the marker to OSM.
 
@@ -169,11 +180,11 @@ Yes/No do not write params, JSONL, or sqlite in this revision. The hook is `on_c
 
 Speed Sign Logger On, onroad, but SIGN stays dark or never shows mph — almost always missing weights, not a bad model.
 
-1. Look at the onroad plate: **NO WT** means `/data/media/0/nap/speed_sign.onnx` is absent or failed to load. Settings → NAP → Speed Sign Weights should say **Missing**.
-2. Park or turn on Force Offroad. Tap **Install weights** (Wi-Fi). Wait for the runner to finish — do not leave it spinning forever; an error prints on that screen. Or SSH: `python -m scripts.nap.install_speed_sign_weights`.
-3. File should be ~12 MB (12658953 bytes). `ls -l /data/media/0/nap/speed_sign.onnx`. Settings should flip to **Installed**. **Out of date** means the old file is still there — run Install weights again.
-4. No full reboot required: speedsignd retries ONNX every ~15 s. `swaglog` should show `speedsignd starting … backend=yolo-onnx` or `ONNX loaded after retry backend=yolo-onnx` (also `hz=` / `nice=19`).
-5. Engage or stay manual. Pass a clear, unobstructed MUTCD R2-1. Two agreeing reads light SIGN while **controlling**. `swaglog | grep "speedsignd timing"` should show `engaged=1`, `threads=1`, `cpu_share` at or under `0.250`, and `read_interval_ms` about 4× `infer_ms`. A blank plate with weights Installed means no detection yet (night, glare, tiny sign — see Accuracy limits).
+1. Look at the onroad plate: **NO WT** means `/data/media/0/nap/speed_sign.onnx` is absent or failed to load. Settings → NAP → Speed Sign Weights should say **Missing**. **NO RT** means the ONNX is present and the CPU runtime is not — Settings says **runtime missing**.
+2. Park or turn on Force Offroad. Tap **Install weights** (Wi-Fi). That installs the ONNX and the runtime. Wait for the runner to finish — do not leave it spinning forever; an error prints on that screen. Or SSH: `python -m scripts.nap.install_speed_sign_weights`.
+3. ONNX should be ~12 MB (12658953 bytes). `ls -l /data/media/0/nap/speed_sign.onnx`. Runtime: `ls /data/media/0/nap/pylib/onnxruntime`. Settings should flip to **Installed** and must not say **runtime missing**. **Out of date** means the old ONNX is still there — run Install weights again.
+4. No full reboot required: speedsignd retries ONNX every ~15 s. `swaglog` should show `speedsignd starting … backend=onnxruntime-cpu` (also `threads=1`, `os_threads=`, `hz=` / `nice=19`). Leave Logger On while disengaged until that first session finishes, then engage. A boot that is already engaged waits (`reason=compile-wait`) and does not run the multi-minute CLANG compile.
+5. Engage or stay manual. Pass a clear, unobstructed MUTCD R2-1. Two agreeing reads light SIGN while **controlling**. `swaglog | grep "speedsignd timing"` should show `backend=onnxruntime-cpu`, `engaged=1`, `threads=1`, `os_threads=`, `cpu_share` at or under `0.250`, and `read_interval_ms` about 4× `infer_ms` (about 1200 when infer is ~300 ms). A blank plate with weights Installed and the runtime present means no detection yet (night, glare, tiny sign — see Accuracy limits).
 
 Do not treat a blank plate as “the detector is running.” Blank + Installed = no confirmed sign. **WAIT** is not the engaged state. Blank + Missing / **NO WT** = install weights.
 

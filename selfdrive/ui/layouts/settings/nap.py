@@ -50,7 +50,9 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
 )
 from openpilot.selfdrive.ui.layouts.settings.driving_mannerisms import DrivingMannerismsLayout
 from openpilot.selfdrive.ui.layouts.settings.map_speed import MapSpeedLimitLayout
-from openpilot.selfdrive.speedsignd.install import weights_status_summary
+# Row text is install_status_summary (weights plus "runtime missing").
+# weights_status_summary remains the weights-only label ("Installed" / "Out of date" / "Missing").
+from openpilot.selfdrive.speedsignd.install import install_status_summary
 from openpilot.selfdrive.car.tesla.preap_body_controls import register_nap_body_params
 from opendbc.car.tesla.preap.nap_params import NAPParamKeys, DEFAULTS
 
@@ -147,10 +149,14 @@ class NAPLayout(Widget):
 
     self._weights_status = text_item(
       "Speed Sign Weights",
-      weights_status_summary,
-      description="YOLO ONNX at /data/media/0/nap/speed_sign.onnx. "
-      "Missing → onroad SIGN shows NO WT and will not read roadside signs. "
-      "Installed → blank plate until a confirmed mph.",
+      install_status_summary,
+      description=(
+        "YOLO ONNX at /data/media/0/nap/speed_sign.onnx. "
+        + "Missing → onroad SIGN shows NO WT and will not read roadside signs. "
+        + "runtime missing → plate shows NO RT until Install weights also "
+        + "unpacks onnxruntime into /data/media/0/nap/pylib. "
+        + "Installed → blank plate until a confirmed mph."
+      ),
     )
     self._main_items.append(self._weights_status)
 

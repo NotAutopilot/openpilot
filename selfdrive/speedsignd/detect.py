@@ -979,6 +979,11 @@ def describe_infer_runtimes() -> str:
   """What this process can import. Prefer ORT, then cv2.dnn, then tinygrad."""
   pin_cpu_only_env()
   try:
+    from openpilot.selfdrive.speedsignd.install import ensure_vendored_runtime
+    ensure_vendored_runtime()
+  except Exception:
+    pass
+  try:
     import onnxruntime as ort
     ort_s = "onnxruntime-" + str(getattr(ort, "__version__", "present"))
   except Exception as e:
@@ -1139,7 +1144,18 @@ def _ort_session(path: str, threads: int, sha: str):
 
 
 def _select_cpu_kind() -> str:
-  """Which CPU runner this process can import. Does not load weights."""
+  """Which CPU runner this process can import. Does not load weights.
+
+  System onnxruntime wins. Otherwise the aarch64 wheel under
+  /data/media/0/nap/pylib is inserted on sys.path (never the system venv).
+  cv2.dnn is next. tinygrad CLANG is the slow fallback and must not be
+  realized while engaged.
+  """
+  try:
+    from openpilot.selfdrive.speedsignd.install import ensure_vendored_runtime
+    ensure_vendored_runtime()
+  except Exception:
+    pass
   try:
     import onnxruntime  # noqa: F401
     return "onnxruntime-cpu"
@@ -1477,6 +1493,18 @@ class SpeedSignDetector:
     fn = getattr(sess, "allow_compile", None)
     if fn is not None:
       fn(bool(allow))
+
+  def compile_allowed_now(self) -> bool:
+    """Live flag the worker re-reads before realize.
+
+    A warm session (compiled) may run while engaged. Otherwise the flag
+    set by the main loop this tick wins, including the first frame of a
+    boot that is already engaged.
+    """
+    if self.compile_ready():
+      return True
+    sess = None if self.onnx is None else self.onnx.session
+    return bool(getattr(sess, "_allow_compile", False))
 
   def detect(self, y: np.ndarray, min_conf: float | None = None, rgb: np.ndarray | None = None,
              nv12=None) -> list[SpeedSign]:
