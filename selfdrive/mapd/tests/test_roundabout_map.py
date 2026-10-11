@@ -29,8 +29,9 @@ SOCO_CENTER = (35.52208, -83.02814)
 # R128 17:37:59.9 CT, first mapd hint ~192 m east of the ring (westbound on Dellwood Rd).
 R128_FIRST_HINT = (35.52224, -83.02645)   # decel onset (RB_DECEL_ONSET_M = 140): ~131 m out
 # A tagged speed way near the ring (synthetic, not in OSM) to prove speed matching is unchanged.
+SPEED_COORDS: list[tuple[float, float]] = [(35.5240, -83.0330), (35.5240, -83.0230)]
 SPEED_WAY = {"way_id": 900000001, "name": "Test Rd", "highway": "primary", "maxspeed_ms": 45 * CV.MPH_TO_MS,
-             "coords": [(35.5240, -83.0330), (35.5240, -83.0230)], "junction": ""}
+             "coords": SPEED_COORDS, "junction": ""}
 
 
 def _payload():
@@ -201,7 +202,7 @@ def test_overpass_queries_include_rings_and_approaches():
 
 def test_extra_rb_elements_do_not_change_speed_ways():
   base = {"elements": [{"type": "way", "id": SPEED_WAY["way_id"], "tags": {"highway": "primary", "maxspeed": "45 mph"},
-                        "geometry": [{"lat": a, "lon": b} for a, b in SPEED_WAY["coords"]]}]}
+                        "geometry": [{"lat": a, "lon": b} for a, b in SPEED_COORDS]}]}
   combined = {"elements": base["elements"] + _payload()["elements"]}
   assert ways_from_overpass(combined) == ways_from_overpass(base)
 
@@ -238,7 +239,7 @@ def test_builder_from_json_writes_pack_v4(tmp_path):
   src = tmp_path / "in.json"
   payload = _payload()
   payload["elements"].append({"type": "way", "id": SPEED_WAY["way_id"], "tags": {"highway": "primary", "maxspeed": "45 mph"},
-                              "nodes": [1, 2], "geometry": [{"lat": a, "lon": b} for a, b in SPEED_WAY["coords"]]})
+                              "nodes": [1, 2], "geometry": [{"lat": a, "lon": b} for a, b in SPEED_COORDS]})
   src.write_text(json.dumps(payload))
   out = tmp_path / "out.sqlite"
   assert build_main(["--from-json", str(src), "--out", str(out)]) in (0, None)

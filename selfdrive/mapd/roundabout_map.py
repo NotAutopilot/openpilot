@@ -56,7 +56,7 @@ def _lanes(tags: dict) -> int:
 
 
 def local_xy(lat: float, lon: float, lat0: float, lon0: float) -> tuple[float, float]:
-  """East, north metres from (lat0, lon0)."""
+  """East, north meters from (lat0, lon0)."""
   x = math.radians(lon - lon0) * math.cos(math.radians(lat0)) * EARTH_R
   y = math.radians(lat - lat0) * EARTH_R
   return x, y

@@ -99,7 +99,7 @@ def _area_outer_rings(a) -> list[list[tuple[float, float]]]:
 
 def _places_from_pyosmium(pbf: str) -> PlaceIndex:
   try:
-    import osmium  # type: ignore
+    import osmium
   except ImportError as e:
     raise RuntimeError(
       "Reading .osm.pbf needs pyosmium (pip install osmium) or convert with osmium-tool first."
@@ -109,7 +109,7 @@ def _places_from_pyosmium(pbf: str) -> PlaceIndex:
 
   class H(osmium.SimpleHandler):
     def area(self, a):
-      tags = {k: v for k, v in a.tags}
+      tags = dict(a.tags)
       if not is_urban_place_tags(tags):
         return
       rings = _area_outer_rings(a)
@@ -130,7 +130,7 @@ def _ways_from_pyosmium(
   places: PlaceIndex | None = None,
 ) -> list[dict]:
   try:
-    import osmium  # type: ignore
+    import osmium
   except ImportError as e:
     raise RuntimeError(
       "Reading .osm.pbf needs pyosmium (pip install osmium) or convert with osmium-tool first."
@@ -140,7 +140,7 @@ def _ways_from_pyosmium(
 
   class H(osmium.SimpleHandler):
     def way(self, w):
-      tags = {k: v for k, v in w.tags}
+      tags = dict(w.tags)
       highway = tags.get("highway") or ""
       if not highway:
         return
@@ -187,7 +187,7 @@ def _ways_from_pyosmium(
 def _rb_rows_from_pyosmium(pbf: str, *, bbox: tuple[float, float, float, float] | None = None) -> list[dict]:
   """Roundabout rings (any maxspeed) + approach roads touching them. Two passes over the PBF."""
   try:
-    import osmium  # type: ignore
+    import osmium
   except ImportError as e:
     raise RuntimeError(
       "Reading .osm.pbf needs pyosmium (pip install osmium) or convert with osmium-tool first."
