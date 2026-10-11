@@ -1,3 +1,10 @@
+NAP sight-distance cap, LOG ONLY (2026-10-11)
+========================
+* Pre-AP shadow (`NAPSightCap`, default 1 = shadow; 0 off). Nothing reads it: speed, MAX, curve follow, CurveMaxHold, the #222 cases and the -0.22 EV settle are unchanged.
+* Sight distance = where the model path's lateral std reaches 2 m (`model_sight`, shared with low-visibility steering, whose path std read now lives there unchanged).
+* Would fire when sight drops below half its 2-12 s median for 0.5 s at 25-55 mph, with rising path curvature or a map roundabout ahead, unless the model was already red with a short path. Vehicles never count as sight loss: any lead (moving or stopped), adjacent car or parked car within 150 m suppresses it and the reason is logged. Steps aside while the roundabout funnel is live. Glare-only low-vis never feeds it.
+* Logs `sightcap {json}` (errorLogMessage, no new capnp fields): sight, baseline, cap speed (slow to a 30 m bend at 15 mph inside the sight at 1.5 m/s², 2 m/s³ jerk), would-be accel, min with curve follow, leads, pitch, crest, night/sun, lane-line probs, blinker, confidence, low-vis.
+
 NAP gap lock (2026-10-05)
 ========================
 * Pre-AP, default Off (`NAPGapLock`). Hold the engage stalk toward you for 2 seconds to keep the current radar gap (8–80 m) instead of the time gap. Long can be on, paused, or not yet taken; a finished hold resumes it. Same follow law, a custom distance. The 3X shows the lock while it is on. A tip, cancel, brake, or One-Pedal pause returns to Follow Distance. Another 2 second hold stores a new distance. No panda flash.

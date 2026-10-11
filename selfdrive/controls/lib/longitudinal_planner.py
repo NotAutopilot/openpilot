@@ -38,6 +38,12 @@ from openpilot.selfdrive.controls.lib.curve_follow import (
   read_curve_follow_mode,
 )
 from openpilot.selfdrive.controls.lib.radar_path_gate import model_path_xy, path_lateral_m
+from openpilot.selfdrive.controls.lib.model_sight import model_sight
+from openpilot.selfdrive.controls.lib.sight_cap import (
+  MODE_OFF as SIGHT_MODE_OFF, SightCap, classify_lead, crest_ahead, read_sight_cap_mode,
+)
+from openpilot.selfdrive.controls.lib.sight_cap import LOG_PERIOD_S as SIGHT_LOG_PERIOD_S
+from openpilot.selfdrive.controls.lib.sight_cap import format_log_line as sight_log_line
 from openpilot.selfdrive.controls.lib.lead_leaving import LeadLeavingEstimator
 from openpilot.selfdrive.controls.lib.unified_lead import UnifiedLeadController, unified_follow_desired
 from openpilot.selfdrive.controls.lib.gap_lock import (
@@ -210,6 +216,12 @@ class LongitudinalPlanner:
     self._cf_trusted = False
     self._cf_faulted = False
     self._cf_cycle = 0
+    # Sight-distance cap (NAPSightCap 0 off / 1 shadow). LOG ONLY: nothing reads it.
+    self._sc_mode = read_sight_cap_mode(self._params) if self._is_preap else SIGHT_MODE_OFF
+    self._sight_cap = SightCap()
+    self._sc_faulted = False
+    self._sc_last_log = -1e9
+    self._sc_clock = 0.0
     self._turn_a_max = None
 
     self.a_desired = init_a
@@ -309,6 +321,7 @@ class LongitudinalPlanner:
       )
       self._follow_blend.read_setpoints(self._params)
       self._cf_mode = read_curve_follow_mode(self._params)
+      self._sc_mode = read_sight_cap_mode(self._params)
       self._gap_lock_enabled = gap_lock_param_enabled(self._params)
 
     if len(sm['carControl'].orientationNED) == 3:
@@ -561,6 +574,7 @@ class LongitudinalPlanner:
       old_preview_a = float(self.curve_preview_a)
       self._update_curve_follow(sm, float(v_ego), curve_path, old_preview_a, rb_v is not None,
                                 float(output_a_target))
+      self._update_sight_cap(sm, float(v_ego), curve_path, rb_v is not None, rb_hint)
       output_a_target = min(float(output_a_target), self.curve_preview_a)
 
     for idx in range(2):
@@ -605,6 +619,106 @@ class LongitudinalPlanner:
       self._cf_trusted = False
       self.curve_follow_a = PREVIEW_FREE_A_MS2
       cloudlog.exception("curve_follow fault: old preview stays in force")
+
+  def _update_sight_cap(self, sm, v_ego: float, curve_path, rb_live: bool, rb_hint) -> None:
+    """Sight-distance cap in shadow: compute and log. Never touches the command."""
+    if self._sc_mode == SIGHT_MODE_OFF or self._sc_faulted:
+      return
+    try:
+      model = sm['modelV2']
+      self._sc_clock += self.dt
+      t_s = self._sc_clock
+      sight = model_sight(model)
+      radar_state = sm['radarState']
+      lead_one = radar_state.leadOne
+      live = bool(lead_one.status)
+      path_x = path_y = None
+      lat = None
+      if live:
+        try:
+          path_x, path_y = model_path_xy(model)
+          lat = path_lateral_m(lead_one, path_x, path_y)
+        except Exception:
+          lat = None
+      lead = classify_lead(live, lat, float(lead_one.vLead) if live else None, float(lead_one.dRel) if live else None)
+      others = []
+      lead_two = radar_state.leadTwo
+      if bool(lead_two.status):
+        try:
+          lat2 = path_lateral_m(lead_two, *model_path_xy(model))
+        except Exception:
+          lat2 = None
+        others.append(classify_lead(True, lat2, float(lead_two.vLead), float(lead_two.dRel)))
+      ks = curve_path[2] if curve_path is not None else None
+      sc = self._sight_cap
+      sc.update(t=t_s, dt=self.dt, v_ego=v_ego, sight_m=sight, ks=ks,
+                conf_red=str(model.confidence) == "red", lead=lead, rb_live=rb_live,
+                rb_ahead=bool(rb_hint is not None and getattr(rb_hint, "approaching", False)), others=others)
+      if sc.fired_edge or sc.suppressed_edge or (sc.would_fire and t_s - self._sc_last_log >= SIGHT_LOG_PERIOD_S):
+        self._sc_last_log = t_s
+        self._log_sight_cap(sm, model, t_s, v_ego, lead, live, others)
+    except Exception:
+      self._sc_faulted = True
+      cloudlog.exception("sight_cap fault: shadow logging stopped")
+
+  def _log_sight_cap(self, sm, model, t_s: float, v_ego: float, lead, live: bool, others) -> None:
+    """Would-fire record through errorLogMessage (qlog), like curvefollow. No capnp fields."""
+    try:
+      sc = self._sight_cap
+      cs = sm['carState']
+      two = sm['radarState'].leadTwo
+      two_info = None
+      if bool(two.status):
+        try:
+          lat2 = path_lateral_m(two, *model_path_xy(model))
+        except Exception:
+          lat2 = None
+        t2 = classify_lead(True, lat2, float(two.vLead), float(two.dRel))
+        two_info = [t2.lane, round(float(t2.v), 1), round(float(t2.d), 1)]
+      crest, z2 = crest_ahead(list(model.position.x), list(model.position.z))
+      pitch = None
+      try:
+        if len(sm['carControl'].orientationNED) == 3:
+          pitch = round(float(sm['carControl'].orientationNED[1]), 4)
+      except Exception:
+        pitch = None
+      night = None
+      sun_el = None
+      try:
+        md = sm['liveMapDataNAP']
+        lat_deg, lon_deg = float(md.latitude), float(md.longitude)
+        if lat_deg != 0.0 or lon_deg != 0.0:
+          from openpilot.selfdrive.controls.lib.lat_low_visibility import solar_position
+          # Wall clock for the sun position only (log field; never control).
+          sun_el, _az = solar_position(lat_deg, lon_deg, time.time())  # noqa: TID251
+          night = bool(sun_el < -6.0)
+          sun_el = round(float(sun_el), 1)
+      except Exception:
+        night = None
+      cf_a = float(self.curve_follow_a)
+      try:
+        t_log = float(sm.logMonoTime['modelV2']) * 1e-9
+      except Exception:
+        t_log = t_s
+      rec = {
+        "t": round(t_log, 2), "edge": int(sc.fired_edge), "fire": int(sc.would_fire), "why": sc.reason, "cue": sc.cue,
+        "v": round(v_ego, 2), "sd": None if sc.sight is None else round(sc.sight, 1),
+        "sb": None if sc.base is None else round(sc.base, 1),
+        "vc": None if sc.v_cap is None else round(sc.v_cap, 2), "ac": round(sc.a_cap, 3),
+        "cf": round(cf_a, 3), "cmb": round(min(cf_a, sc.a_cap), 3),
+        "lead": [int(live), lead.lane, None if lead.v is None else round(lead.v, 1),
+                 None if lead.d is None else round(lead.d, 1), None if lead.lat is None else round(lead.lat, 2)],
+        "lead2": two_info, "veh": next((k for k in (lead.kind, *(o.kind for o in others)) if k), ""),
+        "pitch": pitch, "crest": int(crest), "z2": z2,
+        "night": night, "sun": sun_el,
+        "llp": [round(float(p), 2) for p in list(model.laneLineProbs)[:4]],
+        "bl": int(bool(cs.leftBlinker)) + 2 * int(bool(cs.rightBlinker)),
+        "cn": str(model.confidence),
+        "lv": int(bool(getattr(sm['controlsState'], 'lowVisibility', False))),
+      }
+      cloudlog.error(sight_log_line(rec))
+    except Exception:
+      pass  # a sight-cap log failure must never reach the plan
 
   def _log_curve_follow(self, sm, model, v_ego, a_target, old_preview_a, ts, ds, ks, y_std, blinker,
                         lane_change, frame_drop, rb_active, arrays) -> None:
