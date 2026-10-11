@@ -228,6 +228,6 @@ def test_0000013c_holds_the_left_turn_at_the_ring_edge_in_band():
 # ---- decel onset ------------------------------------------------------------------------------------------------
 
 def test_decel_onset_is_a_named_constant_near_the_ring():
-  assert RB_FUNNEL_M == RB_DECEL_ONSET_M and 130.0 <= RB_DECEL_ONSET_M <= 140.0
+  assert RB_FUNNEL_M == 450.0 and 130.0 <= RB_DECEL_ONSET_M <= 140.0  # Oct 11: funnel = speed-based reach, low-speed onset 140 m
   v0, v1 = 35 * 0.44704, 18 * 0.44704
   assert (v0 * v0 - v1 * v1) / (2.0 * RB_DECEL_ONSET_M) <= 0.7          # 35 -> 18 mph needs ~0.64 m/s² over 140 m (was 0.48 over 187 m)

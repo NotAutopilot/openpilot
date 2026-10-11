@@ -1,5 +1,7 @@
 """Roundabout first slice: funnel detect, speed ease, outer bias, FP guard."""
+import json
 import math
+import os
 
 import pytest
 
@@ -9,6 +11,11 @@ from openpilot.selfdrive.mapd.osm_db import EARTH_R, OsmSpeedLimitDB, _unpack_co
 from openpilot.selfdrive.mapd.overpass import ways_from_overpass
 from openpilot.selfdrive.mapd.roundabout import (
   RB_A_FLOOR_MS2,
+  RB_A_MAX_DECEL_MS2,
+  RB_DECEL_JERK_MS3,
+  RB_ONSET_MAX_M,
+  RB_ONSET_MIN_M,
+  RB_PROFILE_BUFFER_M,
   RB_ENTRY_BIAS_M,
   RB_DECEL_ONSET_M,
   RB_FUNNEL_M,
@@ -24,6 +31,7 @@ from openpilot.selfdrive.mapd.roundabout import (
   apply_roundabout_plan,
   junction_is_roundabout,
   live_map_roundabout_hint,
+  rb_decel_onset_m,
   roundabout_decel_ms2,
   roundabout_ease_v_ms,
   roundabout_outer_curvature_bias,
@@ -146,9 +154,10 @@ def test_funnel_eases_speed():
   assert eased >= RB_V_MIN_MS - 1e-6
   on_ring = RoundaboutHint(on_roundabout=True, speed_limit_ms=20.0 * CV.MPH_TO_MS)
   assert abs(roundabout_ease_v_ms(on_ring, v49, v49) - 20.0 * CV.MPH_TO_MS) < 1e-6
-  # Decel onset (named RB_DECEL_ONSET_M, Oct 1: 200 -> 140 m): 35 mph can still hit 18 by the ring at ~0.65 m/s².
+  # Low-speed decel onset stays 140 m (Oct 1): 35 mph can still hit 18 by the ring at ~0.65 m/s².
+  # Oct 11: the search reach (RB_FUNNEL_M) is the 450 m max of the speed-based onset.
   assert 80.0 <= RB_FUNNEL_MIN_M <= 100.0
-  assert RB_DECEL_ONSET_M == RB_FUNNEL_M and 130.0 <= RB_DECEL_ONSET_M <= 140.0
+  assert 130.0 <= RB_DECEL_ONSET_M <= 140.0 and RB_FUNNEL_M == 450.0
   assert (35.0 * CV.MPH_TO_MS) ** 2 / 2.0 - (18.0 * CV.MPH_TO_MS) ** 2 / 2.0 <= 0.7 * RB_DECEL_ONSET_M
 
 
@@ -304,6 +313,9 @@ def test_funnel_detects_farther_out(tmp_path):
   assert hint.approaching
   assert 100.0 <= hint.distance_m <= RB_FUNNEL_M
   qlat, qlon = _offset(west_lat, west_lon, 270.0, 180.0)
+  # Once hinted, the ring stays latched (no mid-approach drop / early exit restore).
+  assert db.find_roundabout(qlat, qlon, bearing_deg=90.0).approaching
+  db._rb_latch_way = 0
   assert not db.find_roundabout(qlat, qlon, bearing_deg=90.0).approaching
   db.close()
 
@@ -444,3 +456,96 @@ def test_overpass_keeps_junction_tag():
   ways = ways_from_overpass(payload)
   assert len(ways) == 1
   assert ways[0]["junction"] == "roundabout"
+
+
+# --- Oct 11: speed-based onset, smooth MAX profile (Watertown SD route 00000185) ---------------------------------
+MPH = CV.MPH_TO_MS
+DATA = os.path.join(os.path.dirname(__file__), "data", "rb_watertown_oct11.json")
+
+
+def test_onset_formula_and_clamp():
+  assert rb_decel_onset_m(None) == RB_ONSET_MIN_M
+  assert rb_decel_onset_m(25 * MPH) == RB_ONSET_MIN_M
+  d55 = rb_decel_onset_m(55 * MPH)
+  assert d55 == pytest.approx(((55 * MPH) ** 2 - RB_V_MIN_MS ** 2) / 1.4 + 30.0)
+  assert 400.0 <= d55 <= 420.0  # formula as approved; ~340 m was the 0.8 m/s² figure
+  assert rb_decel_onset_m(80 * MPH) == RB_ONSET_MAX_M
+
+
+def _simulate(v0_mph, start_m, ring_limit_ms=0.0, dt=0.05, a_now=0.0):
+  """Planner-ish sim: v follows min(profile MAX, kinematic −a) with the planner jerk limit."""
+  v = v0_mph * MPH
+  d = start_m
+  a_jl = 0.0
+  peak = 0.0
+  first_slow_d = None
+  while d > 0.0:
+    onset = rb_decel_onset_m(v)
+    hint = None
+    if d <= max(onset, start_m if first_slow_d is not None else 0.0):
+      hint = RoundaboutHint(approaching=True, distance_m=d, speed_limit_ms=ring_limit_ms)
+    a_cmd = a_now
+    if hint is not None:
+      v_max = roundabout_ease_v_ms(hint, v, v)
+      a_rb = roundabout_decel_ms2(hint, v)
+      a_jl = max(a_rb, a_jl - RB_DECEL_JERK_MS3 * dt)
+      a_cmd = min(a_now, a_jl)
+      if v > v_max + 0.3:  # MAX ceiling: cruise tracks it at ≤ comfort
+        a_cmd = min(a_cmd, -0.7)
+      if first_slow_d is None and a_cmd < -0.05:
+        first_slow_d = d
+    peak = max(peak, -a_cmd)
+    v = max(0.0, v + a_cmd * dt)
+    d -= v * dt
+  return v, peak, first_slow_d
+
+
+def test_55mph_highway_approach():
+  """Starts at the onset (~415 m from 55 mph at 0.7 m/s²), reaches ring speed by entry, never above ~1.5 m/s²."""
+  v_entry, peak, first = _simulate(55.0, 600.0)
+  assert first is not None and 390.0 <= first <= 425.0, first
+  target = roundabout_target_ms(0.0)
+  assert v_entry <= target + 1.0 * MPH, v_entry / MPH
+  assert peak <= 1.5 + 1e-6
+  assert peak <= 1.0  # typical ~0.7, no brick wall
+
+
+def test_max_profile_is_smooth_no_step():
+  """MAX ramps down from ~current speed instead of stepping 35 → 18."""
+  v = 35 * MPH
+  onset = rb_decel_onset_m(v)
+  first = roundabout_ease_v_ms(RoundaboutHint(approaching=True, distance_m=onset), v, v)
+  assert first >= v - 1.0 * MPH
+  prev = first
+  for d in range(int(onset), 0, -5):
+    cur = roundabout_ease_v_ms(RoundaboutHint(approaching=True, distance_m=float(d)), v, v)
+    assert cur <= prev + 1e-9
+    assert prev - cur <= 1.0  # per 5 m
+    prev = cur
+  assert roundabout_ease_v_ms(RoundaboutHint(approaching=True, distance_m=RB_PROFILE_BUFFER_M), v, v) == \
+    pytest.approx(roundabout_target_ms(0.0))
+
+
+def test_late_hint_still_capped():
+  a = roundabout_decel_ms2(RoundaboutHint(approaching=True, distance_m=40.0), 50 * MPH)
+  assert a >= RB_A_MAX_DECEL_MS2 - 1e-9
+
+
+def test_replay_watertown_ring_oct11():
+  """Route 00000185--d9fc14b285 ring (17:02:37–17:03:07 CT) replayed through the new profile."""
+  with open(DATA) as f:
+    rows = json.load(f)
+  hit = [r for r in rows if r["appr"]]
+  assert hit, "ring approach present"
+  first = hit[0]
+  # Old: MAX stepped 35.2 → 18.0 mph at 133 m. New profile at 133 m is near current speed.
+  new_max = roundabout_ease_v_ms(RoundaboutHint(approaching=True, distance_m=first["d"],
+                                                speed_limit_ms=first["rb"]), first["v"], first["v"]) / MPH
+  assert new_max >= 25.0
+  assert rb_decel_onset_m(first["v"], roundabout_target_ms(first["rb"])) == RB_ONSET_MIN_M
+  # Required decel never above 1.5 along the logged approach, and ring target is 18 mph.
+  for r in hit:
+    a = roundabout_decel_ms2(RoundaboutHint(approaching=True, distance_m=r["d"], speed_limit_ms=r["rb"]), r["v"])
+    assert a >= -1.5
+  assert roundabout_target_ms(first["rb"]) / MPH == pytest.approx(18.0)
+  assert math.isfinite(new_max)

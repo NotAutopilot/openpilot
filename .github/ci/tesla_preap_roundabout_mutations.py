@@ -1045,8 +1045,8 @@ MUTATIONS += (
   HistoricalMutation(
     name="rb-hold-decel-onset-back-to-200m",
     source_path="selfdrive/mapd/roundabout.py",
-    original=b'RB_DECEL_ONSET_M = 140.0\n',
-    replacement=b'RB_DECEL_ONSET_M = 200.0\n',
+    original=b'RB_ONSET_MIN_M = 140.0\n',
+    replacement=b'RB_ONSET_MIN_M = 200.0\n',
     test_nodes=(
       f"{RB_MAPD_TEST_PATH}::test_funnel_eases_speed",
       f"{RB_HOLD_TEST_PATH}::test_decel_onset_is_a_named_constant_near_the_ring",
