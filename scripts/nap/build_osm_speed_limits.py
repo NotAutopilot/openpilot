@@ -53,6 +53,7 @@ from openpilot.selfdrive.mapd.overpass import bbox_from_center, resolve_way_spee
 from openpilot.selfdrive.mapd.roundabout_map import (
   ROLE_RING,
   is_ring_tags,
+  mini_roundabout_way,
   rb_rows_from_overpass,
   roundabout_rows,
 )
@@ -209,6 +210,16 @@ def _rb_rows_from_pyosmium(pbf: str, *, bbox: tuple[float, float, float, float] 
     return nodes, coords
 
   class Rings(osmium.SimpleHandler):
+    def node(self, n):
+      tags = {t.k: t.v for t in n.tags}
+      if tags.get("highway") != "mini_roundabout" or not n.location.valid():
+        return
+      lat, lon = float(n.location.lat), float(n.location.lon)
+      if bbox is not None and not _bbox_intersects_way([(lat, lon)], bbox):
+        return
+      ring_nodes.add(int(n.id))
+      generic.append(mini_roundabout_way(int(n.id), lat, lon, tags))
+
     def way(self, w):
       tags = {t.k: t.v for t in w.tags}
       if not is_ring_tags(tags):

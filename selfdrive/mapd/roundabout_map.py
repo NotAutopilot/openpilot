@@ -39,6 +39,9 @@ RB_COMFORT_LAT_ACCEL = 2.5
 RING_JSON_VERSION = 1
 # Approach polylines carried in the ring param (trimmed, local xy).
 RING_JSON_APPROACH_M = 120.0
+# highway=mini_roundabout is an OSM node, not a way: stored as a small synthetic ring.
+MINI_RB_RADIUS_M = 7.0
+MINI_RB_POINTS = 16
 
 
 def is_ring_tags(tags: dict) -> bool:
@@ -135,6 +138,11 @@ def roundabout_rows(ways: list[dict], keep_m: float = APPROACH_KEEP_M) -> list[d
 def _row(w: dict, role: str, coords: list[tuple[float, float]]) -> dict:
   tags = w.get("tags") or {}
   ms = parse_maxspeed(tags.get("maxspeed")) or parse_maxspeed(tags.get("maxspeed:forward")) or 0.0
+  if role == ROLE_RING:
+    # Advisory ring speed (yellow plate) wins when it is lower than the posted limit.
+    adv = parse_maxspeed(tags.get("maxspeed:advisory")) or 0.0
+    if adv > 0.5:
+      ms = min(ms, adv) if ms > 0.5 else adv
   return {
     "way_id": int(w["way_id"]),
     "role": role,
@@ -161,6 +169,26 @@ def ways_from_overpass_elements(payload: dict) -> list[dict]:
       continue
     out.append({"way_id": int(el["id"]), "tags": el.get("tags") or {}, "node_ids": list(nodes), "coords": coords})
   return out
+
+
+def mini_roundabout_way(node_id: int, lat: float, lon: float, tags: dict | None = None,
+                        radius_m: float = MINI_RB_RADIUS_M) -> dict:
+  """Synthetic closed ring way for an OSM highway=mini_roundabout node.
+
+  way_id is the negated node id (OSM way ids are positive). node_ids are the
+  real node id at every vertex so roads through the node become approaches.
+  """
+  tags = dict(tags or {})
+  ring_tags = {"highway": "mini_roundabout", "junction": "roundabout", "oneway": "yes"}
+  for k in ("name", "maxspeed", "maxspeed:advisory"):
+    if tags.get(k):
+      ring_tags[k] = tags[k]
+  coords = []
+  for i in range(MINI_RB_POINTS + 1):
+    a = 2.0 * math.pi * i / MINI_RB_POINTS
+    dn, de = radius_m * math.sin(a), radius_m * math.cos(a)
+    coords.append((lat + math.degrees(dn / EARTH_R), lon + math.degrees(de / (EARTH_R * math.cos(math.radians(lat))))))
+  return {"way_id": -int(node_id), "tags": ring_tags, "node_ids": [int(node_id)] * len(coords), "coords": coords}
 
 
 def rb_rows_from_overpass(payload: dict, keep_m: float = APPROACH_KEEP_M) -> list[dict]:

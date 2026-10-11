@@ -569,3 +569,50 @@ def test_ring_exit_above_the_limit_eases_down():
       assert hud > prev - 0.5
     prev = hud
   assert _hud_mph(h) > 38.0
+
+
+def _ring_way(tags):
+  coords = [(45.0 + 0.0002 * math.sin(a), -95.0 + 0.0003 * math.cos(a)) for a in [i * math.pi / 4 for i in range(9)]]
+  return {"way_id": 1, "tags": {"highway": "tertiary", "junction": "roundabout", **tags},
+          "node_ids": list(range(100, 109)), "coords": coords}
+
+
+@pytest.mark.parametrize("tags, mph", [
+  ({"maxspeed": "30 mph", "maxspeed:advisory": "15 mph"}, 15),
+  ({"maxspeed": "20 mph", "maxspeed:advisory": "25 mph"}, 20),
+  ({"maxspeed:advisory": "15 mph"}, 15),
+  ({"maxspeed": "25 mph"}, 25),
+])
+def test_ring_advisory_uses_lower_speed(tags, mph):
+  from openpilot.selfdrive.mapd.roundabout_map import roundabout_rows
+  rows = roundabout_rows([_ring_way(tags)])
+  assert rows[0]["role"] == ROLE_RING
+  assert rows[0]["maxspeed_ms"] == pytest.approx(mph * CV.MPH_TO_MS, abs=0.05)
+
+
+def test_approach_ignores_advisory():
+  from openpilot.selfdrive.mapd.roundabout_map import roundabout_rows
+  ring = _ring_way({})
+  road = {"way_id": 2, "tags": {"highway": "primary", "maxspeed": "45 mph", "maxspeed:advisory": "15 mph"},
+          "node_ids": [100, 200], "coords": [ring["coords"][0], (45.0, -94.99)]}
+  app = [r for r in roundabout_rows([ring, road]) if r["role"] == ROLE_APPROACH]
+  assert app and all(r["maxspeed_ms"] == pytest.approx(45 * CV.MPH_TO_MS, abs=0.05) for r in app)
+
+
+def test_mini_roundabout_is_small_ring_with_approaches():
+  from openpilot.selfdrive.mapd.roundabout_map import MINI_RB_RADIUS_M, mini_roundabout_way, roundabout_rows
+  lat, lon = 45.12, -95.04
+  mini = mini_roundabout_way(555, lat, lon, {"highway": "mini_roundabout"})
+  assert mini["way_id"] == -555
+  road = {"way_id": 3, "tags": {"highway": "residential"}, "node_ids": [554, 555, 556],
+          "coords": [(lat - 0.001, lon), (lat, lon), (lat + 0.001, lon)]}
+  rows = roundabout_rows([mini, road])
+  rings = [r for r in rows if r["role"] == ROLE_RING]
+  assert len(rings) == 1 and len([r for r in rows if r["role"] == ROLE_APPROACH]) == 2
+  geo = ring_geometry(rings)
+  assert geo is not None
+  assert 6.0 <= geo.radius_m <= 8.0 and abs(geo.radius_m - MINI_RB_RADIUS_M) < 0.5
+  from openpilot.selfdrive.mapd.roundabout import RB_V_MIN_MS
+  # A 7 m ring is tighter than any comfort target: the funnel floor applies.
+  assert roundabout_target_ms(roundabout_comfort_speed_ms(geo.radius_m, geo.lanes, geo.maxspeed_ms)) \
+    == pytest.approx(RB_V_MIN_MS, abs=0.01)
