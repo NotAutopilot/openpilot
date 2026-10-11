@@ -645,13 +645,13 @@ function renderSoftware(root, data) {
     locked || !data.can_download, function (b) {
       software({action: "download"}, b);
     }));
-  if (data.update_available && !swPending && !data.busy) {
-    actions.appendChild(swButton(data.install_label || "Install & reboot", false, false, !data.can_install, function () {
+  // Same rule as the native INSTALL button: shown and enabled when UpdateAvailable and offroad.
+  if (data.update_available && data.can_install) {
+    actions.appendChild(swButton(data.install_label || "Install & reboot", false, false, false, function () {
       askSoftwareConfirm(data.install_label || "Install & reboot",
         "The comma reboots now and boots into " + (data.new_description || "the downloaded update") + ".",
         function () { software({action: "install", confirm: true}, null); });
     }));
-    if (data.install_blocked_reason) swLine(label, data.install_blocked_reason, "warn");
   }
   root.appendChild(actions);
   fitPane();
