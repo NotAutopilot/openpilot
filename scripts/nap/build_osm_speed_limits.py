@@ -53,6 +53,7 @@ from openpilot.selfdrive.mapd.overpass import bbox_from_center, resolve_way_spee
 from openpilot.selfdrive.mapd.roundabout_map import (
   ROLE_RING,
   is_ring_tags,
+  mini_roundabout_way,
   rb_rows_from_overpass,
   roundabout_rows,
 )
@@ -98,7 +99,7 @@ def _area_outer_rings(a) -> list[list[tuple[float, float]]]:
 
 def _places_from_pyosmium(pbf: str) -> PlaceIndex:
   try:
-    import osmium  # type: ignore
+    import osmium
   except ImportError as e:
     raise RuntimeError(
       "Reading .osm.pbf needs pyosmium (pip install osmium) or convert with osmium-tool first."
@@ -108,7 +109,7 @@ def _places_from_pyosmium(pbf: str) -> PlaceIndex:
 
   class H(osmium.SimpleHandler):
     def area(self, a):
-      tags = {k: v for k, v in a.tags}
+      tags = dict(a.tags)
       if not is_urban_place_tags(tags):
         return
       rings = _area_outer_rings(a)
@@ -129,7 +130,7 @@ def _ways_from_pyosmium(
   places: PlaceIndex | None = None,
 ) -> list[dict]:
   try:
-    import osmium  # type: ignore
+    import osmium
   except ImportError as e:
     raise RuntimeError(
       "Reading .osm.pbf needs pyosmium (pip install osmium) or convert with osmium-tool first."
@@ -139,7 +140,7 @@ def _ways_from_pyosmium(
 
   class H(osmium.SimpleHandler):
     def way(self, w):
-      tags = {k: v for k, v in w.tags}
+      tags = dict(w.tags)
       highway = tags.get("highway") or ""
       if not highway:
         return
@@ -186,7 +187,7 @@ def _ways_from_pyosmium(
 def _rb_rows_from_pyosmium(pbf: str, *, bbox: tuple[float, float, float, float] | None = None) -> list[dict]:
   """Roundabout rings (any maxspeed) + approach roads touching them. Two passes over the PBF."""
   try:
-    import osmium  # type: ignore
+    import osmium
   except ImportError as e:
     raise RuntimeError(
       "Reading .osm.pbf needs pyosmium (pip install osmium) or convert with osmium-tool first."
@@ -209,6 +210,16 @@ def _rb_rows_from_pyosmium(pbf: str, *, bbox: tuple[float, float, float, float] 
     return nodes, coords
 
   class Rings(osmium.SimpleHandler):
+    def node(self, n):
+      tags = {t.k: t.v for t in n.tags}
+      if tags.get("highway") != "mini_roundabout" or not n.location.valid():
+        return
+      lat, lon = float(n.location.lat), float(n.location.lon)
+      if bbox is not None and not _bbox_intersects_way([(lat, lon)], bbox):
+        return
+      ring_nodes.add(int(n.id))
+      generic.append(mini_roundabout_way(int(n.id), lat, lon, tags))
+
     def way(self, w):
       tags = {t.k: t.v for t in w.tags}
       if not is_ring_tags(tags):
@@ -234,10 +245,11 @@ def _rb_rows_from_pyosmium(pbf: str, *, bbox: tuple[float, float, float, float] 
       generic.append({"way_id": int(w.id), "tags": tags, "node_ids": got[0], "coords": got[1]})
 
   print(f"Reading roundabout rings from {pbf}…", file=sys.stderr, flush=True)
-  Rings().apply_file(pbf, locations=True)
+  # Only objects with a highway key reach Python (big speedup on large PBFs).
+  Rings().apply_file(pbf, locations=True, filters=[osmium.filter.KeyFilter("highway")])
   if ring_nodes:
     print(f"Reading approach roads for {len(generic)} ring ways…", file=sys.stderr, flush=True)
-    Approaches().apply_file(pbf, locations=True)
+    Approaches().apply_file(pbf, locations=True, filters=[osmium.filter.KeyFilter("highway")])
   return roundabout_rows(generic)
 
 

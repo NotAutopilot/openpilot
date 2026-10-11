@@ -40,12 +40,12 @@ The US speed-limits sqlite is **not in git** (too large; ODbL still requires att
 
 | | |
 |---|---|
-| Release tag | `osm-us-speed-limits-v3` on `jmbrunick/openpilot` |
+| Release tag | `osm-us-speed-limits-v4` on `jmbrunick/openpilot` |
 | Asset | `speed_limits_us.sqlite.zst` |
 | SHA-256 | of the **zst** (`ASSET_SHA256`), verified **before** decompress. Dest sqlite is not hashed unless `SQLITE_SHA256` is set. `--sha256 ''` skips. |
 | Install path | `/data/media/0/osm/speed_limits.sqlite` |
 | Staging | `/data/media/0/osm/.download/` on the dest filesystem (not `/tmp`) |
-| Size | **~200 MiB zst → ~541 MiB sqlite**. Fetch needs **850 MiB** free on `/data`. |
+| Size | **~204 MiB zst → ~570 MiB sqlite**. Fetch needs **854 MiB** free on `/data`. |
 
 On the comma 3X: **Settings → NAP → Map Speed Limit → Download US Maps** (offroad), or `python -m scripts.nap.fetch_osm_maps`. That is the first-install of the published US pack. Frequent local updates: **Refresh maps** (or `python -m scripts.nap.refresh_osm_maps`) — live OSM within **100 miles** (~160.9 km), merged into the installed sqlite. `mapd` reloads the sqlite every ~15s onroad — no reboot. To unlock those buttons without parking, Settings → triple-tap **NAP** → **Force Offroad** (see [force-offroad.md](force-offroad.md)).
 
@@ -92,7 +92,8 @@ Overpass can be slow in a dense metro. Wait or retry; the old maps stay put.
 
 Pack schema **v4** (`meta.pack_schema = 4`) adds `rb_ways` / `rb_nodes`: every OSM way tagged `junction=roundabout` (with or without `maxspeed` / `lanes`) plus the highway ways that touch a ring (approach/exit roads), stored in travel direction (two-way roads both ways). Rings without `maxspeed` get no speed-limit row, so the MAX/limit behavior is unchanged; they only feed roundabout detection and ring geometry. `build_osm_speed_limits.py` includes them by default; `--no-roundabouts` builds the old v3 layout. v3 packs still load (no rb tables = no ring geometry).
 
-- **Getting rings on the device:** Settings → NAP → Map Speed Limit → **Refresh maps**. The 100-mile Overpass query now also fetches `junction=roundabout` ways and their approach roads, and the merge adds `rb_ways` even onto an installed v3 pack. A v4 US first-install pack is **not published yet** (maps-index.json still points at v3), so Download US Maps alone does not add rings.
+- **Getting rings on the device:** Settings → NAP → Map Speed Limit → **Refresh maps**. The 100-mile Overpass query now also fetches `junction=roundabout` ways and their approach roads, and the merge adds `rb_ways` even onto an installed v3 pack. The v4 US first-install pack (`osm-us-speed-limits-v4`) includes rings for all 50 states + DC, so Download US Maps adds them.
+- **Advisory and mini-roundabouts:** a ring's `maxspeed:advisory` is stored when it is lower than the posted `maxspeed` (or when there is no posted limit). `highway=mini_roundabout` nodes become a synthetic 7 m ring (way_id = −node id) in PBF builds, so the funnel sees them; roads through the node are its approaches. Refresh maps (Overpass) does not add mini-roundabouts yet.
 - **Ring slow-down target:** when the ring geometry is known, `roundaboutSpeedLimit` uses a comfort speed from the lane radius (lateral ≤ ~2.5 m/s², clamped 15–20 mph; e.g. Soco Rd/Dellwood ≈ 15.8 mph) instead of the default 20 mph.
 - **Roundabout Steering Assist** (`NAPRoundaboutAssist`, Settings → NAP → Driving Mannerisms, **default Off**, Tesla Pre-AP only): on a mapped ring, blends the model curvature toward the lane circle (hold right entry until ~8–10 m before the ring, correction slewed ≤ 0.07/s, weight from GNSS/map-match confidence). The camera path keeps authority on lane edges and driver torque overrides as usual. It depends on GNSS accuracy (validated only in replay), hence default Off. mapd publishes the matched ring to `NAPRoundaboutRing`.
 
@@ -104,7 +105,7 @@ Download US Maps still uses the GitHub Release + `maps-index.json`. Bump those w
 2. Attach `speed_limits_us.sqlite.zst` to a **new** GitHub Release on `jmbrunick/openpilot` (e.g. `osm-us-speed-limits-v3`). Do not replace the in-git JSON with the 204MB zst.
 3. SHA-256 the **zst** (`sha256sum speed_limits_us.sqlite.zst`).
 4. Bump `selfdrive/mapd/maps-index.json`:
-   - `revision` — integer or dotted semver, must be **greater** than the previous value (current first-install is `"3"`)
+   - `revision` — integer or dotted semver, must be **greater** than the previous value (current first-install is `"4"`)
    - `asset_url` — Release download URL for the new zst
    - `asset_name` — usually `speed_limits_us.sqlite.zst`
    - `sha256` — hex digest of the zst

@@ -29,8 +29,9 @@ SOCO_CENTER = (35.52208, -83.02814)
 # R128 17:37:59.9 CT, first mapd hint ~192 m east of the ring (westbound on Dellwood Rd).
 R128_FIRST_HINT = (35.52224, -83.02645)   # decel onset (RB_DECEL_ONSET_M = 140): ~131 m out
 # A tagged speed way near the ring (synthetic, not in OSM) to prove speed matching is unchanged.
+SPEED_COORDS: list[tuple[float, float]] = [(35.5240, -83.0330), (35.5240, -83.0230)]
 SPEED_WAY = {"way_id": 900000001, "name": "Test Rd", "highway": "primary", "maxspeed_ms": 45 * CV.MPH_TO_MS,
-             "coords": [(35.5240, -83.0330), (35.5240, -83.0230)], "junction": ""}
+             "coords": SPEED_COORDS, "junction": ""}
 
 
 def _payload():
@@ -201,7 +202,7 @@ def test_overpass_queries_include_rings_and_approaches():
 
 def test_extra_rb_elements_do_not_change_speed_ways():
   base = {"elements": [{"type": "way", "id": SPEED_WAY["way_id"], "tags": {"highway": "primary", "maxspeed": "45 mph"},
-                        "geometry": [{"lat": a, "lon": b} for a, b in SPEED_WAY["coords"]]}]}
+                        "geometry": [{"lat": a, "lon": b} for a, b in SPEED_COORDS]}]}
   combined = {"elements": base["elements"] + _payload()["elements"]}
   assert ways_from_overpass(combined) == ways_from_overpass(base)
 
@@ -238,7 +239,7 @@ def test_builder_from_json_writes_pack_v4(tmp_path):
   src = tmp_path / "in.json"
   payload = _payload()
   payload["elements"].append({"type": "way", "id": SPEED_WAY["way_id"], "tags": {"highway": "primary", "maxspeed": "45 mph"},
-                              "nodes": [1, 2], "geometry": [{"lat": a, "lon": b} for a, b in SPEED_WAY["coords"]]})
+                              "nodes": [1, 2], "geometry": [{"lat": a, "lon": b} for a, b in SPEED_COORDS]})
   src.write_text(json.dumps(payload))
   out = tmp_path / "out.sqlite"
   assert build_main(["--from-json", str(src), "--out", str(out)]) in (0, None)
@@ -569,3 +570,50 @@ def test_ring_exit_above_the_limit_eases_down():
       assert hud > prev - 0.5
     prev = hud
   assert _hud_mph(h) > 38.0
+
+
+def _ring_way(tags):
+  coords = [(45.0 + 0.0002 * math.sin(a), -95.0 + 0.0003 * math.cos(a)) for a in [i * math.pi / 4 for i in range(9)]]
+  return {"way_id": 1, "tags": {"highway": "tertiary", "junction": "roundabout", **tags},
+          "node_ids": list(range(100, 109)), "coords": coords}
+
+
+@pytest.mark.parametrize("tags, mph", [
+  ({"maxspeed": "30 mph", "maxspeed:advisory": "15 mph"}, 15),
+  ({"maxspeed": "20 mph", "maxspeed:advisory": "25 mph"}, 20),
+  ({"maxspeed:advisory": "15 mph"}, 15),
+  ({"maxspeed": "25 mph"}, 25),
+])
+def test_ring_advisory_uses_lower_speed(tags, mph):
+  from openpilot.selfdrive.mapd.roundabout_map import roundabout_rows
+  rows = roundabout_rows([_ring_way(tags)])
+  assert rows[0]["role"] == ROLE_RING
+  assert rows[0]["maxspeed_ms"] == pytest.approx(mph * CV.MPH_TO_MS, abs=0.05)
+
+
+def test_approach_ignores_advisory():
+  from openpilot.selfdrive.mapd.roundabout_map import roundabout_rows
+  ring = _ring_way({})
+  road = {"way_id": 2, "tags": {"highway": "primary", "maxspeed": "45 mph", "maxspeed:advisory": "15 mph"},
+          "node_ids": [100, 200], "coords": [ring["coords"][0], (45.0, -94.99)]}
+  app = [r for r in roundabout_rows([ring, road]) if r["role"] == ROLE_APPROACH]
+  assert app and all(r["maxspeed_ms"] == pytest.approx(45 * CV.MPH_TO_MS, abs=0.05) for r in app)
+
+
+def test_mini_roundabout_is_small_ring_with_approaches():
+  from openpilot.selfdrive.mapd.roundabout_map import MINI_RB_RADIUS_M, mini_roundabout_way, roundabout_rows
+  lat, lon = 45.12, -95.04
+  mini = mini_roundabout_way(555, lat, lon, {"highway": "mini_roundabout"})
+  assert mini["way_id"] == -555
+  road = {"way_id": 3, "tags": {"highway": "residential"}, "node_ids": [554, 555, 556],
+          "coords": [(lat - 0.001, lon), (lat, lon), (lat + 0.001, lon)]}
+  rows = roundabout_rows([mini, road])
+  rings = [r for r in rows if r["role"] == ROLE_RING]
+  assert len(rings) == 1 and len([r for r in rows if r["role"] == ROLE_APPROACH]) == 2
+  geo = ring_geometry(rings)
+  assert geo is not None
+  assert 6.0 <= geo.radius_m <= 8.0 and abs(geo.radius_m - MINI_RB_RADIUS_M) < 0.5
+  from openpilot.selfdrive.mapd.roundabout import RB_V_MIN_MS
+  # A 7 m ring is tighter than any comfort target: the funnel floor applies.
+  assert roundabout_target_ms(roundabout_comfort_speed_ms(geo.radius_m, geo.lanes, geo.maxspeed_ms)) \
+    == pytest.approx(RB_V_MIN_MS, abs=0.01)
