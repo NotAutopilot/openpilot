@@ -32,8 +32,8 @@ def export_onnx(
   except ImportError as e:
     raise RuntimeError(
       "export_speed_sign_onnx needs ultralytics (and torch) on this machine:\n"
-      "  pip install ultralytics onnx\n"
-      "The comma 3X does not run this — export on a PC, then install the ONNX."
+      + "  pip install ultralytics onnx\n"
+      + "The comma 3X does not run this — export on a PC, then install the ONNX."
     ) from e
 
   parent = os.path.dirname(os.path.abspath(out)) or "."

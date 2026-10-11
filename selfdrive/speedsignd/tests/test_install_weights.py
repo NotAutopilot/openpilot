@@ -9,6 +9,7 @@ from openpilot.selfdrive.speedsignd.install import (
   install_weights,
   sha256_file,
   weights_present,
+  weights_sha_matches,
   weights_status_summary,
 )
 from openpilot.selfdrive.speedsignd.weights_manifest import ASSET_SHA256, release_asset_url
@@ -60,9 +61,9 @@ def test_cli_download_file_url(tmp_path):
 
 def test_manifest_points_at_github_release():
   url = release_asset_url()
-  assert "speed-sign-onnx-v1" in url
+  assert "speed-sign-onnx-v2" in url
   assert url.endswith("speed_sign.onnx")
-  assert len(ASSET_SHA256) == 64
+  assert ASSET_SHA256 == "1131200b7fe2d400596e09d7680fc3a26a08dcd8952acfdf261170bdb22d3d28"
 
 
 def test_weights_status_missing_and_installed(tmp_path):
@@ -78,7 +79,29 @@ def test_weights_status_missing_and_installed(tmp_path):
   ok = tmp_path / "speed_sign.onnx"
   ok.write_bytes(b"x" * MIN_ONNX_BYTES)
   assert weights_present(str(ok))
+  # Size alone is not Installed. v1 at this path is Out of date.
+  assert weights_status_summary(str(ok)) == "Out of date"
+  assert not weights_sha_matches(str(ok))
+
+
+def test_weights_status_installed_only_when_sha_matches(tmp_path, monkeypatch):
+  ok = tmp_path / "speed_sign.onnx"
+  ok.write_bytes(b"v2-weights" + (b"x" * MIN_ONNX_BYTES))
+  digest = sha256_file(str(ok))
+  monkeypatch.setattr("openpilot.selfdrive.speedsignd.install.ASSET_SHA256", digest)
+  assert weights_sha_matches(str(ok))
   assert weights_status_summary(str(ok)).startswith("Installed")
+
+
+def test_fetch_replaces_existing_file(tmp_path):
+  dest = tmp_path / "nap" / "speed_sign.onnx"
+  dest.parent.mkdir()
+  dest.write_bytes(b"old-v1-weights-keep-me-not")
+  src = tmp_path / "speed_sign.onnx"
+  src.write_bytes(b"new-v2-weights")
+  digest = sha256_file(str(src))
+  out = fetch_and_install(dest=str(dest), url=src.resolve().as_uri(), sha256=digest)
+  assert Path(out).read_bytes() == b"new-v2-weights"
 
 
 def test_install_script_does_not_reboot_and_settings_wire_it():

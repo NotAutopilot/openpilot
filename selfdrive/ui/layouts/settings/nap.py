@@ -136,6 +136,33 @@ class NAPLayout(Widget):
     self._radar_items = []
     self._toggle_map = {}  # param_key -> ListItem (for refresh)
 
+    # ── Section 0: Speed Sign (top — flip Logger while testing) ──
+    self._main_items.append(section_header_item("Speed Sign"))
+
+    self._add_toggle(
+      NAP_SPEED_SIGN_LOG,
+      "Speed Sign Logger",
+      SPEED_SIGN_LOG_DESCRIPTION,
+    )
+
+    self._weights_status = text_item(
+      "Speed Sign Weights",
+      weights_status_summary,
+      description="YOLO ONNX at /data/media/0/nap/speed_sign.onnx. "
+      "Missing → onroad SIGN shows NO WT and will not read roadside signs. "
+      "Installed → blank plate until a confirmed mph.",
+    )
+    self._main_items.append(self._weights_status)
+
+    self._install_weights_btn = button_item(
+      "Install weights",
+      "Start",
+      description=INSTALL_SPEED_SIGN_WEIGHTS_INSTRUCTIONS.split("\n", 1)[0],
+      callback=self._on_install_speed_sign_weights,
+    )
+    self._install_weights_btn.action_item.set_enabled(ui_state.is_offroad)
+    self._main_items.append(self._install_weights_btn)
+
     # ── Section 1: Longitudinal Control ──
     # Force Offroad / Simulate Look / False Alert Ignore live in the NAP triple-tap popup.
     self._main_items.append(section_header_item("Longitudinal Control"))
@@ -280,30 +307,6 @@ class NAPLayout(Widget):
 
     # ── Section 6: Advanced ──
     self._main_items.append(section_header_item("Advanced"))
-
-    self._add_toggle(
-      NAP_SPEED_SIGN_LOG,
-      "Speed Sign Logger",
-      SPEED_SIGN_LOG_DESCRIPTION,
-    )
-
-    self._weights_status = text_item(
-      "Speed Sign Weights",
-      weights_status_summary,
-      description="YOLO ONNX at /data/media/0/nap/speed_sign.onnx. "
-      "Missing → onroad SIGN shows NO WT and will not read roadside signs. "
-      "Installed → blank plate until a confirmed mph.",
-    )
-    self._main_items.append(self._weights_status)
-
-    self._install_weights_btn = button_item(
-      "Install weights",
-      "Start",
-      description=INSTALL_SPEED_SIGN_WEIGHTS_INSTRUCTIONS.split("\n", 1)[0],
-      callback=self._on_install_speed_sign_weights,
-    )
-    self._install_weights_btn.action_item.set_enabled(ui_state.is_offroad)
-    self._main_items.append(self._install_weights_btn)
 
     # Force Pre-AP is always on for now — grayed out in the ON position
     self._params.put_bool(NAPParamKeys.FORCE_PRE_AP, True)

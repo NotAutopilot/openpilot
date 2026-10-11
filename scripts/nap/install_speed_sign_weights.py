@@ -3,7 +3,9 @@
 
 Does not download maps, does not talk to osm.org, and does not write sqlite.
 
-On the comma 3X (Wi-Fi), fetch the published weights (~43 MB) with checksum:
+On the comma 3X (Wi-Fi), fetch the published weights (~12 MB) with checksum.
+An existing file at the destination is replaced. Settings shows Out of date
+when the sha is not speed-sign-onnx-v2:
 
   python -m scripts.nap.install_speed_sign_weights
 

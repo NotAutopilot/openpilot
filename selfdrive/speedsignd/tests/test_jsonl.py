@@ -144,6 +144,14 @@ def test_settings_and_docs_cover_enable_and_log_path():
   docs = (root / "docs-nap" / "speed-sign-log.md").read_text(encoding="utf-8")
   assert "Speed Sign Logger" in nap
   assert "NAPSpeedSignLog" in nap or "NAP_SPEED_SIGN_LOG" in nap
+  # Logger sits at the top of NAP (before Force Offroad / Longitudinal).
+  assert nap.find("Speed Sign Logger") < nap.find("Force Offroad")
+  assert nap.find("Speed Sign Logger") < nap.find("Longitudinal Control")
+  mici = (root / "selfdrive" / "ui" / "mici" / "layouts" / "settings" / "nap.py").read_text(encoding="utf-8")
+  marker = "self._scroller.add_widgets([\n      speed_sign_log,"
+  assert marker in mici
+  widgets = mici[mici.find("self._scroller.add_widgets(["):]
+  assert widgets.find("speed_sign_log,") < widgets.find("pedal_enabled,")
   content = (root / "selfdrive" / "ui" / "layouts" / "settings" / "nap_content.py").read_text(encoding="utf-8")
   assert "1 Hz" in content and "nice 19" in content
   assert "engaged" in content.lower()

@@ -7,13 +7,18 @@ import pytest
 
 from openpilot.selfdrive.speedsignd.detect import SpeedSign, SpeedSignDetector, paint_mutcd_r2_1
 from openpilot.selfdrive.speedsignd.hud import (
+  AGREE_READS,
+  AGREE_WINDOW_S,
   HUD_DETECT_PAUSED_TEXT,
   HUD_HOLD_S,
   HUD_MISSING_WEIGHTS_TEXT,
   LiveSignHold,
+  is_speed_limit_sighting,
+  should_replace_held_mph,
   TICI_CONFIRM_BTN_H,
   TICI_SIGN_H,
   TICI_SIGN_W,
+  accepted_hud_sign,
   accuracy_button_rects,
   hit_accuracy_button,
   hud_confirm_visible,
@@ -35,6 +40,8 @@ from openpilot.selfdrive.speedsignd.tests.test_detect import _scene
 def test_hold_keeps_mph_then_clears():
   h = LiveSignHold(hold_s=3.0)
   signs = [SpeedSign(mph=45, conf=0.8, bbox=(0, 0, 10, 10))]
+  live, mph, _ = h.update(signs, 9.8)
+  assert not live
   live, mph, conf = h.update(signs, 10.0)
   assert live and mph == 45 and conf == 0.8
   live, mph, _ = h.update([], 11.0)
@@ -48,7 +55,10 @@ def test_hold_keeps_mph_then_clears():
 def test_new_detection_refreshes_hold():
   h = LiveSignHold(hold_s=3.0)
   h.update([SpeedSign(mph=30, conf=0.7, bbox=(0, 0, 1, 1))], 0.0)
-  live, mph, _ = h.update([SpeedSign(mph=55, conf=0.9, bbox=(0, 0, 1, 1))], 1.0)
+  live, mph, _ = h.update([SpeedSign(mph=30, conf=0.7, bbox=(0, 0, 1, 1))], 0.2)
+  assert live and mph == 30
+  h.update([SpeedSign(mph=55, conf=0.9, bbox=(0, 0, 1, 1))], 1.0)
+  live, mph, _ = h.update([SpeedSign(mph=55, conf=0.9, bbox=(0, 0, 1, 1))], 1.2)
   assert live and mph == 55
   live, mph, _ = h.update([], 3.9)
   assert live and mph == 55
@@ -151,6 +161,8 @@ def test_publish_fields_flag_missing_weights_without_mph():
   live, held, _ = h.update([], 10.1)
   assert not live and held == 0
 
+  msg_valid, mph, conf, missing, paused = live_sign_publish_fields(h, signs, 10.8, False)
+  assert mph == 0
   msg_valid, mph, conf, missing, paused = live_sign_publish_fields(h, signs, 11.0, False)
   assert msg_valid and not missing and mph == 45 and not paused
   live, held, _ = h.update([], 11.5)
@@ -161,6 +173,79 @@ def test_publish_fields_flag_missing_weights_without_mph():
   # Paused publish does not refresh hold from a leftover sign list.
   live, held, _ = h.update([], 12.1)
   assert live and held == 45
+
+
+def test_hold_shows_ocr_50_from_two_frames_not_a_contradiction():
+  """Class 65 + OCR 50 is not a vote. Two OCR-only frames (second look) are."""
+  h = LiveSignHold(hold_s=3.0)
+  clash = [SpeedSign(
+    mph=50, conf=0.71, bbox=(0, 0, 10, 10),
+    class_mph=65, class_conf=0.81, refine_mph=50, refine_conf=0.71,
+  )]
+  assert not h.update(clash, 9.0)[0]
+  assert not h.update(clash, 9.4)[0]
+  signs = [SpeedSign(
+    mph=50, conf=0.71, bbox=(0, 0, 10, 10),
+    class_mph=None, refine_mph=50, refine_conf=0.71,
+  )]
+  live, mph, _ = h.update(signs, 9.8)
+  assert not live
+  live, mph, _ = h.update(signs, 10.0)
+  assert live and mph == 50
+  live, mph, _ = h.update([], 11.0)
+  assert live and mph == 50
+
+
+def test_process_frame_hud_lights_refined_50(tmp_path):
+  from openpilot.selfdrive.speedsignd.debounce import SignDebounce
+
+  class _Det:
+    onnx = object()
+
+    def detect(self, y, min_conf=None, rgb=None, nv12=None):
+      return [SpeedSign(
+        mph=50, conf=0.71, bbox=(0, 0, 8, 8),
+        class_mph=50, class_conf=0.82, refine_mph=50, refine_conf=0.71,
+      )]
+
+  log = JsonlLogger(str(tmp_path / "out.jsonl"))
+  debounce = SignDebounce()
+  y = _scene()
+  signs, written = process_frame(
+    y, 45.0, -95.0, 0.0, True, _Det(), log, now=1.0, debounce=debounce,
+  )
+  assert signs and signs[0].mph == 50
+  assert written == []
+
+
+def test_process_frame_hud_blank_when_yolo_65_refine_fails(tmp_path):
+  from openpilot.selfdrive.speedsignd.debounce import SignDebounce
+
+  class _Det:
+    onnx = object()
+
+    def detect(self, y, min_conf=None, rgb=None, nv12=None):
+      return [SpeedSign(
+        mph=65, conf=0.73, bbox=(0, 0, 8, 8),
+        class_mph=65, class_conf=0.73, refine_mph=None,
+      )]
+
+  log = JsonlLogger(str(tmp_path / "out.jsonl"))
+  debounce = SignDebounce()
+  y = _scene()
+  signs, written = process_frame(
+    y, 45.0, -95.0, 0.0, True, _Det(), log, now=1.0, debounce=debounce,
+  )
+  assert signs == []
+  assert written == []
+  assert debounce.last_raw and debounce.last_raw[0].mph == 65
+  live, mph, _ = LiveSignHold().update(signs, 1.0)
+  assert not live and mph == 0
+  live, mph, _ = LiveSignHold().update(
+    [SpeedSign(mph=65, conf=0.73, bbox=(0, 0, 8, 8), class_mph=65, class_conf=0.73)],
+    2.0,
+  )
+  assert not live and mph == 0
 
 
 def test_detect_without_gps_still_returns_signs(tmp_path):
@@ -177,7 +262,288 @@ def test_detect_without_gps_still_returns_signs(tmp_path):
 
 
 def test_hold_duration_constant():
-  assert HUD_HOLD_S == 3.0
+  # Parked 50 went blank after 10 s of 3–5 s infers; 45 s covers miss gaps.
+  # Two agreeing reads replace the {40, 60, 65, 70} junk gate.
+  assert HUD_HOLD_S == 45.0
+  assert AGREE_READS == 2
+  assert AGREE_WINDOW_S == 12.0
+
+
+def test_hold_last_good_across_infer_skips():
+  """Empty signs between 1 Hz / multi-second infers must keep last accepted mph."""
+  h = LiveSignHold()
+  signs = [SpeedSign(
+    mph=50, conf=0.71, bbox=(0, 0, 10, 10),
+    class_mph=50, class_conf=0.81, refine_mph=50, refine_conf=0.71,
+  )]
+  live, mph, _ = h.update(signs, 9.5)
+  assert not live
+  live, mph, _ = h.update(signs, 10.0)
+  assert live and mph == 50
+  for t in (11.0, 12.5, 14.0, 17.5, 19.9, 25.0, 35.0, 50.0):
+    live, mph, _ = h.update([], t)
+    assert live and mph == 50
+  live, mph, conf = h.update([], 10.0 + HUD_HOLD_S + 0.01)
+  assert not live and mph == 0 and conf == 0.0
+
+
+def test_hold_lasts_across_more_than_10s_empty_ticks():
+  """Justin: 10 s hold expired during miss gaps. Default 45 s must survive >10 s empty."""
+  h = LiveSignHold()
+  sign50 = [_sign(50, 0.50, class_mph=50, refine_mph=50, refine_conf=0.50)]
+  assert not h.update(sign50, 0.0)[0]
+  live, mph, _ = h.update(sign50, 0.2)
+  assert live and mph == 50
+  live, mph, _ = h.update([], 10.5)
+  assert live and mph == 50
+  live, mph, _ = h.update([], 20.0)
+  assert live and mph == 50
+  live, mph, _ = h.update([], 44.9)
+  assert live and mph == 50
+  # Confirming read was at 0.2 s, so the 45 s hold ends at 45.2.
+  live, mph, _ = h.update([], 45.3)
+  assert not live
+
+
+def test_yolo_65_refine_fail_does_not_light_65():
+  """YOLO 65 + refine=- → blank HUD, not 65."""
+  bad = SpeedSign(
+    mph=65, conf=0.73, bbox=(0, 0, 10, 10),
+    class_mph=65, class_conf=0.73, refine_mph=None,
+  )
+  assert accepted_hud_sign(bad) is None
+  h = LiveSignHold()
+  live, mph, _ = h.update([bad], 1.0)
+  assert not live and mph == 0
+
+
+def test_yolo_70_refine_fail_does_not_light_70():
+  bad = SpeedSign(
+    mph=70, conf=0.68, bbox=(0, 0, 10, 10),
+    class_mph=70, class_conf=0.68, refine_mph=None,
+  )
+  assert accepted_hud_sign(bad) is None
+  h = LiveSignHold()
+  live, mph, _ = h.update([bad], 1.0)
+  assert not live and mph == 0
+
+
+def test_yolo_65_refine_fail_holds_prior_50():
+  """A later unrefined 65 must not replace a refined 50; keep last-good."""
+  h = LiveSignHold()
+  good = [SpeedSign(
+    mph=50, conf=0.71, bbox=(0, 0, 10, 10),
+    class_mph=50, class_conf=0.81, refine_mph=50, refine_conf=0.71,
+  )]
+  live, mph, _ = h.update(good, 0.8)
+  assert not live
+  live, mph, _ = h.update(good, 1.0)
+  assert live and mph == 50
+  bad = [SpeedSign(
+    mph=65, conf=0.73, bbox=(0, 0, 10, 10),
+    class_mph=65, class_conf=0.73, refine_mph=None,
+  )]
+  live, mph, _ = h.update(bad, 2.0)
+  assert live and mph == 50
+  live, mph, _ = h.update([], 8.0)
+  assert live and mph == 50
+
+
+def test_class_ocr_contradiction_never_lights():
+  """v2 often reads 60 as 30 and 30 as 50. A disagreeing OCR must not vote either way."""
+  sign = SpeedSign(
+    mph=50, conf=0.71, bbox=(0, 0, 10, 10),
+    class_mph=65, class_conf=0.82, refine_mph=50, refine_conf=0.71,
+  )
+  assert accepted_hud_sign(sign) is None
+  h = LiveSignHold()
+  assert not h.update([sign], 5.0)[0]
+  live, mph, _ = h.update([sign], 5.4)
+  assert not live and mph == 0
+  live, mph, _ = h.update([sign], 8.0)
+  assert not live and mph == 0
+
+
+def test_same_timestamp_is_one_frame():
+  """Class+OCR agreement on one frame is one vote, even if update is called twice."""
+  sign = SpeedSign(
+    mph=65, conf=0.80, bbox=(0, 0, 10, 10),
+    class_mph=65, class_conf=0.80, refine_mph=65, refine_conf=0.80,
+  )
+  assert accepted_hud_sign(sign) is None
+  h = LiveSignHold()
+  assert not h.update([sign], 1.0)[0]
+  assert not h.update([sign], 1.0)[0]
+  live, mph, _ = h.update([sign], 2.0)
+  assert live and mph == 65
+
+
+def test_yolo_65_refine_agree_needs_a_second_frame():
+  """Class and OCR both saying 65 is one vote. The next frame lights it."""
+  sign = SpeedSign(
+    mph=65, conf=0.80, bbox=(0, 0, 10, 10),
+    class_mph=65, class_conf=0.80, refine_mph=65, refine_conf=0.80,
+  )
+  assert accepted_hud_sign(sign) is None
+  h = LiveSignHold()
+  live, mph, _ = h.update([sign], 1.0)
+  assert not live and mph == 0
+  live, mph, _ = h.update([sign], 2.0)
+  assert live and mph == 65
+
+
+def _sign(mph, conf, *, class_mph=None, refine_mph=None, refine_conf=0.0):
+  return SpeedSign(
+    mph=mph, conf=conf, bbox=(0, 0, 10, 10),
+    class_mph=class_mph if class_mph is not None else mph,
+    class_conf=conf,
+    refine_mph=refine_mph, refine_conf=refine_conf,
+  )
+
+
+def test_held_50_not_overturned_by_weaker_agreed_65():
+  """A different mph replaces only when it is at least as sure as the hold."""
+  assert should_replace_held_mph(50, 0.50, 65, 0.50)
+  assert not should_replace_held_mph(50, 0.53, 65, 0.47)
+  assert not should_replace_held_mph(50, 0.60, 70, 0.55)
+  h = LiveSignHold()
+  pair50 = [_sign(50, 0.50, class_mph=50, refine_mph=50, refine_conf=0.50)]
+  h.update(pair50, 1.0)
+  live, mph, _ = h.update(pair50, 1.2)
+  assert live and mph == 50
+  weaker = _sign(65, 0.47, class_mph=65, refine_mph=65, refine_conf=0.47)
+  assert accepted_hud_sign(weaker) is None
+  live, mph, _ = h.update([weaker], 1.4)
+  assert live and mph == 50
+
+
+def test_held_50_not_overturned_by_one_read_of_40_60_70():
+  """One class-only read never flashes 40/60/70. An agreed pair below the held conf stays 50."""
+  h = LiveSignHold()
+  pair50 = [_sign(50, 0.90, class_mph=50, refine_mph=50, refine_conf=0.90)]
+  h.update(pair50, 1.0)
+  live, mph, _ = h.update(pair50, 1.2)
+  assert live and mph == 50
+  for mph_j, conf in ((60, 0.51), (40, 0.48), (70, 0.73)):
+    lone = _sign(mph_j, conf, class_mph=mph_j, refine_mph=None)
+    assert accepted_hud_sign(lone) is None
+    live, mph, _ = h.update([lone], 1.4)
+    assert live and mph == 50
+  weak70 = _sign(70, 0.55, class_mph=70, refine_mph=70, refine_conf=0.55)
+  assert accepted_hud_sign(weak70) is None
+  live, mph, _ = h.update([weak70], 1.6)
+  assert live and mph == 50
+  # Two frames that class and OCR both name, at least as sure as the hold, do light.
+  real65 = _sign(65, 0.95, class_mph=65, refine_mph=65, refine_conf=0.95)
+  live, mph, _ = h.update([real65], 1.8)
+  assert live and mph == 50
+  live, mph, _ = h.update([real65], 1.9)
+  assert live and mph == 65
+
+
+def test_refine_50_refreshes_held_50():
+  h = LiveSignHold()
+  h.update([_sign(50, 0.43, class_mph=50, refine_mph=50, refine_conf=0.43)], 1.0)
+  live, mph, _ = h.update([_sign(50, 0.53, class_mph=50, refine_mph=50, refine_conf=0.53)], 2.0)
+  assert live and mph == 50
+  live, mph, _ = h.update([], 46.0)
+  assert live and mph == 50
+
+
+def test_sl_sighting_extends_hold_without_changing_mph():
+  h = LiveSignHold(hold_s=3.0)
+  pair = [_sign(50, 0.50, class_mph=50, refine_mph=50, refine_conf=0.50)]
+  h.update(pair, 1.0)
+  h.update(pair, 1.2)
+  miss = _sign(65, 0.73, class_mph=65, refine_mph=None)
+  assert is_speed_limit_sighting(miss)
+  live, mph, _ = h.update([miss], 3.5)
+  assert live and mph == 50
+  live, mph, _ = h.update([], 6.4)
+  assert live and mph == 50
+
+
+def test_held_50_overturns_to_agreed_65():
+  h = LiveSignHold()
+  pair = [_sign(50, 0.50, class_mph=50, refine_mph=50, refine_conf=0.50)]
+  h.update(pair, 1.0)
+  h.update(pair, 1.2)
+  strong = _sign(65, 0.80, class_mph=65, refine_mph=65, refine_conf=0.80)
+  assert should_replace_held_mph(50, 0.50, 65, 0.80)
+  live, mph, _ = h.update([strong], 1.4)
+  assert live and mph == 50
+  live, mph, _ = h.update([strong], 1.6)
+  assert live and mph == 65
+
+
+def test_held_65_yields_to_equally_sure_ocr_50():
+  """A contradiction is not a vote. Two OCR-only 50s at least as sure replace 65."""
+  assert not should_replace_held_mph(65, 0.80, 50, 0.43)
+  assert should_replace_held_mph(65, 0.51, 50, 0.55)
+  h = LiveSignHold()
+  agreed = _sign(65, 0.80, class_mph=65, refine_mph=65, refine_conf=0.80)
+  h.update([agreed], 1.0)
+  h.update([agreed], 1.1)
+  weak = [SpeedSign(
+    mph=50, conf=0.43, bbox=(0, 0, 10, 10),
+    class_mph=65, class_conf=0.80, refine_mph=50, refine_conf=0.43,
+  )]
+  h.update(weak, 1.2)
+  live, mph, _ = h.update(weak, 1.4)
+  assert live and mph == 65
+  sure = [SpeedSign(
+    mph=50, conf=0.85, bbox=(0, 0, 10, 10),
+    class_mph=None, refine_mph=50, refine_conf=0.85,
+  )]
+  h.update(sure, 1.6)
+  live, mph, _ = h.update(sure, 1.8)
+  assert live and mph == 50
+
+
+def test_expired_hold_needs_two_frames_and_ignores_one_class_read():
+  """One unrefined 70 stays blank. One class==OCR 70 stays blank. The next frame lights."""
+  h = LiveSignHold(hold_s=1.0)
+  pair = [_sign(50, 0.50, class_mph=50, refine_mph=50, refine_conf=0.50)]
+  h.update(pair, 0.0)
+  h.update(pair, 0.2)
+  # Hold expired. Empty publish must not re-arm from votes still inside 12 s.
+  live, mph, _ = h.update([], 3.0)
+  assert not live
+  lone = [_sign(70, 0.73, class_mph=70, refine_mph=None)]
+  live, mph, _ = h.update(lone, 3.1)
+  assert not live and mph == 0
+  agreed = [_sign(70, 0.51, class_mph=70, refine_mph=70, refine_conf=0.51)]
+  live, mph, _ = h.update(agreed, 3.2)
+  assert not live and mph == 0
+  live, mph, _ = h.update(agreed, 3.4)
+  assert live and mph == 70
+
+
+def test_publish_fields_yolo_65_refine_fail_blank_or_hold():
+  """liveSpeedSignNAP: unrefined 65 is not published; prior 50 is held."""
+  h = LiveSignHold()
+  bad = [SpeedSign(
+    mph=65, conf=0.73, bbox=(0, 0, 10, 10),
+    class_mph=65, class_conf=0.73, refine_mph=None,
+  )]
+  blank = LiveSignHold()
+  msg_valid, mph, conf, missing, paused = live_sign_publish_fields(blank, bad, 1.0, False)
+  # No accepted detect yet: cereal mph stays 0 (plate blank), same as no-hit.
+  assert not missing and not paused and mph == 0 and conf == 0.0
+  assert not msg_valid
+
+  good = [SpeedSign(
+    mph=50, conf=0.71, bbox=(0, 0, 10, 10),
+    class_mph=50, class_conf=0.81, refine_mph=50, refine_conf=0.71,
+  )]
+  msg_valid, mph, _, missing, paused = live_sign_publish_fields(h, good, 2.0, False)
+  assert mph == 0
+  msg_valid, mph, _, missing, paused = live_sign_publish_fields(h, good, 2.4, False)
+  assert msg_valid and mph == 50
+  msg_valid, mph, _, missing, paused = live_sign_publish_fields(h, bad, 3.0, False)
+  assert msg_valid and mph == 50
+  msg_valid, mph, _, missing, paused = live_sign_publish_fields(h, [], 4.0, False)
+  assert msg_valid and mph == 50
 
 
 def test_tici_plate_sits_on_driver_left_below_max():

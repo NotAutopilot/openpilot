@@ -180,16 +180,15 @@ FORCE_OFFROAD_DESCRIPTION = (
 )
 SPEED_SIGN_LOG_DESCRIPTION = (
   "Log-only MUTCD speed-sign detector on the ROAD camera + GPS. Default Off. "
-  "When On, speedsignd shows a display-only SIGN plate and may append JSONL "
-  "under /data/media/0/nap/speed_signs.jsonl (t, lat, lon, bearing, mph, conf). "
-  "WARNING: onroad YOLO can lag the driving model and cause TAKE CONTROL / "
-  "process timeouts. Heavy detect never runs while openpilot is actively "
-  "controlling (plate shows WAIT) so modeld is not starved. WAIT only means "
-  "OP is commanding actuators and should drop as soon as you cancel — if "
-  "you see WAIT while the UI looks disengaged, that is a bug; report "
-  "swaglog lines matching speedsignd. "
-  "While you are driving manually — moving is OK — detect runs at 1 Hz "
-  "and nice 19 so you can log speed-limit signs. Not gated on park or "
+  "When On, speedsignd shows a display-only SIGN plate and may append a short "
+  "JSONL line under /data/media/0/nap/speed_signs.jsonl (t, lat, lon, bearing, mph, conf). "
+  "Detect keeps running while openpilot is engaged, at 1 Hz or slower so one "
+  "little core stays near 25 percent (idle at least 3× the inference). "
+  "Inference stays on CPU (never the GPU modeld uses). "
+  "SCHED_IDLE, or nice 19 if that is unavailable, one thread on core 2. "
+  "It backs off when the CPU is loaded or the driving model / controls report lag. "
+  "The plate shows the mph while engaged, not WAIT (WAIT was the old pause). "
+  "Manual driving — moving is OK — uses the same detect. Not gated on park or "
   "Force Offroad. OSM upload is future work; this is JSONL + HUD only. "
   "If you see TAKE CONTROL or driving-model lag, turn Logger Off and use "
   "nap-release. Does not write sqlite, does not change cruise / HUD MAX, "
@@ -203,9 +202,11 @@ SPEED_SIGN_LOG_DESCRIPTION = (
 INSTALL_SPEED_SIGN_WEIGHTS_INSTRUCTIONS = """\
 Install speed-sign ONNX weights
 
-Downloads the published YOLO ONNX (~43 MB) from GitHub Release
-speed-sign-onnx-v1 / speed_sign.onnx and writes
-/data/media/0/nap/speed_sign.onnx (SHA-256 checked).
+Downloads the published YOLOv8n ONNX (~12 MB) from GitHub Release
+speed-sign-onnx-v2 / speed_sign.onnx and writes
+/data/media/0/nap/speed_sign.onnx (SHA-256 checked). Replaces an older
+file at that path. Settings → Speed Sign Weights shows Out of date when
+the sha does not match — tap Install weights again. Do not keep the v1 file.
 
 Without this file, Speed Sign Logger On still starts speedsignd, but the
 onroad SIGN plate shows NO WT and will not read real roadside signs.
@@ -213,10 +214,11 @@ onroad SIGN plate shows NO WT and will not read real roadside signs.
 PRECONDITIONS:
   1. Device is offroad / parked (Force Offroad if you are in the car)
   2. Wi-Fi that can reach GitHub Releases
-  3. ~50 MiB free on /data
+  3. ~20 MiB free on /data
 
 Takes less than a minute. speedsignd retries the ONNX onroad without a
-reboot. Then a clear MUTCD R2-1 should light SIGN mph.
+reboot. Leave Logger On while disengaged until the first CPU compile
+finishes, then engage. A clear MUTCD R2-1 needs two agreeing reads.
 
 Does not write sqlite, does not change cruise / HUD MAX, and does not
 query osm.org.

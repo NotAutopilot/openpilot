@@ -38,7 +38,7 @@ struct LiveSpeedSignNAP @0xaedffd8f31e7b55d {
   conf @1 :Float32;
   valid @2 :Bool;         # live detection including HUD hold
   weightsMissing @3 :Bool; # ONNX failed to load; HUD shows NO WT, never a fake mph
-  detectPaused @4 :Bool;   # OP commanding actuators — YOLO skipped; HUD shows WAIT (not cereal-unknown)
+  detectPaused @4 :Bool;   # HUD WAIT if set. Engaged detect leaves this false.
 }
 
 # NAP radar cone-line sample. Log only. Does not steer.
