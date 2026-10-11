@@ -41,6 +41,7 @@ RURAL_MAJOR_CAP_MPH = 65
 RURAL_MINOR_CAP_MPH = 55
 RESIDENTIAL_MPH = 25
 # Unposted ramps/links: never above this (curves, merges); posted ramps keep their tag.
+# Applies in Minnesota too (MN 169.14 alone would give a ramp 70).
 LINK_CAP_MPH = 45
 ALLEY_MPH = 15
 
@@ -128,7 +129,8 @@ def default_maxspeed_mph(state: str | None, highway: str, tags: dict, *, urban: 
     return None
   hw = (highway or str(tags.get("highway") or "")).strip().lower()
   if state == MN:
-    return mn_statutory.statutory_maxspeed_mph(hw, tags, urban=urban)
+    mph = mn_statutory.statutory_maxspeed_mph(hw, tags, urban=urban)
+    return min(mph, LINK_CAP_MPH) if mph is not None and hw.endswith("_link") else mph
   lim = IIHS.get(state)
   if lim is None or hw not in FILL_CLASSES:
     return None
@@ -210,3 +212,37 @@ def default_maxspeed_ms(state: str | None, highway: str, tags: dict, coords: lis
   if mph is None:
     return None, ""
   return mph * CV.MPH_TO_MS, fill_source(state)
+
+
+def _end_keys(coords: list[tuple[float, float]]) -> tuple[tuple[int, int], tuple[int, int]]:
+  a, b = coords[0], coords[-1]
+  return (round(a[0] * 1e6), round(a[1] * 1e6)), (round(b[0] * 1e6), round(b[1] * 1e6))
+
+
+def inherit_posted_neighbors(ways: list[dict]) -> int:
+  """Estimated fills that continue a posted road take the posted limit.
+
+  An untagged piece of the same named road between two posted pieces (e.g. a
+  bridge or a split way on US-212 in Watertown, SD) would otherwise get the
+  rural default (70) between two 45 mph zones. If an estimated way shares an
+  endpoint with posted ways of the same name, it takes the lowest of their
+  limits. It stays estimated. Returns how many ways were changed.
+  """
+  posted: dict[tuple[str, tuple[int, int]], float] = {}
+  for w in ways:
+    if w.get("estimated") or len(w.get("coords") or []) < 2 or not w.get("name"):
+      continue
+    for k in _end_keys(w["coords"]):
+      key = (str(w["name"]), k)
+      posted[key] = min(posted.get(key, 1e9), float(w["maxspeed_ms"]))
+  changed = 0
+  for w in ways:
+    if not w.get("estimated") or len(w.get("coords") or []) < 2 or not w.get("name"):
+      continue
+    near = [posted[(str(w["name"]), k)] for k in _end_keys(w["coords"]) if (str(w["name"]), k) in posted]
+    if near:
+      v = min(near)
+      if abs(v - float(w["maxspeed_ms"])) > 0.01:
+        w["maxspeed_ms"] = v
+        changed += 1
+  return changed

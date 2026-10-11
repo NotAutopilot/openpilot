@@ -98,3 +98,24 @@ def test_sd_refresh_fills_us212_estimated(tmp_path):
   t = db.lookup(lat + 0.03, lon, bearing_deg=90.0)
   assert t is not None and not t.estimated and abs(t.speed_limit_ms - 45 * CV.MPH_TO_MS) < 0.2
   db.close()
+
+
+def test_untagged_piece_between_posted_takes_posted_limit():
+  lat = 44.8901
+  ways = ways_from_overpass({"elements": [
+    {"type": "way", "id": 1, "tags": {"highway": "primary", "name": "9th Avenue Southeast", "maxspeed": "45 mph"},
+     "geometry": [{"lat": lat, "lon": -97.070}, {"lat": lat, "lon": -97.0685}]},
+    {"type": "way", "id": 2, "tags": {"highway": "primary", "name": "9th Avenue Southeast"},
+     "geometry": [{"lat": lat, "lon": -97.0685}, {"lat": lat, "lon": -97.0678}]},
+    {"type": "way", "id": 3, "tags": {"highway": "primary", "name": "9th Avenue Southeast", "maxspeed": "45 mph"},
+     "geometry": [{"lat": lat, "lon": -97.0678}, {"lat": lat, "lon": -97.066}]},
+    {"type": "way", "id": 4, "tags": {"highway": "primary", "name": "Other Rd"},
+     "geometry": [{"lat": lat, "lon": -97.0678}, {"lat": lat + 0.01, "lon": -97.0678}]},
+  ]}, fill_unmarked=True)
+  by_id = {w["way_id"]: w for w in ways}
+  assert by_id[2]["estimated"] and abs(by_id[2]["maxspeed_ms"] - 45 * CV.MPH_TO_MS) < 0.01
+  assert abs(by_id[4]["maxspeed_ms"] - 65 * CV.MPH_TO_MS) < 0.01  # different road: state default
+
+
+def test_mn_ramp_capped():
+  assert default_maxspeed_mph("MN", "motorway_link", {}, urban=False) == 45

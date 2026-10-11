@@ -47,7 +47,7 @@ from openpilot.selfdrive.mapd.mn_statutory import (
   benson_fill_bbox,
   is_urban_place_tags,
 )
-from openpilot.selfdrive.mapd.us_statutory import fillable_highway, is_fill_source, state_index
+from openpilot.selfdrive.mapd.us_statutory import fillable_highway, inherit_posted_neighbors, is_fill_source, state_index
 from openpilot.selfdrive.mapd.osm_db import OsmSpeedLimitDB
 from openpilot.selfdrive.mapd.overpass import bbox_from_center, resolve_way_speed, ways_from_overpass
 from openpilot.selfdrive.mapd.roundabout_map import (
@@ -181,6 +181,9 @@ def _ways_from_pyosmium(
 
   print(f"Reading highway ways from {pbf}…", file=sys.stderr, flush=True)
   H().apply_file(pbf, locations=True, filters=[osmium.filter.KeyFilter("highway")])
+  if fill_unmarked:
+    n = inherit_posted_neighbors(out)
+    print(f"  {n} estimated ways took the posted limit of the same road at their ends", file=sys.stderr, flush=True)
   return out
 
 

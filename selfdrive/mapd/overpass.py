@@ -17,7 +17,7 @@ from openpilot.selfdrive.mapd.mn_statutory import (
   PlaceIndex,
   places_from_overpass,
 )
-from openpilot.selfdrive.mapd.us_statutory import default_maxspeed_ms, is_fill_source, state_index
+from openpilot.selfdrive.mapd.us_statutory import default_maxspeed_ms, inherit_posted_neighbors, is_fill_source, state_index
 from openpilot.selfdrive.mapd.speed_limit import parse_maxspeed
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
@@ -172,4 +172,6 @@ def ways_from_overpass(payload: dict, *, fill_unmarked: bool = False) -> list[di
       "estimated": is_fill_source(source),
       "junction": tags.get("junction") or "",
     })
+  if fill_unmarked:
+    inherit_posted_neighbors(out)
   return out
