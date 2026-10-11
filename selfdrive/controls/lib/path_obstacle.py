@@ -497,8 +497,61 @@ def _mean_std(vals: list[float]) -> tuple[float, float]:
   return mean, math.sqrt(var)
 
 
+def _np_plane(value):
+  """2D numeric numpy array, or None (then the list path runs)."""
+  try:
+    import numpy as np
+  except Exception:
+    return None
+  if not isinstance(value, np.ndarray) or value.ndim != 2 or value.dtype.kind not in "uifb":
+    return None
+  if value.shape[0] == 0 or value.shape[1] == 0:
+    return None
+  return value
+
+
+def _metrics_np(obj, road) -> dict:
+  """Vectorized metrics_from_rows. Same sampling, bins and fallbacks."""
+  import numpy as np
+  height, width = obj.shape
+  cells = height * width
+  step = 1
+  while cells / (step * step) > 2400 and step < 8:
+    step += 1
+  samp = obj[::step, :width:step].astype(np.float64)
+  vals = samp.ravel()
+  mean = float(vals.mean())
+  std = float(np.sqrt(((vals - mean) ** 2).mean()))
+  ys = np.arange(samp.shape[0]) * step
+  band_of = np.where(ys < height / 3, 0, np.where(ys < 2 * height / 3, 1, 2))
+  xs = np.arange(samp.shape[1])
+  col_of = np.where(xs < width / 3, 0, np.where(xs < 2 * width / 3, 1, 2))
+  cols = []
+  for c in range(3):
+    sel = samp[:, col_of == c]
+    cols.append(float(sel.mean()) if sel.size else mean)
+  band_means = []
+  for b in range(3):
+    sel = samp[band_of == b, :]
+    band_means.append(float(sel.mean()) if sel.size else None)
+  bands = [m if m is not None else mean for m in band_means]
+  road_mean = None
+  if road is not None:
+    rs = road[::step, :width:step].astype(np.float64).ravel()
+    rs = rs[np.isfinite(rs)]
+    if rs.size:
+      road_mean = float(rs.mean())
+  if road_mean is None:
+    road_mean = (band_means[2] if band_means[2] is not None else 0.0) or mean
+  return {"mean": mean, "std": std, "cols": cols, "bands": bands, "road": road_mean}
+
+
 def metrics_from_rows(obj_rows, road_rows=None) -> dict:
   """Mean/std plus 3 column and 3 row means. Caps the sample count."""
+  obj_np = _np_plane(obj_rows)
+  if obj_np is not None and (road_rows is None or _np_plane(road_rows) is not None) and \
+      (obj_np.dtype.kind != "f" or bool(__import__("numpy").isfinite(obj_np).all())):
+    return _metrics_np(obj_np, _np_plane(road_rows) if road_rows is not None else None)
   rows = _row_lists(obj_rows)
   if not rows:
     return {"mean": 0.0, "std": 0.0, "cols": [0.0, 0.0, 0.0], "bands": [0.0, 0.0, 0.0], "road": 0.0}
@@ -608,6 +661,44 @@ def _luma_of(value) -> tuple[float, bool] | None:
   return luma, False
 
 
+def _light_stats_np(obj, v_plane) -> tuple[float, float, float, float]:
+  """Vectorized crop_light_stats for a 2D luma crop. Same sampling and V lookup."""
+  import numpy as np
+  height, width = obj.shape
+  if width < 2 or height < 2:
+    return 0.0, 0.0, 0.0, 0.0
+  step = 1
+  cells = height * width
+  while cells / (step * step) > 2000 and step < 8:
+    step += 1
+  samp = obj[::step, :width:step].astype(np.float64)
+  red = np.zeros(samp.shape, dtype=bool)
+  if v_plane is not None:
+    nv_rows, nv_cols = v_plane.shape
+    fy = (np.arange(samp.shape[0]) * step) / max(height - 1, 1)
+    vy = np.minimum(nv_rows - 1, (fy * nv_rows).astype(np.int64))
+    fx = (np.arange(samp.shape[1]) * step) / max(width - 1, 1)
+    vx = np.minimum(nv_cols - 1, (fx * nv_cols).astype(np.int64))
+    v_vals = v_plane.astype(np.float64)[vy[:, None], vx[None, :]]
+    red = (samp >= RED_Y_MIN) & np.isfinite(v_vals) & (v_vals >= RED_V_MIN)
+  finite = np.isfinite(samp)
+  lumas = samp[finite]
+  n = int(lumas.size)
+  if n == 0:
+    return 0.0, 0.0, 0.0, 0.0
+  near = float(np.count_nonzero(lumas >= NEAR_SAT_Y)) / n
+  sat = float(np.count_nonzero(lumas >= SAT_Y)) / n
+  red_frac = float(np.count_nonzero(red[finite])) / n
+  median = float(np.partition(lumas, n // 2)[n // 2])
+  excess = np.maximum(0.0, lumas - median)
+  total = float(excess.sum())
+  if total <= 1.0:
+    blob = 0.0
+  else:
+    blob = float(excess[lumas >= NEAR_SAT_Y].sum()) / total
+  return near, sat, red_frac, blob
+
+
 def crop_light_stats(obj_rows, v_rows=None) -> tuple[float, float, float, float]:
   """(near_sat_frac, sat_frac, red_frac, blob_share) for one crop.
 
@@ -615,7 +706,11 @@ def crop_light_stats(obj_rows, v_rows=None) -> tuple[float, float, float, float]
   pixel or, when v_rows is the NV12 V crop, a bright pixel with high V.
   blob_share is how much of the contrast above the median sits in the
   clipped pixels. Empty crops return zeros. Any bad pixel is skipped.
+  A 2D numpy luma crop (the on-device case) takes the vectorized path.
   """
+  obj_np = _np_plane(obj_rows)
+  if obj_np is not None and (v_rows is None or _np_plane(v_rows) is not None):
+    return _light_stats_np(obj_np, _np_plane(v_rows) if v_rows is not None else None)
   rows = _row_lists(obj_rows)
   if not rows:
     return 0.0, 0.0, 0.0, 0.0

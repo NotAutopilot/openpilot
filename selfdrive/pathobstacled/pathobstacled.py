@@ -13,6 +13,14 @@ import os
 import time
 from dataclasses import replace
 
+from openpilot.selfdrive.pathobstacled.cone_cam import (
+  BUDGET_S as CONE_BUDGET_S,
+  CamGeom,
+  ConeCamState,
+  WINDOWS_M as CONE_WINDOWS_M,
+  score_line,
+  uv_planes_from_nv12,
+)
 from openpilot.selfdrive.controls.lib.path_obstacle import (
   PARAM_OBSTACLE_CHIME,
   PARAM_OBSTACLE_LOG,
@@ -47,6 +55,12 @@ VISION_FAIL_REASONS = (
   "budget",
   "model_error",
 )
+# Cone camera confirm (log only). At most 5 Hz, one shared 8 ms budget per
+# grab+score, SCHED_IDLE while scoring, and a backoff while modeld drops frames.
+CONE_HZ = 5.0
+CONE_DROP_BACKOFF_S = 0.5
+CONE_DROP_BACKOFF_MAX_S = 5.0
+CONE_DROP_PERC = 0.0
 THUMB_DIR = "/data/media/0/realdata/path_obstacle_thumbs"
 THUMB_GAP_S = 2.0
 NICE = 19
@@ -284,6 +298,7 @@ class _Cameras:
     self.last_reason = ""
     self.patch_sig: dict[int, tuple] = {}
     self.chroma_v = None
+    self.chroma_uv = None
 
   def _types(self):
     if self._vipc is None:
@@ -415,11 +430,16 @@ class _Cameras:
       self.chroma_v = _v_plane_from_nv12(buf)
     except Exception:
       self.chroma_v = None
+    try:
+      self.chroma_uv = uv_planes_from_nv12(buf)
+    except Exception:
+      self.chroma_uv = None
     return plane, ""
 
   def grab(self, wide: bool, now: float, deadline: float | None = None):
     """Return (Y plane or None, reason). Reason is empty when a frame is ready."""
     self.chroma_v = None
+    self.chroma_uv = None
     if deadline is not None and now >= deadline:
       self.last_reason = "budget"
       return None, "budget"
@@ -586,6 +606,11 @@ class Helper:
     self.gps = None
     self.calib = _DEFAULT_CALIB
     self._fail_logged = ""
+    self.cone = ConeCamState()
+    self.next_cone = 0.0
+    self.cone_backoff = 0.0
+    self.cone_hold_until = 0.0
+    self.cone_start = 0
 
   def refresh_params(self, params, now: float) -> None:
     if now - self.param_t > 1.0:
@@ -663,6 +688,132 @@ class Helper:
     return sample, vision_us
 
 
+def _cone_geom(cam, calib) -> CamGeom:
+  roll, pitch, yaw, height, _wr, _wp, _wy = calib if calib is not None else _DEFAULT_CALIB
+  try:
+    sensor = "" if cam is None else cam.sensor
+  except Exception:
+    sensor = ""
+  width, cam_h, road_f, _wide_f = _cam_size(sensor)
+  return CamGeom(width=width, height=cam_h, focal=road_f, roll=roll, pitch=pitch, yaw=yaw, cam_height=height)
+
+
+class _IdleSched:
+  """SCHED_IDLE for the cone scoring only, then back to SCHED_OTHER (nice 19 stays).
+
+  Leaving SCHED_IDLE needs privilege: an unprivileged thread cannot come back
+  (EPERM), which would leave the obstacle chime path idle-scheduled too. So
+  the switch is made only as root; otherwise scoring stays at nice 19, the
+  lowest SCHED_OTHER priority, under the same 8 ms budget.
+  """
+
+  def __enter__(self):
+    self.ok = False
+    try:
+      if os.geteuid() != 0:
+        return self
+      os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
+      self.ok = True
+    except (AttributeError, OSError):
+      pass
+    return self
+
+  def __exit__(self, *exc):
+    if self.ok:
+      try:
+        os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
+      except (AttributeError, OSError):
+        pass
+    return False
+
+
+def cone_frame_drop(driving_model) -> bool:
+  """True when modeld reports dropped frames (drivingModelData.frameDropPerc)."""
+  if driving_model is None:
+    return False
+  try:
+    perc = float(driving_model.frameDropPerc)
+  except Exception:
+    return False
+  return math.isfinite(perc) and perc > CONE_DROP_PERC
+
+
+def on_cone(helper: Helper, body, now: float, driving_model=None, frame=None):
+  """Score the radar cone line in one ROAD frame. Returns the log dict or None.
+
+  `frame` (y, u, v) is for tests; on device the frame comes from VisionIPC.
+  Nothing reads the result: it is only logged.
+  """
+  try:
+    side = int(body.side)
+    count = int(body.count)
+    lats = (float(body.latNear), float(body.latMid), float(body.latFar))
+    radar_active = bool(body.active)
+  except Exception:
+    return None
+  if side == 0 or count <= 0 or not all(math.isfinite(v) for v in lats):
+    return None
+  if cone_frame_drop(driving_model):
+    helper.cone_backoff = min(CONE_DROP_BACKOFF_MAX_S, max(CONE_DROP_BACKOFF_S, helper.cone_backoff * 2.0))
+    helper.cone_hold_until = now + helper.cone_backoff
+    return None
+  if now < helper.cone_hold_until or now < helper.next_cone:
+    return None
+  helper.cone_backoff = 0.0
+  helper.next_cone = now + 1.0 / CONE_HZ
+  started = time.monotonic()
+  deadline = started + CONE_BUDGET_S
+  reason = ""
+  scores = []
+  over = False
+  with _IdleSched():
+    if frame is not None:
+      y, u, v = frame
+    else:
+      y, reason = helper.cams.grab(False, now, deadline)
+      uv = helper.cams.chroma_uv
+      u, v = uv if uv is not None else (None, None)
+      if y is not None and u is None:
+        reason = "no_frame"
+    if not reason and y is not None:
+      geom = _cone_geom(helper.cam, helper.calib)
+      try:
+        scores, over = score_line(y, u, v, geom, lats, deadline=deadline, start=helper.cone_start)
+      except Exception:
+        scores, reason = [], "model_error"
+      if over:
+        reason = "budget"
+        helper.cone_start = (helper.cone_start + max(1, len(scores))) % len(CONE_WINDOWS_M)
+      else:
+        helper.cone_start = 0
+  ms = (time.monotonic() - started) * 1e3
+  if ms > CONE_BUDGET_S * 1e3:
+    helper.next_cone = now + max(1.0 / CONE_HZ, 0.40)
+  confirmed = helper.cone.update(side, scores, now)
+  if not helper.cone.should_log(now):
+    return None
+  return {
+    "side": side,
+    "radar_active": radar_active,
+    "radar_count": count,
+    "confirmed": confirmed,
+    "n_hits": sum(1 for sc in scores if sc.hit),
+    "n_scored": len(scores),
+    "hits": [int(sc.x0) for sc in scores if sc.hit],
+    "conf": round(max((sc.conf for sc in scores), default=0.0), 3),
+    "ms": round(ms, 2),
+    "reason": reason,
+  }
+
+
+def _log_cone(event: dict) -> None:
+  try:
+    from openpilot.common.swaglog import cloudlog
+    cloudlog.event("cone_cam", **event)
+  except Exception:
+    pass
+
+
 def _latest_body(messaging, sock):
   last = None
   while True:
@@ -685,36 +836,64 @@ def _run() -> None:
   # liveCalibration. Those services are at or near the msgq reader cap.
   # Sun uses whichever GPS this device publishes. Calibration is the param.
   gps_service = get_gps_location_service(params)
+  # coneLineNAP (radard, 8 Hz) and drivingModelData (modeld frame drops) are
+  # far below the msgq reader cap; test_msgq_reader_budget counts them.
   sock = messaging.sub_sock("pathObstacleNAP", timeout=RADAR_TIMEOUT_MS)
+  cone_sock = messaging.sub_sock("coneLineNAP", conflate=True)
+  dmd_sock = messaging.sub_sock("drivingModelData", conflate=True)
   cam_sock = messaging.sub_sock("roadCameraState", conflate=True)
   gps_sock = messaging.sub_sock(gps_service, conflate=True)
   pm = messaging.PubMaster(["pathObstacleVisionNAP"])
+  poller = messaging.Poller()
+  poller.registerSocket(sock)
+  poller.registerSocket(cone_sock)
   helper = Helper()
+  driving_model = None
 
   while True:
-    msg = messaging.recv_one(sock)
+    ready = poller.poll(RADAR_TIMEOUT_MS)
     now = time.monotonic()
     helper.refresh_params(params, now)
-    if msg is None or not helper.log_on:
-      if not helper.log_on:
-        helper.det.reset()
+    if not helper.log_on:
+      helper.det.reset()
+      _latest_body(messaging, sock)
+      _latest_body(messaging, cone_sock)
       continue
-    try:
-      active = bool(msg.pathObstacleNAP.active)
-    except Exception:
+    if not ready:
       continue
-    if not active:
-      continue
-    try:
-      helper.absorb(
-        _latest_body(messaging, cam_sock),
-        _latest_body(messaging, gps_sock),
-      )
-      result = helper.on_radar(msg, now)
-      if result is None:
+    helper.absorb(
+      _latest_body(messaging, cam_sock),
+      _latest_body(messaging, gps_sock),
+    )
+    dmd = _latest_body(messaging, dmd_sock)
+    if dmd is not None:
+      driving_model = dmd
+    # Obstacle first, unchanged: every queued pathObstacleNAP in order.
+    while True:
+      msg = messaging.recv_one_or_none(sock)
+      if msg is None:
+        break
+      try:
+        active = bool(msg.pathObstacleNAP.active)
+      except Exception:
         continue
-      sample, vision_us = result
-      _publish_vision(pm, messaging, sample, vision_us)
+      if not active:
+        continue
+      try:
+        result = helper.on_radar(msg, time.monotonic())
+        if result is None:
+          continue
+        sample, vision_us = result
+        _publish_vision(pm, messaging, sample, vision_us)
+      except Exception:
+        continue
+    cone = _latest_body(messaging, cone_sock)
+    if cone is None:
+      continue
+    try:
+      event = on_cone(helper, cone, time.monotonic(), driving_model)
+      if event is not None:
+        _log_cone(event)
     except Exception:
       continue
 
