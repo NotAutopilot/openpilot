@@ -81,35 +81,41 @@ def test_update_split_hud_on_first_hit():
   assert split.confirmed[0].mph == 55
 
 
-def test_duty_cycle_gap_needs_the_second_look_to_confirm_jsonl():
-  """A 2.1 s infer now waits 8.4 s, outside the 4 s JSONL window.
+def test_duty_cycle_gap_two_yolo_reads_confirm_inside_12s():
+  """A 2.1 s infer waits 8.4 s. That fits the 12 s window, so the next YOLO confirms.
 
-  The second look 0.1 s later is what confirms. The next YOLO cannot.
+  A class/OCR contradiction on the second look does not.
   """
   period, budget = 1.0 / SPEEDSIGND_HZ, 0.100
   infer_s = 2.1
   second_t = next_detect_mono(infer_s, infer_s, period, budget)
   assert abs(second_t - infer_s * 4.0) < 1e-9
-  assert second_t > DEBOUNCE_WINDOW_S
+  assert second_t < DEBOUNCE_WINDOW_S
   d = SignDebounce()
-  first_sign = SpeedSign(mph=55, conf=0.8, bbox=(0, 0, 8, 8))
+  first_sign = SpeedSign(
+    mph=55, conf=0.8, bbox=(0, 0, 8, 8),
+    class_mph=55, class_conf=0.8, refine_mph=55, refine_conf=0.8,
+  )
   first = d.update_split([first_sign], 0.0)
   assert first.hud and first.confirmed == []
-  look = SpeedSign(
+  clash = SpeedSign(
     mph=55, conf=0.62, bbox=(0, 0, 8, 8),
     class_mph=65, class_conf=0.70, refine_mph=55, refine_conf=0.62,
   )
-  second = d.update_split([look], 0.1)
-  assert second.confirmed and second.confirmed[0].mph == 55
+  assert d.update_split([clash], 0.1).confirmed == []
   late = d.update_split([first_sign], second_t)
-  assert late.confirmed == []
+  assert late.confirmed and late.confirmed[0].mph == 55
+  # A 4 s infer gaps 16 s, past the window: a miss, not a one-frame plate.
+  slow = next_detect_mono(4.0, 4.0, period, budget)
+  assert slow > DEBOUNCE_WINDOW_S
 
 
-def test_debounce_constants_match_1hz():
+def test_debounce_constants_match_duty_gap():
   assert SPEEDSIGND_HZ == 1.0
   assert DEBOUNCE_HITS == 2
-  assert DEBOUNCE_WINDOW_S == 4.0
-  # Two 1 Hz hits (or 1 Hz + one skip) must fit in the JSONL window.
+  assert DEBOUNCE_WINDOW_S == 12.0
+  # Two duty-cycled reads at a ~3 s infer (12 s apart) still fit.
+  assert DEBOUNCE_WINDOW_S >= 4.0 * 3.0
   assert DEBOUNCE_WINDOW_S >= 2.0 / SPEEDSIGND_HZ
 
 
@@ -118,18 +124,24 @@ def test_update_split_one_unrefined_read_does_not_confirm():
   for i, mph in enumerate((40, 60, 65, 70)):
     bad = SpeedSign(mph=mph, conf=0.73, bbox=(0, 0, 8, 8), class_mph=mph, class_conf=0.73)
     split = d.update_split([bad], float(i) * 3.0)
-    assert split.hud and split.hud[0].mph == mph
+    assert split.hud == []
     assert split.confirmed == []
 
 
-def test_two_ocr_votes_confirm_50_not_the_class_65():
+def test_contradiction_does_not_confirm_and_two_ocr_frames_do():
   d = SignDebounce()
   mixed = SpeedSign(
     mph=50, conf=0.71, bbox=(0, 0, 8, 8),
     class_mph=65, class_conf=0.82, refine_mph=50, refine_conf=0.71,
   )
   assert d.update_split([mixed], 0.0).confirmed == []
-  split = d.update_split([mixed], 0.2)
+  assert d.update_split([mixed], 0.2).confirmed == []
+  ocr = SpeedSign(
+    mph=50, conf=0.71, bbox=(0, 0, 8, 8),
+    class_mph=None, refine_mph=50, refine_conf=0.71,
+  )
+  assert d.update_split([ocr], 1.0).confirmed == []
+  split = d.update_split([ocr], 1.2)
   assert split.confirmed and split.confirmed[0].mph == 50
 
 
@@ -140,20 +152,28 @@ def test_update_split_one_unrefined_65_is_not_confirmed():
     class_mph=65, class_conf=0.73, refine_mph=None,
   )
   split = d.update_split([bad], 0.0)
-  assert split.hud and split.confirmed == []
+  assert split.hud == [] and split.confirmed == []
   assert d.last_raw and d.last_raw[0].mph == 65
   again = d.update_split([bad], 0.3)
-  assert again.confirmed and again.confirmed[0].mph == 65
+  assert again.confirmed == []
+  assert again.hud == []
 
 
-def test_update_split_hud_refined_50_from_class_65():
+def test_unreadable_and_negative_never_confirm():
+  d = SignDebounce()
+  unread = SpeedSign(mph=0, conf=0.90, bbox=(1, 1, 20, 20), class_mph=None)
+  neg = SpeedSign(mph=0, conf=0.90, bbox=(1, 1, 20, 20), class_mph=None, refine_mph=None)
+  assert d.update_split([unread], 0.0).confirmed == []
+  assert d.update_split([unread, neg], 1.0).confirmed == []
+  assert d.last_raw == []
+
+
+def test_update_split_contradiction_is_not_a_hud_vote():
   d = SignDebounce()
   s = SpeedSign(
     mph=50, conf=0.71, bbox=(0, 0, 8, 8),
     class_mph=65, class_conf=0.82, refine_mph=50, refine_conf=0.71,
   )
   split = d.update_split([s], 0.0)
-  assert split.hud and split.hud[0].mph == 50
+  assert split.hud == []
   assert split.confirmed == []
-  assert split.hud[0].refine_mph == 50
-  assert split.hud[0].class_mph == 65

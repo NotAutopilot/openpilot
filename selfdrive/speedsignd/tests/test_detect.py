@@ -54,6 +54,21 @@ def test_license_plate_aspect_is_rejected():
   assert detect_mutcd_speed_signs(y) == []
 
 
+def test_try_load_refuses_sha_mismatch(tmp_path, monkeypatch):
+  from openpilot.selfdrive.speedsignd.install import MIN_ONNX_BYTES
+  path = tmp_path / "speed_sign.onnx"
+  path.write_bytes(b"v1" * MIN_ONNX_BYTES)
+  opened = []
+
+  def boom(*_a, **_k):
+    opened.append(1)
+    raise AssertionError("mismatched sha must not open a session")
+
+  monkeypatch.setattr("openpilot.selfdrive.speedsignd.detect._onnx_session", boom)
+  assert OnnxSpeedSignDetector.try_load(str(path)) is None
+  assert opened == []
+
+
 def test_detector_falls_back_without_onnx(tmp_path, monkeypatch):
   missing = str(tmp_path / "nope.onnx")
   monkeypatch.setenv("NAP_SPEED_SIGN_ONNX", missing)

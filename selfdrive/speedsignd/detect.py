@@ -608,6 +608,14 @@ class OnnxSpeedSignDetector:
     path = path or default_onnx_path()
     if not path or not os.path.isfile(path):
       return None
+    # v1 at the same path has a different class map. Refuse it so a 60 is
+    # not decoded as whatever channel 7 means in the new head.
+    try:
+      from openpilot.selfdrive.speedsignd.install import weights_sha_matches
+      if not weights_sha_matches(path):
+        return None
+    except Exception:
+      return None
     session, backend = _onnx_session(path)
     if session is None:
       return None

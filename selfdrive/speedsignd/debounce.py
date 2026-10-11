@@ -1,18 +1,16 @@
-"""Temporal confirm so a single noisy frame does not write JSONL.
+"""Temporal confirm so one frame does not write JSONL or light the HUD.
 
-HUD lights on the first *accepted* in-threshold hit (65/70 need refine).
-At 1 Hz with skip-on-overrun, two agreeing frames often cannot land while
-a roadside R2-1 is still in view — especially after WAIT, when the first
-useful infer may already be a second late. JSONL keeps the two-hit confirm.
-Empty-road YOLO max conf is ~0, so a single >= min_conf hit is already a
-real plate, not asphalt.
+Both need two reads of the same mph from different frames. A class/OCR
+contradiction and a class-only hit are not votes. The window is long
+enough for two duty-cycled v8n reads when infer is a few seconds.
+Empty-road YOLO max conf is ~0.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
 from openpilot.selfdrive.speedsignd.detect_types import SpeedSign
-from openpilot.selfdrive.speedsignd.hud import AGREE_READS, frame_reads
+from openpilot.selfdrive.speedsignd.hud import AGREE_READS, frame_reads, note_read
 from openpilot.selfdrive.speedsignd.weights_manifest import DEBOUNCE_HITS, DEBOUNCE_WINDOW_S, YOLO_MIN_CONF
 
 
@@ -25,7 +23,7 @@ class DebounceResult:
 
 @dataclass
 class SignDebounce:
-  """Track hits. HUD = first accepted mph; JSONL = `need` of the same mph."""
+  """Track hits. JSONL confirms after `need` votes of the same mph."""
 
   need: int = DEBOUNCE_HITS
   window_s: float = DEBOUNCE_WINDOW_S
@@ -43,15 +41,12 @@ class SignDebounce:
     self._hits = [h for h in self._hits if now - h[0] <= self.window_s]
     hud: list[SpeedSign] = []
     for s in self.last_raw:
-      pending, pair = frame_reads(s)
-      if not pending and pair is None:
+      pending, _pair = frame_reads(s)
+      if not pending:
         continue
       hud.append(s)
-      if pair is not None:
-        self._hits.append((now, int(pair[0]), float(pair[1]), s.bbox))
-        self._hits.append((now, int(pair[0]), float(pair[1]), s.bbox))
       for mph, conf in pending:
-        self._hits.append((now, int(mph), float(conf), s.bbox))
+        note_read(self._hits, now, int(mph), float(conf), s.bbox)
     if not hud:
       return DebounceResult(hud=[], confirmed=[])
     counts: dict[int, list] = {}

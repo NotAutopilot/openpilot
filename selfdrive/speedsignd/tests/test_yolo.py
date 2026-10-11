@@ -6,7 +6,15 @@ import pytest
 
 from openpilot.selfdrive.speedsignd.detect import OnnxSpeedSignDetector, SpeedSign, SpeedSignDetector, paint_mutcd_r2_1
 from openpilot.selfdrive.speedsignd.tests.test_detect import _scene
-from openpilot.selfdrive.speedsignd.weights_manifest import YOLO_CLASS_NAMES, YOLO_IMGSZ, YOLO_MIN_CONF
+from openpilot.selfdrive.speedsignd.weights_manifest import (
+  ASSET_BYTES,
+  ASSET_SHA256,
+  RELEASE_TAG,
+  YOLO_CLASS_NAMES,
+  YOLO_IMGSZ,
+  YOLO_MIN_CONF,
+  YOLO_OUTPUT_LAYOUT,
+)
 from openpilot.selfdrive.speedsignd.nv12 import Nv12DetectCrop
 from openpilot.selfdrive.speedsignd.yolo import (
   PEAK_NAME_MIN,
@@ -15,6 +23,8 @@ from openpilot.selfdrive.speedsignd.yolo import (
   _resize_rgb,
   class_to_mph,
   decode_yolov8,
+  is_negative_name,
+  is_unreadable_name,
   letterbox_rgb,
   nms_xyxy,
   prefer_refine,
@@ -25,38 +35,50 @@ from openpilot.selfdrive.speedsignd.yolo import (
   yolo_peak,
 )
 
+# v2 channel = 4 + class index. 0 sl_25 … 9 sl_70, 10 unreadable, 11/12 neg.
+_SL_30 = 1
+_SL_50 = 5
+_SL_55 = 6
+_SL_60 = 7
+_SL_65 = 8
+_SL_70 = 9
+_SL_UNREADABLE = 10
+_NEG_YELLOW = 11
+_NEG_OTHER = 12
+_NC = 17
 
-def test_class_to_mph_reads_mutcd_r2_1_only():
+
+def test_class_to_mph_reads_sl_and_speed_limit():
+  assert class_to_mph("sl_55") == 55
+  assert class_to_mph("sl_60") == 60
+  assert class_to_mph("sl_25") == 25
   assert class_to_mph("speedLimit55") == 55
-  assert class_to_mph("speedLimit60") == 60
-  assert class_to_mph("speedLimit25") == 25
-  assert class_to_mph("stop") is None
-  assert class_to_mph("yield") is None
-  assert class_to_mph("speedLimit47") is None
-  assert class_to_mph("doNotEnter") is None
+  assert class_to_mph("sl_unreadable") is None
+  assert class_to_mph("neg_yellow") is None
+  assert class_to_mph("neg_other") is None
+  assert class_to_mph("sl_47") is None
+  assert is_unreadable_name("sl_unreadable")
+  assert is_negative_name("neg_yellow")
+  assert not is_negative_name("sl_60")
 
 
-def test_yolo_class_list_covers_highway_speeds():
-  names = set(YOLO_CLASS_NAMES)
-  for mph in (15, 25, 30, 45, 55, 60, 70, 80):
-    assert f"speedLimit{mph}" in names
-  assert YOLO_CLASS_NAMES[12] == "speedLimit55"
-  assert YOLO_CLASS_NAMES[13] == "speedLimit60"
-  # JC best.pt names: 0 doNotEnter … 19 stop 20 yield. Not frequency order.
-  assert YOLO_CLASS_NAMES[0] == "doNotEnter"
-  assert YOLO_CLASS_NAMES[19] == "stop"
-  assert YOLO_CLASS_NAMES[20] == "yield"
-  assert len(YOLO_CLASS_NAMES) == 21
+def test_yolo_class_list_is_v2_speed_sign():
+  assert RELEASE_TAG == "speed-sign-onnx-v2"
+  assert ASSET_SHA256 == "1131200b7fe2d400596e09d7680fc3a26a08dcd8952acfdf261170bdb22d3d28"
+  assert ASSET_BYTES == 12658953
+  assert YOLO_OUTPUT_LAYOUT == (1, 17, 2100)
+  assert YOLO_MIN_CONF == 0.40
+  names = list(YOLO_CLASS_NAMES)
+  assert names == [
+    "sl_25", "sl_30", "sl_35", "sl_40", "sl_45", "sl_50", "sl_55",
+    "sl_60", "sl_65", "sl_70", "sl_unreadable", "neg_yellow", "neg_other",
+  ]
+  assert len(names) == 13
   sl = speed_limit_class_indices()
-  assert sl[0] == 4 and YOLO_CLASS_NAMES[4] == "speedLimit15"
-  assert sl[-1] == 18 and YOLO_CLASS_NAMES[18] == "speedLimit85"
-  assert 19 not in sl and 20 not in sl
-  # speed_sign.onnx metadata names — Justin's posted 60/50/30; 65 is the
-  # confident-wrong head on a close 50 (cls=50:0.00, 65:0.73).
-  assert YOLO_CLASS_NAMES[7] == "speedLimit30"
-  assert YOLO_CLASS_NAMES[11] == "speedLimit50"
-  assert YOLO_CLASS_NAMES[13] == "speedLimit60"
-  assert YOLO_CLASS_NAMES[14] == "speedLimit65"
+  assert sl[0] == 0 and names[0] == "sl_25"
+  assert sl[-1] == 9 and names[9] == "sl_70"
+  assert _SL_UNREADABLE not in sl
+  assert _NEG_YELLOW not in sl and _NEG_OTHER not in sl
   assert POSTED_LOG_MPH == (30, 50, 60, 65)
   assert PEAK_NAME_MIN == 0.05
   assert REFINE_OVERRIDE_CONF == 0.28
@@ -97,32 +119,32 @@ def test_road_detect_crop_is_the_native_right_window():
 
 
 def test_yolo_peak_reports_below_threshold_class():
-  raw = np.zeros((1, 25, 4), np.float32)
-  raw[0, 4 + 19, 0] = 0.33  # stop
+  raw = np.zeros((1, _NC, 4), np.float32)
+  raw[0, 4 + _NEG_YELLOW, 0] = 0.33
   peak = yolo_peak(raw)
-  assert peak.shape == (1, 25, 4)
+  assert peak.shape == (1, _NC, 4)
   assert peak.conf == pytest.approx(0.33, abs=1e-5)
-  assert peak.name == "stop"
+  assert peak.name == "neg_yellow"
   assert peak.n_over == 0
   assert peak.sl_conf == pytest.approx(0.0, abs=1e-5)
   assert peak.n_over_sl == 0
 
 
-def test_yolo_peak_splits_stop_from_speed_limit_and_logs_top3():
-  """Justin's STOP-works / R2-1-miss shape: global peak is stop, sl_peak is weak."""
-  raw = np.zeros((1, 25, 4), np.float32)
-  raw[0, 4 + 19, 0] = 0.91  # stop
-  raw[0, 4 + 20, 0] = 0.22  # yield
-  raw[0, 4 + 12, 1] = 0.12  # speedLimit55 on another anchor
-  raw[0, 4 + 6, 1] = 0.08   # speedLimit25
+def test_yolo_peak_splits_negative_from_speed_limit_and_logs_top3():
+  """A strong neg_* must not be reported as the speed-limit peak."""
+  raw = np.zeros((1, _NC, 4), np.float32)
+  raw[0, 4 + _NEG_YELLOW, 0] = 0.91
+  raw[0, 4 + _NEG_OTHER, 0] = 0.22
+  raw[0, 4 + _SL_55, 1] = 0.12
+  raw[0, 4 + 0, 1] = 0.08  # sl_25
   peak = yolo_peak(raw)
-  assert peak.name == "stop"
+  assert peak.name == "neg_yellow"
   assert peak.conf == pytest.approx(0.91, abs=1e-5)
   assert peak.n_over == 1
-  assert peak.sl_name == "speedLimit55"
+  assert peak.sl_name == "sl_55"
   assert peak.sl_conf == pytest.approx(0.12, abs=1e-5)
   assert peak.n_over_sl == 0
-  assert [n for n, _c in peak.top3] == ["stop", "yield", "speedLimit55"]
+  assert [n for n, _c in peak.top3] == ["neg_yellow", "neg_other", "sl_55"]
   assert peak.top3[0][1] == pytest.approx(0.91, abs=1e-5)
   assert peak.top3[2][1] == pytest.approx(0.12, abs=1e-5)
   assert dict(peak.posted)[30] == pytest.approx(0.0, abs=1e-5)
@@ -132,12 +154,12 @@ def test_yolo_peak_splits_stop_from_speed_limit_and_logs_top3():
 
 
 def test_yolo_peak_blank_name_on_argmax_noise():
-  """0.00/speedLimit65 is not a 65 read — no 65 was posted. Argmax of ~0."""
-  raw = np.zeros((1, 25, 4), np.float32)
-  raw[0, 4 + 14, 0] = 0.004  # speedLimit65 noise winner
-  raw[0, 4 + 13, 0] = 0.003  # speedLimit60
-  raw[0, 4 + 11, 0] = 0.002  # speedLimit50
-  raw[0, 4 + 7, 0] = 0.001   # speedLimit30
+  """A ~0 argmax is not a read."""
+  raw = np.zeros((1, _NC, 4), np.float32)
+  raw[0, 4 + _SL_65, 0] = 0.004
+  raw[0, 4 + _SL_60, 0] = 0.003
+  raw[0, 4 + _SL_50, 0] = 0.002
+  raw[0, 4 + _SL_30, 0] = 0.001
   peak = yolo_peak(raw)
   assert peak.conf == pytest.approx(0.004, abs=1e-5)
   assert peak.name == ""
@@ -164,22 +186,23 @@ def test_nms_keeps_highest_score():
 
 
 def test_decode_yolov8_posted_30_50_60():
-  """Class map for Justin's route speeds — same indices as the ONNX metadata."""
-  for mph, idx in ((30, 7), (50, 11), (60, 13)):
-    raw = np.zeros((1, 25, 4), np.float32)
+  """Class map for the v2 ONNX: sl_30, sl_50, sl_60."""
+  for mph, idx in ((30, _SL_30), (50, _SL_50), (60, _SL_60)):
+    raw = np.zeros((1, _NC, 4), np.float32)
     raw[0, :4, 0] = [160, 120, 80, 100]
     raw[0, 4 + idx, 0] = 0.88
     hits = decode_yolov8(raw, scale=1.0, pad_x=0, pad_y=0, src_hw=(320, 320), min_conf=0.4)
     assert len(hits) == 1 and hits[0].mph == mph
+    assert hits[0].class_mph == mph
 
 
 def test_decode_yolov8_speed_limit_55():
-  raw = np.zeros((1, 25, 8), np.float32)
+  raw = np.zeros((1, _NC, 8), np.float32)
   raw[0, 0, 0] = 160.0
   raw[0, 1, 0] = 120.0
   raw[0, 2, 0] = 80.0
   raw[0, 3, 0] = 100.0
-  raw[0, 4 + 12, 0] = 0.91  # speedLimit55
+  raw[0, 4 + _SL_55, 0] = 0.91
   hits = decode_yolov8(raw, scale=1.0, pad_x=0, pad_y=0, src_hw=(320, 320), min_conf=0.4)
   assert len(hits) == 1
   assert hits[0].mph == 55
@@ -190,36 +213,58 @@ def test_decode_yolov8_speed_limit_55():
 
 
 def test_decode_yolov8_accepts_extra_singleton_dim():
-  """tinygrad OnnxRunner has returned [1,1,25,N]; old _as_cn dropped that as empty."""
-  raw = np.zeros((1, 1, 25, 8), np.float32)
+  """tinygrad OnnxRunner has returned [1,1,C,N]; old _as_cn dropped that as empty."""
+  raw = np.zeros((1, 1, _NC, 8), np.float32)
   raw[0, 0, 0, 0] = 160.0
   raw[0, 0, 1, 0] = 120.0
   raw[0, 0, 2, 0] = 80.0
   raw[0, 0, 3, 0] = 100.0
-  raw[0, 0, 4 + 12, 0] = 0.91
+  raw[0, 0, 4 + _SL_55, 0] = 0.91
   hits = decode_yolov8(raw, scale=1.0, pad_x=0, pad_y=0, src_hw=(320, 320), min_conf=0.4)
   assert len(hits) == 1 and hits[0].mph == 55
 
 
-def test_decode_yolov8_ignores_stop_and_low_conf():
-  raw = np.zeros((1, 25, 4), np.float32)
+def test_decode_yolov8_ignores_neg_and_low_conf():
+  raw = np.zeros((1, _NC, 4), np.float32)
   raw[0, :4, 0] = [80, 80, 40, 40]
-  raw[0, 4 + 19, 0] = 0.99  # stop
+  raw[0, 4 + _NEG_YELLOW, 0] = 0.99
   raw[0, :4, 1] = [200, 80, 40, 40]
-  raw[0, 4 + 13, 1] = 0.2  # speedLimit60 below threshold
+  raw[0, 4 + _SL_60, 1] = 0.2
   assert decode_yolov8(raw, scale=1.0, pad_x=0, pad_y=0, src_hw=(320, 320), min_conf=0.4) == []
 
 
-def test_decode_yolov8_keeps_speed_limit_under_stronger_stop_on_same_anchor():
-  """Argmax-all-classes used to drop this R2-1 because stop won the anchor."""
-  raw = np.zeros((1, 25, 2), np.float32)
+def test_decode_yolov8_keeps_speed_limit_under_stronger_negative():
+  """neg_yellow must not hide an sl_55 on the same anchor."""
+  raw = np.zeros((1, _NC, 2), np.float32)
   raw[0, :4, 0] = [160, 120, 80, 100]
-  raw[0, 4 + 19, 0] = 0.91  # stop
-  raw[0, 4 + 12, 0] = 0.50  # speedLimit55
+  raw[0, 4 + _NEG_YELLOW, 0] = 0.91
+  raw[0, 4 + _SL_55, 0] = 0.50
   hits = decode_yolov8(raw, scale=1.0, pad_x=0, pad_y=0, src_hw=(320, 320), min_conf=0.4)
   assert len(hits) == 1
   assert hits[0].mph == 55
   assert hits[0].conf == pytest.approx(0.50, abs=1e-5)
+
+
+def test_decode_unreadable_is_a_box_not_an_mph():
+  raw = np.zeros((1, _NC, 2), np.float32)
+  raw[0, :4, 0] = [160, 120, 80, 100]
+  raw[0, 4 + _SL_UNREADABLE, 0] = 0.80
+  hits = decode_yolov8(raw, scale=1.0, pad_x=0, pad_y=0, src_hw=(320, 320), min_conf=0.4)
+  assert len(hits) == 1
+  assert hits[0].mph == 0
+  assert hits[0].class_mph is None
+  assert hits[0].bbox[2] > 0
+  out = refine_mph(hits[0], np.zeros((320, 320), np.uint8), lambda _c: (55, 0.90))
+  assert out.mph == 0
+  assert out.refine_mph is None
+  assert out.class_mph is None
+
+
+def test_decode_neg_other_alone_is_dropped():
+  raw = np.zeros((1, _NC, 2), np.float32)
+  raw[0, :4, 0] = [160, 120, 80, 100]
+  raw[0, 4 + _NEG_OTHER, 0] = 0.95
+  assert decode_yolov8(raw, scale=1.0, pad_x=0, pad_y=0, src_hw=(320, 320), min_conf=0.4) == []
 
 
 class _YoloSess:
@@ -229,12 +274,12 @@ class _YoloSess:
   def run(self, _out, feed):
     blob = next(iter(feed.values()))
     assert blob.shape == (1, 3, 320, 320)
-    raw = np.zeros((1, 25, 4), np.float32)
+    raw = np.zeros((1, _NC, 4), np.float32)
     raw[0, 0, 0] = 200.0
     raw[0, 1, 0] = 80.0
     raw[0, 2, 0] = 60.0
     raw[0, 3, 0] = 80.0
-    raw[0, 4 + 13, 0] = 0.88  # speedLimit60
+    raw[0, 4 + _SL_60, 0] = 0.88
     return [raw]
 
 
@@ -262,9 +307,9 @@ def test_yolo_crop_offsets_bbox_to_full_road_frame():
 def test_onnx_records_peak_when_decode_empty():
   class NearMiss(_YoloSess):
     def run(self, _out, _feed):
-      raw = np.zeros((1, 25, 4), np.float32)
+      raw = np.zeros((1, _NC, 4), np.float32)
       raw[0, :4, 0] = [80, 80, 40, 40]
-      raw[0, 4 + 19, 0] = 0.33  # stop, below 0.40
+      raw[0, 4 + _NEG_YELLOW, 0] = 0.33
       return [raw]
 
   det = OnnxSpeedSignDetector("/tmp/fake.onnx", NearMiss(), backend="tinygrad")
@@ -274,12 +319,12 @@ def test_onnx_records_peak_when_decode_empty():
   assert d["backend"] == "tinygrad"
   assert d["frame_w"] == 320 and d["frame_h"] == 320
   assert d["letterbox"] == 320
-  assert d["peak_name"] == "stop"
+  assert d["peak_name"] == "neg_yellow"
   assert d["peak_conf"] == pytest.approx(0.33, abs=1e-5)
   assert d["n_over"] == 0
   assert d["sl_peak_conf"] == pytest.approx(0.0, abs=1e-5)
   assert d["n_over_sl"] == 0
-  assert d["top3"][0][0] == "stop"
+  assert d["top3"][0][0] == "neg_yellow"
   assert d["error"] == ""
 
 
@@ -296,7 +341,7 @@ def test_onnx_detect_surfaces_session_error():
 def test_loaded_onnx_does_not_fall_back_to_numpy(tmp_path):
   class EmptyYolo(_YoloSess):
     def run(self, _out, _feed):
-      return [np.zeros((1, 25, 4), np.float32)]
+      return [np.zeros((1, _NC, 4), np.float32)]
 
   y = _scene()
   paint_mutcd_r2_1(y, 45, x=200, y=30, w=90, h=112)
@@ -359,11 +404,11 @@ def test_refine_prefers_any_confident_disagreement():
 
 
 def test_decode_65_with_50_head_at_zero():
-  """On-car shape: speedLimit65 0.74, speedLimit50 ~0. No class-margin rescue."""
-  raw = np.zeros((1, 25, 4), np.float32)
+  """sl_65 0.74, sl_50 ~0. No class-margin rescue. HUD still needs a second frame."""
+  raw = np.zeros((1, _NC, 4), np.float32)
   raw[0, :4, 0] = [160, 120, 80, 100]
-  raw[0, 4 + 14, 0] = 0.74  # speedLimit65
-  raw[0, 4 + 11, 0] = 0.004  # speedLimit50 — Justin cls=50:0.00
+  raw[0, 4 + _SL_65, 0] = 0.74
+  raw[0, 4 + _SL_50, 0] = 0.004
   hits = decode_yolov8(raw, scale=1.0, pad_x=0, pad_y=0, src_hw=(320, 320), min_conf=0.4)
   assert len(hits) == 1
   assert hits[0].mph == 65
@@ -372,14 +417,17 @@ def test_decode_65_with_50_head_at_zero():
 
 
 def test_onnx_detect_overrides_65_class_on_painted_50():
-  """Close-range HUD path: confident 65 class, 50 head ~0, clear 50 crop → HUD 50."""
+  """refine_mph still overrides a confident 65 when the crop reads 50.
+
+  That contradiction is not a HUD vote — see test_hud.
+  """
   class Sess65(_YoloSess):
     def run(self, _out, _feed):
-      raw = np.zeros((1, 25, 4), np.float32)
+      raw = np.zeros((1, _NC, 4), np.float32)
       raw[0, :4, 0] = [245, 86, 90, 112]
-      raw[0, 4 + 14, 0] = 0.74  # speedLimit65 — Justin 0.73–0.76
-      raw[0, 4 + 11, 0] = 0.004  # speedLimit50 at zero
-      raw[0, 4 + 15, 0] = 0.11  # speedLimit70 junk
+      raw[0, 4 + _SL_65, 0] = 0.74
+      raw[0, 4 + _SL_50, 0] = 0.004
+      raw[0, 4 + _SL_70, 0] = 0.11
       return [raw]
 
   y = _scene(h=320, w=320)

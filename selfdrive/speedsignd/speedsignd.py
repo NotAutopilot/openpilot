@@ -694,8 +694,9 @@ def process_frame(
 ) -> tuple[list, list[dict]]:
   """Detect on every ROAD frame. JSONL only with a GNSS fix and a short line.
 
-  With `debounce`: HUD uses the first in-threshold hit; JSONL still needs
-  two agreeing frames. Tests omit debounce and see raw detections.
+  With `debounce`: HUD and JSONL both need two agreeing frames. The returned
+  list is the signs that cast a vote this call, not a plate that is already
+  lit. Tests omit debounce and see raw detections.
   `write_jsonl` is false while engaged during a disk stall.
   """
   signs = [] if (y is None and rgb is None and nv12 is None) else detector.detect(y, rgb=rgb, nv12=nv12)

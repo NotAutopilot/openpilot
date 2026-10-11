@@ -30,18 +30,20 @@ from openpilot.selfdrive.speedsignd.weights_manifest import (
 REFINE_OVERRIDE_CONF = 0.28
 CROP_OVERRIDE_CONF = REFINE_OVERRIDE_CONF  # old name; was 0.55 and hid 50s
 
-_SPEED_RE = re.compile(r"^speedLimit(\d+)$")
+# v2 names are sl_25 … sl_70. speedLimitNN still parses so older logs and
+# tests that name a class that way stay readable. sl_unreadable does not match.
+_SPEED_RE = re.compile(r"^(?:speedLimit|sl_)(\d+)$")
 
-# Below this, a class name is argmax-of-noise (Justin's 0.00/speedLimit65 with
-# no 65 on the route). Do not treat it as a mph read.
+# Below this, a class name is argmax-of-noise. Do not treat it as a mph read.
 PEAK_NAME_MIN = 0.05
 # Below YOLO_MIN_CONF. Schedules a second look only — never lights the HUD alone.
 SIGN_LIKE_CONF = 0.15
-# Posted 30/50/60 plus the confident-wrong 65 head on a close 50.
+# Posted heads worth logging. v2 has sl_30/50/60/65; 65 is still the common miss.
 POSTED_LOG_MPH = (30, 50, 60, 65)
 
 
 def class_to_mph(name: str) -> int | None:
+  """MUTCD mph from sl_NN or speedLimitNN. sl_unreadable and neg_* are None."""
   m = _SPEED_RE.match(str(name))
   if not m:
     return None
@@ -49,9 +51,28 @@ def class_to_mph(name: str) -> int | None:
   return value if value in MUTCD_MPH else None
 
 
+def is_unreadable_name(name: str) -> bool:
+  """Box the OCR second look may use. Not an mph."""
+  return str(name) == "sl_unreadable"
+
+
+def is_negative_name(name: str) -> bool:
+  """Yellow advisory / other non-speed. Never a box, never an mph."""
+  return str(name).startswith("neg_")
+
+
 def speed_limit_class_indices(names: tuple[str, ...] = YOLO_CLASS_NAMES) -> tuple[int, ...]:
-  """JC checkpoint indices whose names are MUTCD speedLimitNN (4–18)."""
+  """Indices whose names are sl_NN / speedLimitNN. Excludes sl_unreadable and neg_*."""
   return tuple(i for i, n in enumerate(names) if class_to_mph(n) is not None)
+
+
+def _look_indices(names: tuple[str, ...]) -> list[int]:
+  """Speed classes plus sl_unreadable. neg_* stay out of the argmax."""
+  out = list(speed_limit_class_indices(names))
+  for i, n in enumerate(names):
+    if is_unreadable_name(n):
+      out.append(i)
+  return out
 
 
 class YoloPeak(NamedTuple):
@@ -227,10 +248,14 @@ def yolo_peak(raw, names: tuple[str, ...] = YOLO_CLASS_NAMES) -> YoloPeak:
   )[:3]
   posted: list[tuple[int, float]] = []
   for mph in POSTED_LOG_MPH:
-    label = f"speedLimit{mph}"
-    try:
-      idx = names.index(label)
-    except ValueError:
+    idx = None
+    for label in (f"sl_{mph}", f"speedLimit{mph}"):
+      try:
+        idx = names.index(label)
+        break
+      except ValueError:
+        continue
+    if idx is None:
       posted.append((mph, 0.0))
       continue
     posted.append((mph, float(class_peak[idx]) if idx < class_peak.shape[0] else 0.0))
@@ -256,9 +281,10 @@ def decode_yolov8(
   scores = pred[4:].T
   if scores.size == 0:
     return []
-  # HUD only keeps speedLimit*. Argmax over stop/yield would drop an R2-1 that
-  # shares an anchor with a stronger stop (Justin's n_over=10 stop frames).
-  sl_idx = [k for k in speed_limit_class_indices(names) if k < scores.shape[1]]
+  # Argmax over sl_* and sl_unreadable only. neg_* must not hide a plate
+  # and must not become a detection. sl_unreadable is a box for the second
+  # look, not an mph.
+  sl_idx = [k for k in _look_indices(names) if k < scores.shape[1]]
   alt_cls = None
   alt_conf = None
   if sl_idx:
@@ -293,8 +319,11 @@ def decode_yolov8(
   found: list[SpeedSign] = []
   for i in keep:
     name = names[int(cls[i])] if 0 <= int(cls[i]) < len(names) else ""
-    mph = class_to_mph(name)
-    if mph is None:
+    if is_negative_name(name):
+      continue
+    unreadable = is_unreadable_name(name)
+    mph = None if unreadable else class_to_mph(name)
+    if mph is None and not unreadable:
       continue
     x1 = (xyxy[i, 0] - pad_x) * inv
     y1 = (xyxy[i, 1] - pad_y) * inv
@@ -316,11 +345,19 @@ def decode_yolov8(
       alt_c = float(alt_conf[i])
       if alt_mph == mph:
         alt_mph, alt_c = None, 0.0
-    found.append(SpeedSign(
-      mph=mph, conf=float(conf[i]), bbox=(x, y, w, h),
-      class_mph=mph, class_conf=float(conf[i]),
-      alt_mph=alt_mph, alt_conf=alt_c,
-    ))
+    if unreadable:
+      # mph 0 and no class_mph: HUD and JSONL cannot treat this as a plate.
+      # conf stays so the second look can use the box.
+      found.append(SpeedSign(
+        mph=0, conf=float(conf[i]), bbox=(x, y, w, h),
+        class_mph=None, class_conf=0.0,
+      ))
+    else:
+      found.append(SpeedSign(
+        mph=int(mph), conf=float(conf[i]), bbox=(x, y, w, h),
+        class_mph=int(mph), class_conf=float(conf[i]),
+        alt_mph=alt_mph, alt_conf=alt_c,
+      ))
     if len(found) >= max_det:
       break
   found.sort(key=lambda s: s.conf, reverse=True)
@@ -337,12 +374,16 @@ def prefer_refine(_sign: SpeedSign, mph: int, conf: float) -> bool:
 
 
 def refine_mph(sign: SpeedSign, y: np.ndarray | None, read_mph) -> SpeedSign:
-  """Digit read on every in-threshold speedLimit* crop. Does not invent a hit.
+  """Digit read on every in-threshold speed-limit crop. Does not invent a hit.
 
-  If the crop returns a different MUTCD mph with confidence, that is the HUD
-  value — even when the class head is a confident 65 and 50 is at 0.00.
-  Logs keep both class_mph and refine_mph.
+  If the crop returns a different MUTCD mph with confidence, sign.mph becomes
+  that read. The HUD still requires a second frame, and a class/OCR
+  contradiction is not a vote. sl_unreadable (mph not in MUTCD, no class_mph)
+  is left unchanged — the OCR second look is the only way that box becomes
+  an mph. Logs keep both class_mph and refine_mph.
   """
+  if sign.class_mph is None and int(sign.mph) not in MUTCD_MPH:
+    return sign
   if y is None or y.ndim != 2:
     return sign
   x, yy, w, h = sign.bbox

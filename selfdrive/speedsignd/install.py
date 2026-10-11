@@ -16,7 +16,9 @@ from openpilot.selfdrive.speedsignd.weights_manifest import (
 )
 
 CHUNK = 256 * 1024
-# Published asset is ~43 MB. Reject empty / leftover .partial files.
+# v2 asset is ~12 MB. v1 was ~43 MB. Reject empty / leftover .partial files.
+# A large file with the wrong sha is "Out of date", not Installed — the v1
+# weights must be replaced, not decoded with the v2 class map.
 MIN_ONNX_BYTES = 1_000_000
 
 
@@ -28,11 +30,25 @@ def weights_present(path: str | None = None) -> bool:
     return False
 
 
+def weights_sha_matches(path: str | None = None, expected: str | None = None) -> bool:
+  """True only when the file is large enough and matches the published sha."""
+  path = path or default_onnx_path()
+  expected = ASSET_SHA256 if expected is None else expected
+  if not expected or not weights_present(path):
+    return False
+  try:
+    return sha256_file(path).lower() == expected.lower()
+  except OSError:
+    return False
+
+
 def weights_status_summary(path: str | None = None) -> str:
-  """Settings label: Installed or Missing. Callable-safe for text_item."""
+  """Settings label: Installed, Out of date, or Missing."""
   path = path or default_onnx_path()
   if not weights_present(path):
     return "Missing"
+  if not weights_sha_matches(path):
+    return "Out of date"
   try:
     sz = os.path.getsize(path)
   except OSError:

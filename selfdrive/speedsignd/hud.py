@@ -4,7 +4,7 @@ Display-only. Does not write sqlite or change cruise.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 from openpilot.selfdrive.speedsignd.detect_types import MUTCD_MPH, SpeedSign
 from openpilot.selfdrive.speedsignd.weights_manifest import YOLO_MIN_CONF
@@ -16,9 +16,11 @@ from openpilot.selfdrive.speedsignd.yolo import REFINE_OVERRIDE_CONF
 # speedLimit* box (even refine fail / junk class) keeps SIGN lit without
 # inventing an mph.
 HUD_HOLD_S = 45.0
-# Two reads of the same mph. Replaces the {40, 60, 65, 70} junk gate.
+# Two reads of the same mph from different frames. A class/OCR pair on one
+# frame is a single vote. v8n duty gap is about 4–16 s; 12 s covers two
+# reads when infer is up to ~3 s.
 AGREE_READS = 2
-AGREE_WINDOW_S = 2.0
+AGREE_WINDOW_S = 12.0
 HUD_LABEL = "SIGN"
 # Logger On + ONNX missing: show this instead of a blank plate or a fake mph.
 HUD_MISSING_WEIGHTS_TEXT = "NO WT"
@@ -262,56 +264,81 @@ def is_speed_limit_sighting(sign: SpeedSign | None) -> bool:
 
 
 def frame_reads(sign: SpeedSign | None) -> tuple[list[tuple[int, float]], tuple[int, float] | None]:
-  """Votes from one detect.
+  """At most one vote from one frame. The second return is always None.
 
-  Class and OCR that name the same mph are an immediate pair. When they
-  disagree, only the OCR vote is kept — the class head calls a close 50 a
-  65, and must not accumulate across frames. OCR-only or class-only is one
-  pending read; a second frame of the same mph agrees.
+  v2 misreads are systematic (60 read as 30, 30 read as 50, 30/35/60 as
+  50). A same-frame class+OCR pair used to light the HUD immediately, so a
+  wrong class that OCR repeated became a 45 s plate.
+
+  - class and OCR name the same mph: one vote. A later frame must agree.
+  - class and OCR differ, both above their floors: no vote. A correct OCR
+    beside a wrong class is a miss, not a misread.
+  - class only: no vote. That is how route 17a posted 60 as 30.
+  - OCR only (second look, or refine with no in-threshold class): one vote.
+  - bare mph with neither field set (numpy tests): one vote.
+  sl_unreadable and neg_* have no MUTCD mph here, so they never vote.
   """
   if sign is None:
     return [], None
-  class_mph = getattr(sign, "class_mph", None)
+  explicit_class = getattr(sign, "class_mph", None)
   class_conf = float(getattr(sign, "class_conf", 0.0) or 0.0)
-  if class_mph is None:
-    try:
-      class_mph = int(sign.mph)
-      class_conf = float(sign.conf)
-    except (TypeError, ValueError):
-      class_mph = None
   refine = getattr(sign, "refine_mph", None)
   refine_conf = float(getattr(sign, "refine_conf", 0.0) or 0.0)
+  class_i = None
   class_ok = False
-  try:
-    class_i = int(class_mph) if class_mph is not None else None
-    class_ok = class_i in MUTCD_MPH and class_conf >= YOLO_MIN_CONF
-  except (TypeError, ValueError):
-    class_i = None
+  if explicit_class is not None:
+    try:
+      class_i = int(explicit_class)
+      class_ok = class_i in MUTCD_MPH and class_conf >= YOLO_MIN_CONF
+    except (TypeError, ValueError):
+      class_i = None
+  refine_i = None
   refine_ok = False
-  try:
-    refine_i = int(refine) if refine is not None else None
-    refine_ok = refine_i in MUTCD_MPH and refine_conf >= REFINE_OVERRIDE_CONF
-  except (TypeError, ValueError):
-    refine_i = None
+  if refine is not None:
+    try:
+      refine_i = int(refine)
+      refine_ok = refine_i in MUTCD_MPH and refine_conf >= REFINE_OVERRIDE_CONF
+    except (TypeError, ValueError):
+      refine_i = None
+  if class_ok and refine_ok and class_i != refine_i:
+    return [], None
   if class_ok and refine_ok and class_i == refine_i:
-    return [], (int(class_i), max(class_conf, refine_conf))
-  if refine_ok:
+    return [(int(class_i), max(class_conf, refine_conf))], None
+  if refine_ok and not class_ok:
     return [(int(refine_i), refine_conf)], None
   if class_ok:
-    return [(int(class_i), class_conf)], None
+    return [], None
+  if explicit_class is None and refine is None:
+    try:
+      mph = int(sign.mph)
+      conf = float(sign.conf)
+    except (TypeError, ValueError):
+      return [], None
+    if mph in MUTCD_MPH and conf >= YOLO_MIN_CONF:
+      return [(mph, conf)], None
   return [], None
 
 
-def accepted_hud_sign(sign: SpeedSign | None) -> SpeedSign | None:
-  """Sign whose class and OCR already agree, else None.
+def note_read(obs: list, now: float, mph: int, conf: float, extra=None) -> None:
+  """Record one vote. The same timestamp and mph is the same frame, not a second read."""
+  mph = int(mph)
+  conf = float(conf)
+  for i, row in enumerate(obs):
+    if row[0] == now and int(row[1]) == mph:
+      if conf > float(row[2]):
+        obs[i] = (now, mph, conf) if extra is None else (now, mph, conf, extra)
+      return
+  obs.append((now, mph, conf) if extra is None else (now, mph, conf, extra))
 
-  One read never lights the HUD. 40/60/65/70 are not special-cased.
+
+def accepted_hud_sign(sign: SpeedSign | None) -> SpeedSign | None:
+  """One frame never lights the HUD, even when class and OCR agree.
+
+  40/60/65/70 are not special-cased. Callers that used to treat a returned
+  sign as an immediate plate must wait for LiveSignHold.
   """
-  _pending, pair = frame_reads(sign)
-  if pair is None:
-    return None
-  mph, conf = pair
-  return replace(sign, mph=int(mph), conf=float(conf))
+  del sign
+  return None
 
 
 @dataclass
@@ -323,26 +350,23 @@ class LiveSignHold:
   _obs: list = field(default_factory=list)
 
   def update(self, signs, now: float) -> tuple[bool, int, float]:
-    fresh = False
+    fresh_mphs: set[int] = set()
     for s in signs or []:
-      pending, pair = frame_reads(s)
-      if pair is not None:
-        fresh = True
-        self._obs.append((now, int(pair[0]), float(pair[1])))
-        self._obs.append((now, int(pair[0]), float(pair[1])))
+      pending, _pair = frame_reads(s)
       for mph, conf in pending:
-        fresh = True
-        self._obs.append((now, int(mph), float(conf)))
+        note_read(self._obs, now, int(mph), float(conf))
+        fresh_mphs.add(int(mph))
     self._obs = [o for o in self._obs if now - o[0] <= AGREE_WINDOW_S]
     buckets: dict[int, list[float]] = {}
     for _t, mph, conf in self._obs:
       buckets.setdefault(int(mph), []).append(float(conf))
     winners = [(mph, max(cs)) for mph, cs in buckets.items() if len(cs) >= AGREE_READS]
+    # An older mph that still has two votes must not light again just because
+    # this frame voted for something else. Only a mph read this call can.
+    fresh_winners = [item for item in winners if item[0] in fresh_mphs]
     holding = now < self.until and self.mph > 0
-    # Empty publishes must not re-arm the hold from votes still inside the
-    # 2 s agree window. Only a new read this call may set or refresh mph.
-    if winners and fresh:
-      new_mph, new_conf = max(winners, key=lambda item: item[1])
+    if fresh_winners:
+      new_mph, new_conf = max(fresh_winners, key=lambda item: item[1])
       if (not holding) or should_replace_held_mph(self.mph, self.conf, new_mph, new_conf):
         self.mph = int(new_mph)
         self.conf = float(new_conf)

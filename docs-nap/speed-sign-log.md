@@ -33,7 +33,7 @@ Optional detect rate (default 1 Hz, clamped 0.2–4): `NAP_SPEED_SIGN_HZ=0.5` in
 
 Manual detect is **cheap-path** so Logger On is less likely to starve `modeld`:
 
-- one right-side window of the 1928×1208 ROAD frame, **x=1300, y=520, 628×320** (through x=1928, y=840), letterboxed into the 320 ONNX — never a full-frame RGB convert, and not the old 1208² letterbox (that left an 80 ft sign at about 20 px). Route 0000017a signs sat at about y=557–805, x=1110–1914. Scale is 320/628 ≈ 0.51, so a sign ≥ 60 px tall stays ≥ 30 px in the model. The window constants are separate from `YOLO_IMGSZ`, so a retrained YOLOv8n at 320 drops in through `weights_manifest`.
+- one right-side window of the 1928×1208 ROAD frame, **x=1300, y=520, 628×320** (through x=1928, y=840), letterboxed into the 320 ONNX — never a full-frame RGB convert, and not the old 1208² letterbox (that left an 80 ft sign at about 20 px). Route 0000017a signs sat at about y=557–805, x=1110–1914. Scale is 320/628 ≈ 0.51. The v2 detector was trained on 640 crops resized to 320 (scale 0.5), so this window stays. A sign ≥ 60 px tall stays ≥ 30 px in the model.
 - **CPU only.** `onnxruntime` is not in the stock 3X image (openpilot ships tinygrad for modeld). The fallback is tinygrad on `DEV=CPU` with the CLANG renderer, `CPU_COUNT=1`, and `GPU`/`QCOM` set to 0. Startup logs `speedsignd cpu-only asserted backend=...` and raises if the device is not CPU.
 - **No compile while driving.** The first realize is the ~108 s on-device compile. It runs only while disengaged. Engaged reads wait (`reason=compile-wait`) until that realize has finished.
 - **1 ONNX / BLAS thread** (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `TINYGRAD_NUM_THREADS`, `CPU_COUNT`, and the rest, all forced to 1)
@@ -41,7 +41,7 @@ Manual detect is **cheap-path** so Logger On is less likely to starve `modeld`:
 - `NAP_SPEED_SIGN_INFER_CAP_MS` default **800** is logged only. It does **not** add a second wait. Pressure adds another 3× infer of rest. `modelV2.frameDropPerc` backs off before the lag alert. Any skipped `frameId`, or `modelExecutionTime` above 0.050 s, pauses at least 10 s.
 - `os.sched_yield()` while an infer is busy
 
-YOLOv8s-320 is ~8.7 GFLOP plus Python `OnnxRunner` overhead. The 3.8 s figure from route 0000017a was the **GPU** path after compile, not a CPU measurement. One A55 (core 2) running CLANG is expected to take several seconds per infer, on the order of that 3.8 s or slower (roughly 4–15 s if the kernel lands around 1–2 GFLOP/s). This environment cannot time a 3X. Justin measured **mean infer 1819 ms** on `cursor/speedsignd-manual-mph-b6f2` with full-frame RGB; that number is not the CPU-only path. **Mean well under 500 ms is not feasible on stock 3X tinygrad with this 43 MB 320² export** — that needs `onnxruntime`, a nano re-export, or a precompiled TinyJit. This branch does not change weights or Hz. A 8 s CPU infer still idles 24 s (25% of core 2).
+YOLOv8n-320 is about **2.2 GFLOP**, roughly 4× cheaper than the YOLOv8s (~8.7 GFLOP) that produced the route 0000017a numbers. Those 3.8 s infers and the 108 s first realize were the **GPU** path, not a CPU measurement. On one A55 (core 2) with tinygrad CLANG, expect about **1–4 s** per infer. This environment cannot time a 3X, so that range is the FLOP ratio, not a device measurement. The 25% duty cap still applies: start-to-start gap is about **4–16 s** (`read_interval_ms` ≈ 4× `infer_ms`, `cpu_share` ≤ 0.250). A ~1 s infer gaps about 4 s; a ~4 s infer gaps about 16 s. The first realize/compile still waits for disengaged (`reason=compile-wait`) and should be shorter than 108 s, but it is not a measured number. Mean well under 500 ms is still not the expectation on stock 3X tinygrad.
 
 Onroad, `swaglog` prints `speedsignd detect paused (controlling=True enabled=… active=… state=… alive=… valid=…)` when you SET, `speedsignd abandon in-flight ONNX` if a YOLO was still running, and every infer:
 
@@ -50,7 +50,7 @@ speedsignd timing read_interval_ms=32000 infer_ms=8000 cpu_share=0.250 threads=1
 speedsignd infer 8000ms backend=tinygrad-clang frame=1928x1208 letterbox=320 crop=1300,520 628x320 … peak=0.72/speedLimit65 n_over=1 sl_peak=0.72/speedLimit65 … refine=50:0.71 class=65 luma=90/35 chroma=1 prep=18 sess=7900 raw=[(50, 0.71)] hud=[(50, 0.71)] jsonl=[]
 ```
 
-`refine=` is the crop digit read vs the YOLO class. A parked close **SPEED LIMIT 50** often peaks `speedLimit65:0.73`. HUD shows **50** when two reads agree on 50 (class and OCR on one frame, or the same mph on two frames). A single class-only 65 does not light. Class 65 plus OCR 50 counts as one OCR vote for 50, not a vote for 65. Last accepted mph holds **~45 s**.
+`refine=` is the existing crop digit read (`refine_mph`), not a new digit reader. HUD and JSONL light only after **two reads from different frames** agree. Class and OCR on the same frame are one vote when they match, and **no vote** when they contradict (v2 often reads 60 as 30 and 30 as 50; a matching wrong OCR must not lock that in). A class-only hit does not vote. OCR-only (the second look) is one vote. `sl_unreadable` and `neg_*` never become an mph; `sl_unreadable` may schedule the OCR second look. Last accepted mph holds **~45 s**. The agree window is **12 s**, so two reads meet when infer is up to about 3 s. A slower infer can miss a sign. That is a miss, not a wrong plate.
 
 Every finished read logs a greppable line:
 
@@ -68,9 +68,9 @@ A 15 s summary still prints `speedsignd timing hz=… infer_ms mean=… max=… 
 
 ## Install weights on the 3X
 
-No large weights in git (~43 MB ONNX). Same idea as the OSM map pack: fetch onto `/data` with a SHA-256 check.
+No large weights in git (~12 MB ONNX). Same idea as the OSM map pack: fetch onto `/data` with a SHA-256 check. A new sha replaces the file at the same path. The old v1 weights must not stay.
 
-On the 3X (parked / Force Offroad, Wi-Fi): **Settings → NAP → Install weights** → Start. Settings shows **Speed Sign Weights: Installed** or **Missing**. Progress and errors stay on that runner screen (does not block the rest of the UI, does not reboot).
+On the 3X (parked / Force Offroad, Wi-Fi): **Settings → NAP → Install weights** → Start. Settings shows **Speed Sign Weights: Installed**, **Out of date**, or **Missing**. **Out of date** means the file is present but the sha is not v2 — tap Install weights again; the download replaces it. Progress and errors stay on that runner screen (does not block the rest of the UI, does not reboot). speedsignd will not load a mismatched sha (the plate stays **NO WT** until the file matches).
 
 Or SSH:
 
@@ -78,7 +78,7 @@ Or SSH:
 python -m scripts.nap.install_speed_sign_weights
 ```
 
-That downloads GitHub Release `speed-sign-onnx-v1` / `speed_sign.onnx` and writes:
+That downloads GitHub Release `speed-sign-onnx-v2` / `speed_sign.onnx` and writes:
 
 | | |
 |---|---|
@@ -99,7 +99,7 @@ python -m scripts.nap.install_speed_sign_weights /tmp/speed_sign.onnx
 
 Or pass `--url` at a local `file://` / HTTP path. `--sha256 ''` skips the digest (local experiments only).
 
-Source checkpoint (MIT): [cvtechniques/JC-Traffic-Sign-Detection](https://huggingface.co/cvtechniques/JC-Traffic-Sign-Detection) YOLOv8s, trained on LISA + US Roboflow traffic-sign photos (classes `speedLimit15`…`speedLimit85`, plus stop/yield/etc. which we ignore). Export is 320×320 RGB, output `[1, 25, 2100]`. Runtime: `onnxruntime` CPUExecutionProvider if that package is installed (it is not in the stock 3X image), else tinygrad `OnnxRunner` on `DEV=CPU` / CLANG with GPU and QCOM off. The startup log names which one loaded.
+Shipped detector: GitHub Release `speed-sign-onnx-v2`, file `speed_sign.onnx`, YOLOv8n, imgsz 320, opset 12, input `images` 1×3×320×320, output `[1, 17, 2100]`. Classes, in order: `sl_25`, `sl_30`, `sl_35`, `sl_40`, `sl_45`, `sl_50`, `sl_55`, `sl_60`, `sl_65`, `sl_70`, `sl_unreadable`, `neg_yellow`, `neg_other`. SHA-256 `1131200b7fe2d400596e09d7680fc3a26a08dcd8952acfdf261170bdb22d3d28`, 12658953 bytes. Runtime: `onnxruntime` CPUExecutionProvider if that package is installed (it is not in the stock 3X image), else tinygrad `OnnxRunner` on `DEV=CPU` / CLANG with GPU and QCOM off. The startup log names which one loaded. Backend on the 3X is `tinygrad-clang`.
 
 ## What Justin should see
 
@@ -153,7 +153,7 @@ When the logger is **On**, a large opaque **SIGN** plate shows the mph the camer
 | Where (3X) | Left / driver side, below the MAX box. Large plate (200×248). |
 | Where (comma 4) | Left / driver side (top-left), same idea |
 | Yes / No | Shown only with a live mph. 3X: stacked under the plate (full-width, ~112 px tall). comma 4: beside the plate. **No-op stubs** (cloudlog debug only). |
-| Confirm | **2** reads of the same mph. Class and OCR on one frame count as the pair. Otherwise the next frame (or the OCR second look) must agree. JSONL still wants conf ≥ **0.40** inside **4.0 s**. |
+| Confirm | **2** reads of the same mph from **different frames**, inside **12 s**. Class and OCR on one frame are one vote when they match, and no vote when they contradict. Class-only does not vote. JSONL uses the same two-read rule, conf ≥ **0.40**. |
 | Hold | **~45 s** after the last accepted detection (old hold was **3.0 s**), then it hides |
 | Detect rate | Default **1 Hz** while engaged and while manual (env `NAP_SPEED_SIGN_HZ`, clamped 0.2–4), including while moving. A long infer idles 3× that infer. SubMaster **20 Hz**. |
 | Engaged plate | The mph, not **WAIT**. YOLO keeps running. |
@@ -171,7 +171,7 @@ Speed Sign Logger On, onroad, but SIGN stays dark or never shows mph — almost 
 
 1. Look at the onroad plate: **NO WT** means `/data/media/0/nap/speed_sign.onnx` is absent or failed to load. Settings → NAP → Speed Sign Weights should say **Missing**.
 2. Park or turn on Force Offroad. Tap **Install weights** (Wi-Fi). Wait for the runner to finish — do not leave it spinning forever; an error prints on that screen. Or SSH: `python -m scripts.nap.install_speed_sign_weights`.
-3. File should be ~43 MB. `ls -l /data/media/0/nap/speed_sign.onnx`. Settings should flip to **Installed**.
+3. File should be ~12 MB (12658953 bytes). `ls -l /data/media/0/nap/speed_sign.onnx`. Settings should flip to **Installed**. **Out of date** means the old file is still there — run Install weights again.
 4. No full reboot required: speedsignd retries ONNX every ~15 s. `swaglog` should show `speedsignd starting … backend=yolo-onnx` or `ONNX loaded after retry backend=yolo-onnx` (also `hz=` / `nice=19`).
 5. Engage or stay manual. Pass a clear, unobstructed MUTCD R2-1. Two agreeing reads light SIGN while **controlling**. `swaglog | grep "speedsignd timing"` should show `engaged=1`, `threads=1`, `cpu_share` at or under `0.250`, and `read_interval_ms` about 4× `infer_ms`. A blank plate with weights Installed means no detection yet (night, glare, tiny sign — see Accuracy limits).
 
@@ -181,7 +181,7 @@ If you see **TAKE CONTROL IMMEDIATELY** or “Communication Issue Between Proces
 
 ## Accuracy limits (honest)
 
-This is a small CPU detector at **1 Hz** (was 4 Hz) on one native **320²** upper-right window, including while **controlling**. It is **not** a modeld head and is **not** used for control. It must not starve `modeld`: little core 2, SCHED_IDLE or nice 19, 1 thread, idle at least 3× each infer, and a back-off when `modelV2` drops frames or this process's own CPU share goes over 25%. modeld stays FIFO on core 7; controlsd stays on core 4. `swaglog` logs `speedsignd detect paused/running` with `enabled` / `active` / `state` / alive / valid on those edges and every infer `backend=` `peak=` `refine=` `luma=` `chroma=` `prep=` `sess=` `raw=` plus `speedsignd timing read_interval_ms=… infer_ms=… cpu_share=… threads=… engaged=… backoff=…`. On-car frames often class a clear **50** as **65**; two OCR reads of 50 light 50, and one class-only 65 does not.
+This is a small CPU detector at **1 Hz** (was 4 Hz) on one native **628×320** right-side window, including while **controlling**. It is **not** a modeld head and is **not** used for control. It must not starve `modeld`: little core 2, SCHED_IDLE or nice 19, 1 thread, idle at least 3× each infer, and a back-off when `modelV2` drops frames, skips a frame id, or `modelExecutionTime` is above 50 ms, or this process's own CPU share goes over 25%. modeld stays FIFO on core 7; controlsd stays on core 4. `swaglog` logs `speedsignd detect paused/running` with `enabled` / `active` / `state` / alive / valid on those edges and every infer `backend=` `peak=` `refine=` `luma=` `chroma=` `prep=` `sess=` `raw=` plus `speedsignd timing read_interval_ms=… infer_ms=… cpu_share=… threads=… backend=… engaged=… backoff=… reason=…`. Offline val on this window: 105 hits, 52 misreads, 58 misses (30/35/60 read as 50, 30 read as 45). Held-out route 17a: 5 hits, 39 misreads (60 as 30 twenty-one times, 30 as 50 seventeen times), 7 misses. `YOLO_MIN_CONF` stays **0.40**. Two different frames must agree, and a class/OCR contradiction does not vote, so those misreads miss instead of lighting. If both frames are wrong the same way, the plate can still be wrong.
 
 **Usually works:** daylight, dry, a standard white R2-1 facing the car, large enough in the ROAD frame (near / mid roadside, not a speck on the horizon). 55 and 60 are in the trained class set.
 

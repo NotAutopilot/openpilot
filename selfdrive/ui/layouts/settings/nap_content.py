@@ -202,9 +202,11 @@ SPEED_SIGN_LOG_DESCRIPTION = (
 INSTALL_SPEED_SIGN_WEIGHTS_INSTRUCTIONS = """\
 Install speed-sign ONNX weights
 
-Downloads the published YOLO ONNX (~43 MB) from GitHub Release
-speed-sign-onnx-v1 / speed_sign.onnx and writes
-/data/media/0/nap/speed_sign.onnx (SHA-256 checked).
+Downloads the published YOLOv8n ONNX (~12 MB) from GitHub Release
+speed-sign-onnx-v2 / speed_sign.onnx and writes
+/data/media/0/nap/speed_sign.onnx (SHA-256 checked). Replaces an older
+file at that path. Settings → Speed Sign Weights shows Out of date when
+the sha does not match — tap Install weights again. Do not keep the v1 file.
 
 Without this file, Speed Sign Logger On still starts speedsignd, but the
 onroad SIGN plate shows NO WT and will not read real roadside signs.
@@ -212,10 +214,11 @@ onroad SIGN plate shows NO WT and will not read real roadside signs.
 PRECONDITIONS:
   1. Device is offroad / parked (Force Offroad if you are in the car)
   2. Wi-Fi that can reach GitHub Releases
-  3. ~50 MiB free on /data
+  3. ~20 MiB free on /data
 
 Takes less than a minute. speedsignd retries the ONNX onroad without a
-reboot. Then a clear MUTCD R2-1 should light SIGN mph.
+reboot. Leave Logger On while disengaged until the first CPU compile
+finishes, then engage. A clear MUTCD R2-1 needs two agreeing reads.
 
 Does not write sqlite, does not change cruise / HUD MAX, and does not
 query osm.org.
