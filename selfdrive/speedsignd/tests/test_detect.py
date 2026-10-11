@@ -157,6 +157,7 @@ def test_cpu_backend_assertion_rejects_gpu_and_accepts_cpu():
     assert_cpu_backend,
     compile_allowed,
     describe_infer_runtimes,
+    dnn_ids_are_cpu,
     pin_cpu_only_env,
   )
 
@@ -164,6 +165,9 @@ def test_cpu_backend_assertion_rejects_gpu_and_accepts_cpu():
   assert os.environ["DEV"] == "CPU"
   assert os.environ["CPU_COUNT"] == "1"
   assert os.environ["CLANG"] == "1"
+  assert os.environ["BEAM"] == "0"
+  assert os.environ["NOOPT"] == "0"
+  assert os.environ["OMP_NUM_THREADS"] == "1"
   for key in ("GPU", "QCOM", "CUDA", "METAL", "AMD", "NV", "WEBGPU"):
     assert os.environ[key] == "0"
 
@@ -193,9 +197,11 @@ def test_cpu_backend_assertion_rejects_gpu_and_accepts_cpu():
   with pytest.raises(AssertionError):
     assert_cpu_backend(Qcom())
 
-  assert not compile_allowed(controlling=True, ready=False)
-  assert compile_allowed(controlling=False, ready=False)
-  assert compile_allowed(controlling=True, ready=True)
+  assert not compile_allowed(known=True, controlling=True, ready=False)
+  assert compile_allowed(known=True, controlling=False, ready=False)
+  assert not compile_allowed(known=False, controlling=False, ready=False)
+  assert not compile_allowed(known=False, controlling=True, ready=False)
+  assert compile_allowed(known=True, controlling=True, ready=True)
 
   class Runner:
     def __call__(self, tensors):
@@ -237,6 +243,45 @@ def test_cpu_backend_assertion_rejects_gpu_and_accepts_cpu():
   text = describe_infer_runtimes()
   assert "onnxruntime-" in text
   assert "tinygrad-" in text
+  assert "cv2-dnn-" in text
+
+  assert dnn_ids_are_cpu(3, 0, gpu_backends={5, 4}, gpu_targets={1, 6}, cpu_target=0)
+  assert not dnn_ids_are_cpu(5, 0, gpu_backends={5, 4}, gpu_targets={1, 6}, cpu_target=0)
+  assert not dnn_ids_are_cpu(3, 1, gpu_backends={5, 4}, gpu_targets={1, 6}, cpu_target=0)
+  assert not dnn_ids_are_cpu(3, 6, gpu_backends={5, 4}, gpu_targets={1, 6}, cpu_target=0)
+
+  class Cv:
+    _nap_backend = "opencv-dnn-cpu"
+    _nap_device = "CPU"
+
+  assert assert_cpu_backend(Cv()) == "opencv-dnn-cpu"
+
+
+def test_compile_stamp_and_lazy_session_block_while_engaged(tmp_path, monkeypatch):
+  """No session build until known-disengaged, unless this sha already compiled."""
+  from openpilot.selfdrive.speedsignd.detect import (
+    _LazyCpuSession,
+    compile_cache_warm,
+    write_compile_stamp,
+  )
+  monkeypatch.setenv("NAP_SPEED_SIGN_CACHE", str(tmp_path))
+  assert not compile_cache_warm("deadbeef")
+  write_compile_stamp("deadbeef", "opencv-dnn-cpu")
+  assert compile_cache_warm("deadbeef")
+  assert not compile_cache_warm("other")
+  write_compile_stamp("clangsha", "tinygrad-clang")
+  assert not compile_cache_warm("clangsha")
+  db = tmp_path / "clangsha" / "tinygrad" / "cache.db"
+  db.parent.mkdir(parents=True)
+  db.write_bytes(b"kernels")
+  assert compile_cache_warm("clangsha")
+
+  cold = _LazyCpuSession("/no/such.onnx", "not-a-real-sha", "opencv-dnn-cpu")
+  assert not cold.compiled
+  with pytest.raises(RuntimeError, match="compile-blocked"):
+    cold.run(None, {"images": np.zeros((1, 3, 2, 2), np.float32)})
+  warm = _LazyCpuSession("/no/such.onnx", "deadbeef", "opencv-dnn-cpu")
+  assert warm.compiled
 
 
 def test_read_mph_washes_out_above_fixed_90():

@@ -218,7 +218,10 @@ PRECONDITIONS:
 
 Takes less than a minute. speedsignd retries the ONNX onroad without a
 reboot. Leave Logger On while disengaged until the first CPU compile
-finishes, then engage. A clear MUTCD R2-1 needs two agreeing reads.
+finishes (reason=compile-wait while engaged), then engage. That compile
+is cached per weights sha under /data. A clear MUTCD R2-1 needs two
+agreeing reads. Inference stays on CPU: opencv-dnn or onnxruntime when
+the image has them, never the GPU.
 
 Does not write sqlite, does not change cruise / HUD MAX, and does not
 query osm.org.

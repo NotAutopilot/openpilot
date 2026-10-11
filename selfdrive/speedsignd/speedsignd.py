@@ -9,20 +9,22 @@ Stock modelV2 has no speedSign head — this is a separate process, default off.
 
 Safety: Logger On starts the process + HUD. Detect keeps running while
 openpilot is engaged. Inference is CPU only (onnxruntime
-CPUExecutionProvider, or tinygrad DEV=CPU / CLANG). It must not open the
-QCOM GPU modeld uses. The first realize compiles and is refused while
-engaged. One ONNX thread, SCHED_IDLE (else nice 19), pinned to little
+CPUExecutionProvider, else cv2.dnn on the CPU target, else tinygrad
+DEV=CPU / CLANG). It must not open the QCOM GPU modeld uses. The first
+realize compiles only while known-disengaged and is cached per weights
+sha. One ONNX thread, SCHED_IDLE (else nice 19), pinned to little
 core 2 — not core 0 (UI), 1 (sensord), 3 (pandad/encoderd), 4 (controlsd),
 5 (plannerd/radard), 6 (camerad), or 7 (modeld). While engaged the average
 is at most 25% of that core: after each infer the process idles at least
-3× the infer time. modelV2 frame drops add more rest. Any modelV2 frame
-skip, or modelExecutionTime above 50 ms, pauses at least 10 s. HUD lights
+3× the infer time. modelV2 frame drops add more rest. A real modelV2
+frame skip, or modelExecutionTime above 50 ms, pauses at least 10 s.
+A 20 Hz SubMaster poll of 20 Hz modelV2 is not that skip. HUD lights
 only when two reads agree on the same mph, then holds 45 s. JSONL stays a
 short line, skipped while engaged if disk stalls. SubMaster is polled at
-20 Hz. Unknown cereal after a short startup allows throttled detect. Not
-gated on park / Force Offroad. Detect copies one right-side 628×320 ROAD
-window (x 1300–1928, y 520–840) and letterboxes it to YOLO_IMGSZ. 4 Hz
-YOLO on a 3X starved modeld; the default stays 1 Hz.
+20 Hz. Unknown cereal after a short startup allows throttled detect, but
+not the compile. Not gated on park / Force Offroad. Detect copies one
+right-side 628×320 ROAD window (x 1300–1928, y 520–840) and letterboxes
+it to YOLO_IMGSZ. 4 Hz YOLO on a 3X starved modeld; the default stays 1 Hz.
 """
 from __future__ import annotations
 
@@ -30,6 +32,8 @@ import math
 import os
 
 # Before numpy / tinygrad / OpenBLAS import. One compute thread.
+# Package __init__ sets the same keys even earlier. Manager forks after
+# numpy is already loaded, so main() also calls limit_infer_threads().
 for _thread_key in (
   "OMP_NUM_THREADS",
   "OPENBLAS_NUM_THREADS",
@@ -40,8 +44,17 @@ for _thread_key in (
   "OPENCV_FOR_THREADS_NUM",
   "GOTO_NUM_THREADS",
   "TINYGRAD_NUM_THREADS",
+  "KMP_NUM_THREADS",
 ):
   os.environ[_thread_key] = "1"
+os.environ["OMP_DYNAMIC"] = "FALSE"
+os.environ["MKL_DYNAMIC"] = "FALSE"
+os.environ["OMP_WAIT_POLICY"] = "PASSIVE"
+os.environ["BEAM"] = "0"
+os.environ["NOOPT"] = "0"
+os.environ["CPU_COUNT"] = "1"
+os.environ["OPENCV_OPENCL_RUNTIME"] = "disabled"
+os.environ["OPENCV_DNN_OPENCL"] = "0"
 
 import threading
 import time
@@ -79,6 +92,8 @@ HZ_MAX = 4.0
 # Poll selfdriveState faster than detect. 100 Hz service + 1 Hz update makes
 # SubMaster.alive flap (timeout is 10/freq = 100 ms) and stuck the WAIT plate.
 SM_HZ = 20.0
+# modelV2 is published at 20 Hz. SubMaster keeps only the latest message.
+MODEL_HZ = 20.0
 # After this, unread cereal allows throttled detect instead of forever-WAIT.
 UNKNOWN_GRACE_S = 2.0
 # Historical tinygrad budget. A real 3X infer is several seconds, so this
@@ -508,19 +523,38 @@ def reset_ratekeeper_if_behind(rk, now: float) -> bool:
   return False
 
 
+def model_frame_gap_allowed(dt_s: float, hz: float = MODEL_HZ) -> int:
+  """How far frameId may jump without modeld having dropped a frame.
+
+  Both sides are 20 Hz, and SubMaster keeps only the latest modelV2, so a
+  poll that lands between two publishes sees delta 2. A vision recv or an
+  infer that blocks this poll for dt seconds misses about dt*20 publishes.
+  +1 is that one coalesced message. frameDropPerc is the real modeld drop.
+  """
+  dt_s = max(0.0, float(dt_s))
+  return max(2, math.ceil(dt_s * float(hz)) + 1)
+
+
 @dataclass
 class ModelWatch:
   """modelV2 frame drops, frame-id gaps, and modelExecutionTime. No new socket."""
   last_frame: int | None = None
+  last_mono: float | None = None
   last_drop: float | None = None
   last_exec: float | None = None
   drop_hot: bool = False
   exec_hot: bool = False
   skipped: bool = False
 
-  def observe(self, frame_id: int | None, drop: float | None, exec_s: float | None = None) -> None:
-    if frame_id is not None and self.last_frame is not None and int(frame_id) > int(self.last_frame) + 1:
-      self.skipped = True
+  def observe(self, frame_id: int | None, drop: float | None, exec_s: float | None = None,
+              now: float | None = None) -> None:
+    if now is None:
+      now = time.monotonic()
+    if frame_id is not None and self.last_frame is not None and self.last_mono is not None:
+      gap = int(frame_id) - int(self.last_frame)
+      allowed = model_frame_gap_allowed(float(now) - float(self.last_mono))
+      if gap > allowed:
+        self.skipped = True
     if drop is not None:
       value = float(drop)
       # Jitter under 5% is not a drop. 5% is well before modeld's ~20% lag alert.
@@ -538,6 +572,7 @@ class ModelWatch:
           self.exec_hot = True
     if frame_id is not None:
       self.last_frame = int(frame_id)
+      self.last_mono = float(now)
 
   def hard_guard(self) -> bool:
     """Any skipped frame id, or modeld execution above 50 ms."""
@@ -965,8 +1000,9 @@ def live_sign_publish_fields(
   """msg.valid, mph, conf, weights_missing, detect_paused for liveSpeedSignNAP.
 
   When ONNX is missing, keep msg.valid so the HUD can show NO WT — never a
-  numpy-fallback mph. When OP is controlling, show WAIT and do not update
-  hold. Unknown cereal must not set detect_paused (no false WAIT).
+  numpy-fallback mph. Controlling does not freeze the hold: mph stays 0
+  until two different frames agree, then the plate shows that mph while
+  engaged. Unknown cereal must not set detect_paused (no false WAIT).
   """
   if weights_missing:
     return True, 0, 0.0, True, False
@@ -1002,15 +1038,24 @@ def format_read_timing(
   cpu_share: float | None = None,
   threads: int = 1,
   backend: str = "",
+  os_threads: int | None = None,
 ) -> str:
-  """One greppable line per finished read. `speedsignd timing`."""
+  """One greppable line per finished read. `speedsignd timing`.
+
+  `threads` is the pinned BLAS/OpenMP/OpenCV pool (1). `os_threads` is
+  /proc/self/status Threads, which also counts the main loop, the infer
+  worker, and VisionIPC. Route 0000017e logged the proc count in `threads`
+  and showed 11.
+  """
   share = "na" if cpu_share is None else f"{float(cpu_share):.3f}"
+  os_s = "" if os_threads is None else f"os_threads={int(os_threads)} "
   return (
     "speedsignd timing "
     + f"read_interval_ms={read_interval_ms:.0f} "
     + f"infer_ms={infer_ms:.0f} "
     + f"cpu_share={share} "
     + f"threads={int(threads)} "
+    + os_s
     + f"backend={backend or 'unset'} "
     + f"engaged={int(bool(engaged))} "
     + f"backoff={int(bool(backoff))} "
@@ -1103,7 +1148,7 @@ def second_look_sign(buf, bbox) -> SpeedSign | None:
   )
 
 
-def observe_model(watch: ModelWatch, sm) -> None:
+def observe_model(watch: ModelWatch, sm, now: float | None = None) -> None:
   try:
     if not sm.updated["modelV2"]:
       return
@@ -1115,6 +1160,7 @@ def observe_model(watch: ModelWatch, sm) -> None:
       getattr(msg, "frameId", None),
       getattr(msg, "frameDropPerc", None),
       getattr(msg, "modelExecutionTime", None),
+      now=time.monotonic() if now is None else now,
     )
   except Exception:
     return
@@ -1126,6 +1172,8 @@ def main():
   from openpilot.common.swaglog import cloudlog
   from openpilot.selfdrive.mapd.gps_fix import gps_sample_from_sm
 
+  # Child of manager: shrink the BLAS pool the parent already started.
+  limit_infer_threads(1)
   sched_name = yield_to_modeld()
 
   hz = parse_detect_hz(os.environ.get(HZ_ENV))
@@ -1237,6 +1285,11 @@ def main():
         next_detect = 0.0
         in_holdoff = False
       slot.resume()
+      # A compile that started disengaged must not keep running after engage.
+      # pause() drops the result. The clang call already in flight can still
+      # finish; the next start is refused until known-disengaged.
+      if sample.controlling and slot.busy and not detector.compile_ready():
+        slot.pause()
     if last_allow != sample.allow_detect or last_paused != sample.detect_paused:
       cloudlog.info(
         "speedsignd detect %s (%s)",
@@ -1276,7 +1329,7 @@ def main():
         signs = outcome.signs
         infer_ms.append(outcome.infer_s * 1000.0)
         share = cpu_meter.sample(now_mono, read_proc_stat_jiffies())
-        threads_now = read_proc_thread_count() or 1
+        os_threads = read_proc_thread_count()
         cloudlog.info(
           "%s",
           format_read_timing(
@@ -1286,7 +1339,8 @@ def main():
             backoff=pending_backoff,
             reason=pending_reason,
             cpu_share=share,
-            threads=threads_now,
+            threads=threads,
+            os_threads=os_threads,
             backend=detector.backend_name(),
           ),
         )
@@ -1442,12 +1496,17 @@ def main():
           engaged_now = bool(sample.controlling)
 
           ready = detector.compile_ready()
-          # Compile only when this read started disengaged. An already-realized
-          # graph runs while engaged and stays on CPU.
-          detector.allow_compile(not engaged_now)
+          # Compile only when this read is known-disengaged. Unknown cereal
+          # is not that. A warm cache (ready) runs while engaged, on CPU.
+          permitted = compile_allowed(
+            known=bool(sample.known), controlling=engaged_now, ready=ready,
+          )
+          detector.allow_compile(permitted)
 
           def _run(nv12=nv12, lat=lat, lon=lon, bearing=bearing, gps_ok=gps_ok,
-                   engaged_now=engaged_now, stalled=stalled):
+                   engaged_now=engaged_now, stalled=stalled, permitted=permitted):
+            if not permitted and not detector.compile_ready():
+              raise RuntimeError("compile-blocked while driving")
             signs_w = detect_if_allowed(
               nv12.y, lat, lon, bearing, gps_ok, detector, logger, time.monotonic(),
               controlling=engaged_now, rgb=None, debounce=debounce, nv12=nv12,
@@ -1455,7 +1514,7 @@ def main():
             )
             return signs_w[0], signs_w[1], detector.diag_dict()
 
-          if not compile_allowed(controlling=engaged_now, ready=ready):
+          if not permitted:
             last_skip_reason = "compile-wait"
             next_detect = max(next_detect, time.monotonic() + 1.0)
             if now_mono - last_gate_log >= INFER_LOG_PERIOD_S:

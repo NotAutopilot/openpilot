@@ -306,26 +306,66 @@ def test_driving_cores_stay_with_modeld_and_controlsd():
 
 def test_model_frame_drop_and_skip_are_backoff_reasons():
   watch = ModelWatch()
-  watch.observe(10, 0.0)
-  watch.observe(11, 1.0)
+  watch.observe(10, 0.0, now=0.0)
+  watch.observe(11, 1.0, now=0.05)
   assert watch.reason() == ""
-  watch.observe(12, 6.0)
+  watch.observe(12, 6.0, now=0.10)
   assert watch.reason() == "model-drop"
-  watch.observe(15, 6.0)
+  watch.observe(15, 6.0, now=0.10)
   assert watch.reason() == "model-drop+model-skip"
   assert watch.consume() == "model-drop+model-skip"
   assert watch.reason() == "model-drop"
-  watch.observe(16, 1.0)
+  watch.observe(16, 1.0, now=0.15)
   # A hot drop stays until the next infer consumes it, then clears once it is under 5%.
   assert watch.consume() == "model-drop"
   assert watch.reason() == ""
   skipped = ModelWatch()
-  skipped.observe(1, 0.0)
-  skipped.observe(4, 0.0)
+  skipped.observe(1, 0.0, now=0.0)
+  skipped.observe(4, 0.0, now=0.0)
   assert skipped.reason() == "model-skip"
   assert skipped.consume() == "model-skip"
   assert skipped.reason() == ""
   assert join_reasons("model-drop", "cpu-budget", "model-drop") == "model-drop+cpu-budget"
+
+
+def test_submaster_coalesce_is_not_a_model_skip():
+  """20 Hz poll of 20 Hz modelV2. Delta 2 is one coalesced message, not a drop.
+
+  Route 0000017e flagged almost every read model-skip because any frameId
+  gap above 1 latched until consume(), including the frames published while
+  this process was inside recv or the infer thread.
+  """
+  from openpilot.selfdrive.speedsignd.speedsignd import model_frame_gap_allowed
+  assert model_frame_gap_allowed(0.0) == 2
+  assert model_frame_gap_allowed(0.05) == 2
+  assert model_frame_gap_allowed(0.2) == 5
+  assert model_frame_gap_allowed(5.8) >= 116
+
+  coalesced = ModelWatch()
+  coalesced.observe(100, 0.0, 0.022, now=1.0)
+  coalesced.observe(102, 0.0, 0.022, now=1.0)
+  assert coalesced.reason() == ""
+  assert not coalesced.hard_guard()
+
+  blocked = ModelWatch()
+  blocked.observe(100, 0.0, 0.022, now=10.0)
+  # 200 ms vision recv at 20 Hz, plus the coalesced message.
+  blocked.observe(105, 0.0, 0.022, now=10.2)
+  assert blocked.reason() == ""
+
+  infer = ModelWatch()
+  infer.observe(100, 0.0, 0.022, now=20.0)
+  # 5.8 s infer on the same core starves the 20 Hz poll. modeld itself
+  # kept publishing; frameDropPerc stayed 0 on the drive.
+  infer.observe(216, 0.0, 0.022, now=25.8)
+  assert infer.reason() == ""
+  assert not infer.hard_guard()
+
+  real = ModelWatch()
+  real.observe(100, 0.0, 0.022, now=30.0)
+  real.observe(120, 0.0, 0.022, now=30.2)
+  assert real.reason() == "model-skip"
+  assert real.hard_guard()
 
 
 def test_model_skip_or_exec_over_50ms_pauses_at_least_10s():
@@ -354,8 +394,8 @@ def test_model_skip_or_exec_over_50ms_pauses_at_least_10s():
   assert slow.reason() == ""
 
   skipped = ModelWatch()
-  skipped.observe(1, 0.0, 0.022)
-  skipped.observe(4, 0.0, 0.022)
+  skipped.observe(1, 0.0, 0.022, now=0.0)
+  skipped.observe(4, 0.0, 0.022, now=0.0)
   assert skipped.reason() == "model-skip"
   assert skipped.hard_guard()
   # A short infer's 3× backoff is under 10 s; the hard guard raises the floor.
