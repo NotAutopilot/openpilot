@@ -162,6 +162,11 @@ button:active:not(:disabled) {
 .card h2 { margin: 0 0 8px; font-size: 18px; }
 .card p { margin: 0 0 10px; color: #8b9198; font-size: 14px; white-space: pre-wrap; }
 .card button { min-height: 52px; margin: 0 8px 0 0; padding: 8px 16px; font-size: 16px; }
+/* Force Offroad Yes/No: big, like the comma screen dialog. */
+#foack { z-index: 30; padding: 10px; }
+#foack .card { max-width: none; height: 100%; text-align: center; padding: 16px; }
+#foack h2 { font-size: 34px; color: #c9c9c9; margin: 18px 0 24px; }
+#foack button { width: 46%; min-height: 96px; font-size: 32px; margin: 0 1%; }
 .hidden { display: none; }
 @media (min-width: 720px) {
   #content .row { width: 49.5%; margin: 0 0.5% 6px 0; }
@@ -191,6 +196,13 @@ button:active:not(:disabled) {
     <p id="confirm-body"></p>
     <button id="confirm-yes" type="button" class="on">Confirm</button>
     <button id="confirm-no" type="button">Cancel</button>
+  </div>
+</div>
+<div id="foack" class="overlay hidden">
+  <div class="card">
+    <h2 id="foack-prompt">Ready to resume steering control?</h2>
+    <button id="foack-no" type="button">No</button>
+    <button id="foack-yes" type="button" class="on">Yes</button>
   </div>
 </div>
 <script>
@@ -734,6 +746,39 @@ document.getElementById("confirm-no").onclick = function () {
   document.getElementById("confirm").className = "overlay hidden";
   setStatus("");
 };
+
+// Force Offroad Yes/No: mirrors the comma screen dialog; clears when answered on either screen.
+var foBusy = false;
+function foRender(data) {
+  var box = document.getElementById("foack");
+  if (!data || !data.pending) { box.className = "overlay hidden"; return; }
+  document.getElementById("foack-prompt").textContent = data.prompt;
+  document.getElementById("foack-yes").textContent = data.yes;
+  document.getElementById("foack-no").textContent = data.no;
+  box.className = "overlay";
+}
+function foPoll() {
+  if (foBusy) return;
+  getJSON("/api/force_offroad", function (err, data) { if (!err && !foBusy) foRender(data); });
+}
+function foAnswer(answer) {
+  if (foBusy) return;
+  foBusy = true;
+  document.getElementById("foack-yes").disabled = true;
+  document.getElementById("foack-no").disabled = true;
+  postJSON("/api/force_offroad", answer === "yes" ? {answer: "yes", confirm: true} : {answer: "no"}, function (err, data) {
+    foBusy = false;
+    document.getElementById("foack-yes").disabled = false;
+    document.getElementById("foack-no").disabled = false;
+    if (err) { setStatus(err.message); foPoll(); return; }
+    foRender(data);
+    refresh();
+  });
+}
+document.getElementById("foack-yes").onclick = function () { foAnswer("yes"); };
+document.getElementById("foack-no").onclick = function () { foAnswer("no"); };
+foPoll();
+setInterval(foPoll, 1500);
 
 window.onresize = fitPane;
 // Lets :active paint on touch screens that otherwise skip it.
