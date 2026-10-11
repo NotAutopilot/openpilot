@@ -1,4 +1,5 @@
 """Install-path helper: local copy and checksummed fetch onto /data."""
+import os
 import zipfile
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from openpilot.selfdrive.speedsignd.install import (
   MIN_ONNX_BYTES,
   clear_runtime_status_cache,
   fetch_and_install,
+  import_vendored_runtime,
   install_runtime_wheel,
   install_status_summary,
   install_weights,
@@ -152,10 +154,10 @@ def test_runtime_wheel_pin():
 
 def _fake_wheel(path: Path, payload: str = "vendored = True\n") -> str:
   with zipfile.ZipFile(path, "w") as zf:
+    zf.writestr("onnxruntime/", b"")
     zf.writestr("onnxruntime/__init__.py", payload)
+    zf.writestr("onnxruntime/LICENSE", b"license-text\n")
     zf.writestr("onnxruntime-9.9.9.dist-info/METADATA", "Name: onnxruntime\n")
-    zf.writestr("../evil.py", "pwned")
-    zf.writestr("onnxruntime/../../outside.py", "pwned")
     zf.writestr("numpy/__init__.py", "nope")
   return sha256_file(str(path))
 
@@ -166,14 +168,96 @@ def test_runtime_wheel_unzips_off_the_venv(tmp_path):
   pylib = tmp_path / "pylib"
   out = install_runtime_wheel(str(wheel), str(pylib), sha256=digest, version="9.9.9")
   assert out == str(pylib)
+  assert (pylib / "onnxruntime").is_dir()
+  assert (pylib / "onnxruntime" / "LICENSE").is_file()
+  assert not (pylib / "onnxruntime" / "LICENSE").is_dir()
   assert (pylib / "onnxruntime" / "__init__.py").read_text(encoding="utf-8").startswith("vendored")
   assert (pylib / "onnxruntime-9.9.9.dist-info" / "METADATA").is_file()
-  assert not (pylib / "evil.py").exists()
-  assert not (pylib / "outside.py").exists()
   assert not (pylib / "numpy").exists()
   assert vendored_runtime_ready(str(pylib), expected_sha=digest)
   assert not vendored_runtime_ready(str(pylib))  # stamp is not the pinned 3X sha
   assert "pylib" in (pylib / "onnxruntime.stamp").read_text(encoding="utf-8")
+
+
+def test_wheel_path_traversal_is_rejected(tmp_path):
+  wheel = tmp_path / "bad.whl"
+  with zipfile.ZipFile(wheel, "w") as zf:
+    zf.writestr("onnxruntime/__init__.py", "__version__ = '0'\n")
+    zf.writestr("onnxruntime/../../outside.py", "pwned")
+  digest = sha256_file(str(wheel))
+  pylib = tmp_path / "pylib"
+  with pytest.raises(RuntimeError, match="wheel path rejected"):
+    install_runtime_wheel(str(wheel), str(pylib), sha256=digest)
+  assert not (tmp_path / "outside.py").exists()
+  assert not pylib.exists()
+
+
+_NAMELIST = Path(__file__).with_name("onnxruntime_1.31.0_aarch64_namelist.txt")
+_REAL_WHEEL = Path(
+  "/tmp/speedsign/onnxruntime-1.31.0-cp312-cp312-manylinux_2_28_aarch64.whl",
+)
+
+
+def _pinned_wheel_namelist() -> list[str]:
+  """Namelist of the pinned aarch64 wheel. The zip on disk wins over the fixture."""
+  if _REAL_WHEEL.is_file():
+    with zipfile.ZipFile(_REAL_WHEEL) as zf:
+      return zf.namelist()
+  return [line for line in _NAMELIST.read_text(encoding="utf-8").splitlines() if line]
+
+
+def test_real_wheel_namelist_license_is_a_file_and_imports(tmp_path):
+  """Route failure: extract treated onnxruntime/LICENSE as a directory.
+
+  The pinned wheel's namelist has `onnxruntime/` (a directory entry) and
+  `onnxruntime/LICENSE` (a file). Rebuild that listing with a pure-Python
+  __init__ so import works on x86, and when the real wheel is present also
+  unpack it.
+  """
+  names = _pinned_wheel_namelist()
+  assert names == [line for line in _NAMELIST.read_text(encoding="utf-8").splitlines() if line]
+  assert "onnxruntime/" in names
+  assert "onnxruntime/LICENSE" in names
+  assert "onnxruntime/__init__.py" in names
+  assert "onnxruntime/capi/" in names
+
+  sim = tmp_path / "from-namelist.whl"
+  with zipfile.ZipFile(sim, "w") as zf:
+    for name in names:
+      if name.endswith("/"):
+        zf.writestr(name, b"")
+      elif name == "onnxruntime/__init__.py":
+        zf.writestr(name, "__version__ = '1.31.0'\n")
+      elif name == "onnxruntime/LICENSE":
+        zf.writestr(name, b"Apache-2.0\n")
+      else:
+        zf.writestr(name, b"x")
+  digest = sha256_file(str(sim))
+  pylib = tmp_path / "pylib"
+  pylib.mkdir()
+  # The failed 3X extract left the package name as a file.
+  (pylib / "onnxruntime").write_text("not-a-directory", encoding="utf-8")
+  install_runtime_wheel(str(sim), str(pylib), sha256=digest, version="1.31.0")
+  assert (pylib / "onnxruntime").is_dir()
+  license_path = pylib / "onnxruntime" / "LICENSE"
+  assert license_path.is_file()
+  assert not license_path.is_dir()
+  assert license_path.read_bytes() == b"Apache-2.0\n"
+  loaded = import_vendored_runtime(str(pylib))
+  assert loaded.endswith(os.path.join("onnxruntime", "__init__.py"))
+  assert os.path.abspath(str(pylib)) in os.path.abspath(loaded)
+
+  if not _REAL_WHEEL.is_file():
+    return
+  real_dest = tmp_path / "real"
+  install_runtime_wheel(str(_REAL_WHEEL), str(real_dest), sha256=ORT_SHA256)
+  real_license = real_dest / "onnxruntime" / "LICENSE"
+  assert (real_dest / "onnxruntime").is_dir()
+  assert real_license.is_file()
+  assert not real_license.is_dir()
+  assert (real_dest / "onnxruntime" / "__init__.py").is_file()
+  capi = real_dest / "onnxruntime" / "capi" / "onnxruntime_pybind11_state.cpython-312-aarch64-linux-gnu.so"
+  assert capi.is_file()
 
 
 def test_runtime_wheel_rejects_bad_sha(tmp_path):
