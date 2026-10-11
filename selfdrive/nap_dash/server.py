@@ -182,6 +182,8 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_json({"error": "engaging openpilot from the web is not allowed"}, 400)
       name = str(payload.get("param") or payload.get("name") or "")
       snap = locked_write(name, payload.get("value"), bool(payload.get("confirm")))
+      # Lets the page raise the steering Yes/No right after the tap, not on the next poll.
+      snap["force_offroad_ack"] = read_ack(_params())
       return self.send_json(snap)
     except AckError as exc:
       return self.send_json({"error": str(exc)}, 400)

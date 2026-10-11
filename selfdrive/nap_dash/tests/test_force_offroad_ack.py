@@ -95,3 +95,27 @@ def test_http_round_trip_and_engage_still_blocked(monkeypatch):
   finally:
     httpd.shutdown()
     httpd.server_close()
+
+
+def test_force_offroad_tap_has_no_generic_confirm_and_returns_prompt():
+  """Tap Force Offroad: parked applies at once; car on -> only the steering Yes/No, in the same response."""
+  from openpilot.selfdrive.nap_dash import ui_api
+  from openpilot.selfdrive.nap_dash.ui_api import _needs_confirm
+  assert _needs_confirm(None, {"writer": "force_offroad", "confirm": True}, True, False) is False
+  html = (Path(__file__).resolve().parents[1] / "dashboard.html").read_text()
+  assert 'ctrl.writer !== "force_offroad"' in html and "foRender(data.force_offroad_ack)" in html
+
+  class Full(FakeParams):
+    def get(self, key, *a, **kw):
+      return None
+
+    def put(self, key, value, *a, **kw):
+      self.writes.append((key, value))
+
+  for onroad, pending in ((False, False), (True, True)):
+    p = Full(IsOnroad=onroad)
+    out = ui_api.write_setting(p, "NAPForceOffroad", True, confirm=False)
+    assert p.bools["NAPForceOffroad"] is True
+    assert p.bools["NAPForceOffroadConfirmed"] is (not onroad)
+    assert read_ack(p)["pending"] is pending
+    assert out is not None
