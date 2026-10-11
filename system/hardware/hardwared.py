@@ -24,6 +24,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware.power_monitoring import PowerMonitoring
 from openpilot.system.hardware.fan_controller import FanController
 from openpilot.system.hardware.loop_timing import HardwareLoopTimer, slow_loop_fields
+from openpilot.system.hardware.thermal_reader import ThermalCache, conservative_thermal_status, thermal_reader_thread
 from openpilot.system.hardware.nap_force_offroad import (
   PARAM as NAP_FORCE_OFFROAD_PARAM,
   HANDOFF_READY_PARAM as NAP_FORCE_OFFROAD_HANDOFF_READY_PARAM,
@@ -172,7 +173,7 @@ def _report_slow_hardware_loop(timer: HardwareLoopTimer) -> None:
   cloudlog.event("hardwared slow loop", error=True, **fields)
 
 
-def hardware_thread(end_event, hw_queue) -> None:
+def hardware_thread(end_event, hw_queue, thermal_queue=None) -> None:
   pm = messaging.PubMaster(['deviceState'])
   sm = messaging.SubMaster(["peripheralState", "gpsLocationExternal", "selfdriveState", "pandaStates"], poll="pandaStates")
 
@@ -220,6 +221,20 @@ def hardware_thread(end_event, hw_queue) -> None:
 
   HARDWARE.initialize_hardware()
   thermal_config = HARDWARE.get_thermal_config()
+  # Thermal zones are read off the publish loop; see thermal_reader.py.
+  thermal_reader = None
+  if thermal_queue is None:
+    thermal_queue = queue.Queue(maxsize=1)
+    thermal_reader = threading.Thread(target=thermal_reader_thread, args=(end_event, thermal_config, thermal_queue), daemon=True)
+    thermal_reader.start()
+  thermal_cache = ThermalCache(thermal_queue)
+  if thermal_reader is not None:
+    # Startup only: wait briefly for the first real reading so the first
+    # deviceState isn't published with empty temperatures.
+    try:
+      thermal_cache.snapshot = thermal_queue.get(timeout=2.0)
+    except queue.Empty:
+      pass
 
   fan_controller = FanController(int(1./DT_HW))
 
@@ -287,7 +302,8 @@ def hardware_thread(end_event, hw_queue) -> None:
       continue
 
     msg = messaging.new_message('deviceState', valid=True)
-    msg.deviceState = thermal_config.get_msg()
+    thermal_cache.poll()
+    msg.deviceState = thermal_cache.temps
     msg.deviceState.deviceType = HARDWARE.get_device_type()
     timer.mark("thermal_config")
 
@@ -335,6 +351,8 @@ def hardware_thread(end_event, hw_queue) -> None:
     msg.deviceState.maxTempC = all_comp_temp
 
     msg.deviceState.fanSpeedPercentDesired = fan_controller.update(all_comp_temp, onroad_conditions["ignition"])
+    if thermal_cache.stale:
+      msg.deviceState.fanSpeedPercentDesired = 100
     timer.mark("thermal_fan")
 
     is_offroad_for_5_min = (started_ts is None) and ((not started_seen) or (off_ts is None) or (time.monotonic() - off_ts > 60 * 5))
@@ -349,6 +367,8 @@ def hardware_thread(end_event, hw_queue) -> None:
         thermal_status = list(THERMAL_BANDS.keys())[band_idx - 1]
       elif current_band.max_temp is not None and all_comp_temp > current_band.max_temp:
         thermal_status = list(THERMAL_BANDS.keys())[band_idx + 1]
+    # Stale temps: fail hot, never cool.
+    thermal_status = conservative_thermal_status(thermal_status, thermal_cache.stale, ThermalStatus.overheated)
 
     # **** starting logic ****
 
