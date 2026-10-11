@@ -49,6 +49,8 @@ The US speed-limits sqlite is **not in git** (too large; ODbL still requires att
 
 On the comma 3X: **Settings → NAP → Map Speed Limit → Download US Maps** (offroad), or `python -m scripts.nap.fetch_osm_maps`. That is the first-install of the published US pack. Frequent local updates: **Refresh maps** (or `python -m scripts.nap.refresh_osm_maps`) — live OSM within **100 miles** (~160.9 km), merged into the installed sqlite. `mapd` reloads the sqlite every ~15s onroad — no reboot. To unlock those buttons without parking, Settings → triple-tap **NAP** → **Force Offroad** (see [force-offroad.md](force-offroad.md)).
 
+Download US Maps retries timeouts and dropped connections up to 8 times with backoff ("Retrying… (n)" on screen) and resumes with HTTP Range from `/data/media/0/osm/.download/*.partial`. If it still fails, tap Download again: it resumes from the kept partial for the same asset. Only a SHA-256 mismatch deletes the partial.
+
 If a previous download died with ENOSPC, remove leftovers then retry:
 
 ```bash
