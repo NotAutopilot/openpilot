@@ -75,6 +75,9 @@ jobs:
           selfdrive/controls/tests/test_curve_preview.py \
           selfdrive/controls/tests/test_curve_follow.py \
           selfdrive/controls/tests/test_curve_follow_planner.py \
+          selfdrive/controls/tests/test_sight_cap_planner.py \
+          selfdrive/controls/tests/test_sight_cap_replay.py \
+          selfdrive/controls/tests/test_model_sight.py \
           selfdrive/car/tests/test_curve_follow_card_max.py \
           selfdrive/controls/tests/test_lead_leaving.py \
           selfdrive/controls/lib/tests/test_curve_max_hold.py \
