@@ -55,6 +55,7 @@ from collections import deque
 from dataclasses import dataclass
 
 from openpilot.common.constants import CV
+from openpilot.selfdrive.controls.lib.model_sight import path_y_std_at as _shared_path_y_std_at
 
 # --- model confidence -------------------------------------------------------
 # laneLineProbs are already 0..1. Road-edge std (m) maps through
@@ -186,27 +187,11 @@ def side_confidences_exit(lane_probs, edge_stds) -> tuple[float, float]:
 
 
 def path_y_std_at(times, y_stds, t_query: float = PATH_T_S) -> float | None:
-  """Interpolate lateral path std (m) at ``t_query`` seconds. None if unusable."""
-  try:
-    ts = [float(t) for t in (times or [])]
-    ys = [float(y) for y in (y_stds or [])]
-  except (TypeError, ValueError):
-    return None
-  n = min(len(ts), len(ys))
-  pairs = [(t, y) for t, y in zip(ts[:n], ys[:n]) if math.isfinite(t) and math.isfinite(y)]
-  if len(pairs) < 2:
-    return None
-  pairs.sort(key=lambda p: p[0])
-  want = float(t_query)
-  if want <= pairs[0][0]:
-    return pairs[0][1]
-  if want >= pairs[-1][0]:
-    return pairs[-1][1]
-  for (t0, y0), (t1, y1) in zip(pairs, pairs[1:]):
-    if t0 <= want <= t1 and t1 > t0:
-      w = (want - t0) / (t1 - t0)
-      return y0 + w * (y1 - y0)
-  return None
+  """Interpolate lateral path std (m) at ``t_query`` seconds. None if unusable.
+
+  Shared with the sight-distance cap: see model_sight.path_y_std_at.
+  """
+  return _shared_path_y_std_at(times, y_stds, t_query)
 
 
 def edges_both_unusable(edge_stds) -> bool:

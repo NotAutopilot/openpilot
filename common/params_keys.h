@@ -174,6 +174,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // stay in force), 2 = active (replaces the preview, retires the
     // CurveMaxHold MAX cap). Default 1.
     {"NAPCurveFollow", {PERSISTENT, INT, "1"}},
+    {"NAPSightCap", {PERSISTENT, INT, "1"}},
     // Settings → NAP → Lateral Control. Default On (Pre-AP only). Turn
     // geometry correction: low-speed lag + rear reference offset (m) in
     // modeld's plan sampling time. On also drops the legacy roundabout
