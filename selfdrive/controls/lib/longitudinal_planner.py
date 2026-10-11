@@ -718,7 +718,7 @@ class LongitudinalPlanner:
       }
       cloudlog.error(sight_log_line(rec))
     except Exception:
-      pass  # logging must never touch the command
+      pass  # a sight-cap log failure must never reach the plan
 
   def _log_curve_follow(self, sm, model, v_ego, a_target, old_preview_a, ts, ds, ks, y_std, blinker,
                         lane_change, frame_drop, rb_active, arrays) -> None:
