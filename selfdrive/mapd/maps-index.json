@@ -1,8 +1,8 @@
 {
-  "revision": "3",
+  "revision": "4",
   "asset_name": "speed_limits_us.sqlite.zst",
-  "asset_url": "https://github.com/jmbrunick/openpilot/releases/download/osm-us-speed-limits-v3/speed_limits_us.sqlite.zst",
-  "sha256": "609cf55dfcee9af05673f906f33b409a38562455bb9af15a6fe23b3b521aaa9c",
-  "bytes": 209652329,
-  "notes": "US tagged maxspeed plus MN statutory fills ~100mi around Benson (Swift + Kandiyohi). Unmarked fills are NAP estimates (MN 169.14), not OSM."
+  "asset_url": "https://github.com/jmbrunick/openpilot/releases/download/osm-us-speed-limits-v4/speed_limits_us.sqlite.zst",
+  "sha256": "664f8c9c564cf69405cf29e6977081f7b84f9a275a9e8c46bff755caea0f20ca",
+  "bytes": 213762114,
+  "notes": "v3 speed ways (incl. MN 169.14 fills around Benson) + US roundabouts (rb_ways, pack schema 4): rings, approaches, ring advisory speeds, mini-roundabouts."
 }
