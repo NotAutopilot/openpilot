@@ -13,7 +13,7 @@ https://www.openstreetmap.org/copyright
 
 Size basis (Taginfo US, 2026-09): ~3.40 million ways with a maxspeed tag.
 Measured osm-us-speed-limits-v5: ~399 MiB zst → ~1094 MiB sqlite. Fetch requires
-854 MiB free on the dest filesystem (zst + sqlite + 80 MiB margin).
+1573 MiB free on the dest filesystem (zst + sqlite + 80 MiB margin).
 """
 from __future__ import annotations
 
