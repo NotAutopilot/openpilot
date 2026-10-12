@@ -153,8 +153,8 @@ class NAPLayout(Widget):
       description=(
         "YOLO ONNX at /data/media/0/nap/speed_sign.onnx. "
         + "Missing → onroad SIGN shows NO WT and will not read roadside signs. "
-        + "runtime missing → plate shows NO RT until Install weights also "
-        + "unpacks onnxruntime into /data/media/0/nap/pylib. "
+        + "runtime missing — tap Install weights means the plate shows NO RT. "
+        + "Install weights unpacks onnxruntime into /data/media/0/nap/pylib. "
         + "Installed → blank plate until a confirmed mph."
       ),
     )

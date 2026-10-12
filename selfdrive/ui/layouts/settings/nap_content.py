@@ -199,7 +199,7 @@ SPEED_SIGN_LOG_DESCRIPTION = (
   + "python -m scripts.nap.install_speed_sign_weights. "
   + "That button also installs the CPU runtime into /data/media/0/nap/pylib. "
   + "If the weights are present and the runtime is not, the plate shows NO RT "
-  + "and Settings says runtime missing. "
+  + "and Settings says runtime missing — tap Install weights. "
   + "One read at 0.70 or higher on a real limit can light SIGN; a different "
   + "limit within 3 s clears it. Detect alternates a lower tile and an upper tile."
 )
@@ -217,7 +217,7 @@ The same tap downloads pinned onnxruntime 1.31.0 (CPU, cp312, aarch64,
 SHA-256 checked) and unzips it into /data/media/0/nap/pylib. It does not
 pip-install and does not modify the system venv. speedsignd loads that
 directory via sys.path only when the image has no onnxruntime. Until
-that import works, Settings says runtime missing and the onroad plate
+that import works, Settings says runtime missing — tap Install weights and the onroad plate
 shows NO RT.
 
 Without the ONNX, Speed Sign Logger On still starts speedsignd, but the

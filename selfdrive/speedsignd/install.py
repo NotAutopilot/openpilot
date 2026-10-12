@@ -455,6 +455,25 @@ def runtime_missing() -> bool:
   return runtime_status_summary() == "runtime missing"
 
 
+# Settings row value when neither onnxruntime nor cv2.dnn can import.
+# runtime_status_summary stays the short token so HUD NO RT still matches it.
+SETTINGS_RUNTIME_MISSING = "runtime missing — tap Install weights"
+
+
 def install_status_summary(path: str | None = None) -> str:
   """Weights label plus the runtime. Weights strings stay on their own helper."""
-  return weights_status_summary(path) + " · " + runtime_status_summary()
+  runtime = runtime_status_summary()
+  if runtime == "runtime missing":
+    runtime = SETTINGS_RUNTIME_MISSING
+  return weights_status_summary(path) + " · " + runtime
+
+
+def clang_fallback_warning(backend: str) -> str:
+  """Non-empty when this process will run tinygrad CLANG because ORT is absent."""
+  if backend != "tinygrad-clang":
+    return ""
+  return (
+    "speedsignd falling back to tinygrad-clang because onnxruntime is missing. "
+    + "Settings weights status: " + SETTINGS_RUNTIME_MISSING + ". "
+    + "CLANG will not run while engaged."
+  )

@@ -1353,7 +1353,8 @@ def main():
     ",".join(str(c) for c in SPEEDSIGND_CORES), SPEEDSIGND_NICE, sched_name, CPU_BUDGET,
     runtime_label,
   )
-  if runtime_missing():
+  # tinygrad-clang already logged its own fallback inside _onnx_session.
+  if runtime_missing() and backend != "tinygrad-clang":
     cloudlog.warning(
       "speedsignd runtime missing — Settings → NAP → Install weights also installs "
       + "onnxruntime into /data/media/0/nap/pylib (not the system venv). "

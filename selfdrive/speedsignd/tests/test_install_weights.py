@@ -7,6 +7,8 @@ import pytest
 
 from openpilot.selfdrive.speedsignd.install import (
   MIN_ONNX_BYTES,
+  SETTINGS_RUNTIME_MISSING,
+  clang_fallback_warning,
   clear_runtime_status_cache,
   fetch_and_install,
   import_vendored_runtime,
@@ -292,7 +294,13 @@ def test_runtime_missing_label(monkeypatch):
   )
   clear_runtime_status_cache()
   assert runtime_status_summary() == "runtime missing"
-  assert install_status_summary("/no/such/speed_sign.onnx") == "Missing · runtime missing"
+  assert SETTINGS_RUNTIME_MISSING == "runtime missing — tap Install weights"
+  assert install_status_summary("/no/such/speed_sign.onnx") == "Missing · " + SETTINGS_RUNTIME_MISSING
+  warn = clang_fallback_warning("tinygrad-clang")
+  assert "falling back to tinygrad-clang because onnxruntime is missing" in warn
+  assert SETTINGS_RUNTIME_MISSING in warn
+  assert clang_fallback_warning("onnxruntime-cpu") == ""
+  assert clang_fallback_warning("numpy-mutcd") == ""
   clear_runtime_status_cache()
 
 

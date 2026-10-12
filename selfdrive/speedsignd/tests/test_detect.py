@@ -294,3 +294,21 @@ def test_read_mph_washes_out_above_fixed_90():
   mph, conf = _read_mph(crop)
   assert mph == 50
   assert conf >= 0.25
+
+
+def test_clang_fallback_warns_when_onnxruntime_is_missing(tmp_path, monkeypatch):
+  """ONNX present, onnxruntime absent: one warning names tinygrad-clang and the settings tap."""
+  from openpilot.common.swaglog import cloudlog
+  from openpilot.selfdrive.speedsignd.detect import _onnx_session
+  onnx = tmp_path / "speed_sign.onnx"
+  onnx.write_bytes(b"not-a-real-model")
+  warnings: list[str] = []
+  monkeypatch.setattr(
+    "openpilot.selfdrive.speedsignd.detect._select_cpu_kind", lambda: "tinygrad-clang",
+  )
+  monkeypatch.setattr(cloudlog, "warning", lambda text: warnings.append(text))
+  _sess, backend = _onnx_session(str(onnx))
+  assert backend == "tinygrad-clang"
+  assert len(warnings) == 1
+  assert "falling back to tinygrad-clang because onnxruntime is missing" in warnings[0]
+  assert "runtime missing — tap Install weights" in warnings[0]

@@ -1170,11 +1170,23 @@ def _select_cpu_kind() -> str:
     return ""
 
 
+def _log_clang_fallback(kind: str) -> None:
+  """One warning when the CPU runner is CLANG only because onnxruntime did not import."""
+  from openpilot.selfdrive.speedsignd.install import clang_fallback_warning
+  text = clang_fallback_warning(kind)
+  if not text:
+    return
+  from openpilot.common.swaglog import cloudlog
+  cloudlog.warning(text)
+
+
 def _onnx_session(path: str) -> tuple[object | None, str]:
   """Pick a CPU session. Do not realize it here — that is the compile."""
   limit_infer_threads()
   pin_cpu_only_env()
   kind = _select_cpu_kind()
+  if kind == "tinygrad-clang":
+    _log_clang_fallback(kind)
   if not kind:
     return None, ""
   sha = _sha_short(path, n=64)
