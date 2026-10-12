@@ -24,12 +24,14 @@ INFER_THREAD_ENV = (
   "OPENCV_FOR_THREADS_NUM",
   "GOTO_NUM_THREADS",
   "TINYGRAD_NUM_THREADS",
+  "KMP_NUM_THREADS",
 )
 for _thread_key in INFER_THREAD_ENV:
   os.environ[_thread_key] = "1"
 
 # tinygrad's default device on a 3X is QCOM (the Adreno modeld already uses).
 # DEV is read once, at import. Pin CPU/CLANG and hide every GPU before that.
+# BEAM searches kernels for minutes. NOOPT compiles -O0. Both stay off.
 _GPU_ENV = ("GPU", "QCOM", "CUDA", "METAL", "AMD", "NV", "CL", "WEBGPU", "DSP")
 
 
@@ -39,6 +41,13 @@ def pin_cpu_only_env() -> None:
   os.environ["CPU"] = "1"
   os.environ["CLANG"] = "1"
   os.environ["CPU_COUNT"] = "1"
+  os.environ["BEAM"] = "0"
+  os.environ["NOOPT"] = "0"
+  os.environ["OMP_DYNAMIC"] = "FALSE"
+  os.environ["MKL_DYNAMIC"] = "FALSE"
+  os.environ["OMP_WAIT_POLICY"] = "PASSIVE"
+  os.environ["OPENCV_OPENCL_RUNTIME"] = "disabled"
+  os.environ["OPENCV_DNN_OPENCL"] = "0"
   for key in _GPU_ENV:
     os.environ[key] = "0"
   for key in INFER_THREAD_ENV:
@@ -51,7 +60,7 @@ import numpy as np
 
 from openpilot.selfdrive.speedsignd.detect_types import MUTCD_MPH, SpeedSign, shift_sign
 from openpilot.selfdrive.speedsignd.nv12 import letterbox_rgb_from_nv12_crop, rgb_from_y, upscale_gray
-from openpilot.selfdrive.speedsignd.paths import default_onnx_path
+from openpilot.selfdrive.speedsignd.paths import default_onnx_path, nap_data_dir
 from openpilot.selfdrive.speedsignd.weights_manifest import (
   YOLO_CLASS_NAMES,
   YOLO_IMGSZ,
@@ -230,15 +239,64 @@ def parse_infer_cap_ms(raw: str | None, default: float = CAP_MS_DEFAULT) -> floa
   return min(CAP_MS_MAX, max(CAP_MS_MIN, ms))
 
 
+def _shrink_blas_pool(threads: int) -> None:
+  """Resize a BLAS/OpenMP pool that already started.
+
+  Manager forks speedsignd after numpy is imported. OpenBLAS captured
+  nproc (8 on a 3X) at that init, so the env pin in this file is too late.
+  The logged `threads=11` was that pool of 8 plus the main thread, the
+  infer worker, and the VisionIPC client. This call is the one that
+  actually drops the pool to 1 inside the child.
+  """
+  import ctypes
+  n = max(1, int(threads))
+  for soname in ("libopenblas.so.0", "libopenblas.so", "libblas.so.3", "libblas.so"):
+    try:
+      lib = ctypes.CDLL(soname)
+    except OSError:
+      continue
+    for sym in ("openblas_set_num_threads", "goto_set_num_threads"):
+      fn = getattr(lib, sym, None)
+      if fn is None:
+        continue
+      try:
+        fn.argtypes = [ctypes.c_int]
+        fn.restype = None
+        fn(n)
+      except Exception:
+        pass
+    break
+  for soname in ("libgomp.so.1", "libgomp.so", "libiomp5.so"):
+    try:
+      lib = ctypes.CDLL(soname)
+    except OSError:
+      continue
+    fn = getattr(lib, "omp_set_num_threads", None)
+    if fn is None:
+      continue
+    try:
+      fn.argtypes = [ctypes.c_int]
+      fn.restype = None
+      fn(n)
+    except Exception:
+      pass
+    break
+
+
 def limit_infer_threads(n: int | None = None) -> int:
   """Pin BLAS / OpenMP / tinygrad / OpenCV pools. Always one thread on device."""
+  pin_cpu_only_env()
   threads = parse_infer_threads(os.environ.get(THREADS_ENV) if n is None else str(n))
   n_s = str(threads)
   for key in INFER_THREAD_ENV:
     os.environ[key] = n_s
+  _shrink_blas_pool(threads)
   try:
     import cv2
     cv2.setNumThreads(threads)
+    ocl = getattr(cv2, "ocl", None)
+    if ocl is not None and hasattr(ocl, "setUseOpenCL"):
+      ocl.setUseOpenCL(False)
   except Exception:
     pass
   return threads
@@ -795,9 +853,81 @@ def session_backend(session) -> str:
   return name
 
 
-def compile_allowed(*, controlling: bool, ready: bool) -> bool:
-  """First realize compiles the graph. Never start that while engaged."""
-  return bool(ready) or not bool(controlling)
+def compile_cache_dir(sha: str) -> str:
+  """Per-weights compile cache under /data. One clang compile per sha."""
+  root = os.environ.get("NAP_SPEED_SIGN_CACHE") or os.path.join(nap_data_dir(), "speed_sign_cache")
+  digest = (sha or "unknown").strip() or "unknown"
+  return os.path.join(root, digest)
+
+
+def _compile_stamp_path(sha: str) -> str:
+  return os.path.join(compile_cache_dir(sha), "ready")
+
+
+def compile_cache_warm(sha: str) -> bool:
+  """True when a previous disengaged run finished this sha.
+
+  tinygrad also needs its sqlite kernel cache. opencv/onnxruntime only
+  need the stamp: their session create is not the multi-minute clang.
+  """
+  if not sha or not os.path.isfile(_compile_stamp_path(sha)):
+    return False
+  try:
+    with open(_compile_stamp_path(sha), encoding="utf-8") as f:
+      text = f.read()
+  except OSError:
+    return False
+  if "tinygrad" in text:
+    db = os.path.join(compile_cache_dir(sha), "tinygrad", "cache.db")
+    try:
+      return os.path.isfile(db) and os.path.getsize(db) > 0
+    except OSError:
+      return False
+  return True
+
+
+def write_compile_stamp(sha: str, backend: str) -> None:
+  if not sha:
+    return
+  path = _compile_stamp_path(sha)
+  try:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+      f.write((backend or "cpu") + "\n" + sha + "\n")
+    os.replace(tmp, path)
+  except OSError:
+    return
+
+
+def compile_allowed(*, known: bool, controlling: bool, ready: bool) -> bool:
+  """Warm-up realizes kernels. Start it only when known disengaged.
+
+  Unknown cereal is not disengaged: after the startup grace, unread
+  selfdriveState used to set controlling False and the first clang
+  realize ran while the car was engaged. A finished cache (ready) may
+  run while engaged. Offroad never reaches this process (manager starts
+  it only onroad); disengaged onroad is the compile window.
+  """
+  if ready:
+    return True
+  if controlling or not known:
+    return False
+  return True
+
+
+def dnn_ids_are_cpu(
+  backend: int,
+  target: int,
+  *,
+  gpu_backends: set[int],
+  gpu_targets: set[int],
+  cpu_target: int,
+) -> bool:
+  """OpenCV DNN must stay on the CPU target. Never CUDA, OpenCL, or Vulkan."""
+  if int(backend) in gpu_backends or int(target) in gpu_targets:
+    return False
+  return int(target) == int(cpu_target)
 
 
 def _device_is_cpu(name: str) -> bool:
@@ -808,13 +938,20 @@ def _device_is_cpu(name: str) -> bool:
 def assert_cpu_backend(session) -> str:
   """Startup check. Raise unless this session can only run on CPU.
 
-  onnxruntime must be exactly CPUExecutionProvider. tinygrad must be the
-  CPU/CLANG device, never QCOM, CUDA, METAL, or any other GPU.
+  onnxruntime must be exactly CPUExecutionProvider. opencv-dnn must be the
+  OpenCV CPU target. tinygrad must be the CPU/CLANG device, never QCOM,
+  CUDA, METAL, or any other GPU.
   """
   if session is None:
     raise AssertionError("speedsignd session is missing")
+  backend = str(getattr(session, "_nap_backend", "") or "")
+  device = str(getattr(session, "_nap_device", "") or "")
+  if backend == "opencv-dnn-cpu":
+    if device and not _device_is_cpu(device):
+      raise AssertionError("speedsignd backend is not CPU: " + backend + " device=" + device)
+    return "opencv-dnn-cpu"
   get_providers = getattr(session, "get_providers", None)
-  if get_providers is not None and not isinstance(session, _TinyOrtSession):
+  if get_providers is not None and not isinstance(session, (_TinyOrtSession, _LazyCpuSession)):
     providers = list(get_providers())
     if providers != ["CPUExecutionProvider"]:
       raise AssertionError("onnxruntime providers " + str(providers) + " are not CPU-only")
@@ -824,8 +961,8 @@ def assert_cpu_backend(session) -> str:
     except Exception:
       pass
     return "onnxruntime-cpu"
-  device = str(getattr(session, "_nap_device", "") or "")
-  backend = str(getattr(session, "_nap_backend", "") or "")
+  if backend == "onnxruntime-cpu":
+    return "onnxruntime-cpu"
   blob = (backend + " " + device).upper()
   for tok in ("QCOM", "CUDA", "METAL", "WEBGPU", "OPENCL", "GPU"):
     if tok in blob:
@@ -839,27 +976,133 @@ def assert_cpu_backend(session) -> str:
 
 
 def describe_infer_runtimes() -> str:
-  """What this process can import. The 3X image has tinygrad, not onnxruntime."""
+  """What this process can import. Prefer ORT, then cv2.dnn, then tinygrad."""
   pin_cpu_only_env()
+  try:
+    from openpilot.selfdrive.speedsignd.install import ensure_vendored_runtime
+    ensure_vendored_runtime()
+  except Exception:
+    pass
   try:
     import onnxruntime as ort
     ort_s = "onnxruntime-" + str(getattr(ort, "__version__", "present"))
   except Exception as e:
     ort_s = "onnxruntime-absent(" + type(e).__name__ + ")"
+  cv_s = "cv2-dnn-present" if _cv2_dnn_available() else "cv2-dnn-absent"
   try:
     import tinygrad
     tg_s = "tinygrad-" + str(getattr(tinygrad, "__version__", "present"))
   except Exception as e:
     tg_s = "tinygrad-absent(" + type(e).__name__ + ")"
-  return ort_s + " " + tg_s
+  return ort_s + " " + cv_s + " " + tg_s
 
 
-def _open_tinygrad_cpu() -> tuple[str, str]:
-  """Import tinygrad only after DEV=CPU. Do not probe QCOM or any GPU."""
+def _cv2_dnn_available() -> bool:
+  try:
+    import cv2
+  except Exception:
+    return False
+  dnn = getattr(cv2, "dnn", None)
+  return dnn is not None and hasattr(dnn, "readNetFromONNX")
+
+
+def _cv_dnn_id_sets() -> tuple[set[int], set[int], int]:
+  import cv2
+  gpu_b: set[int] = set()
+  gpu_t: set[int] = set()
+  for name in (
+    "DNN_BACKEND_CUDA", "DNN_BACKEND_VKCOM", "DNN_BACKEND_INFERENCE_ENGINE",
+    "DNN_BACKEND_TIMVX", "DNN_BACKEND_CANN", "DNN_BACKEND_WEBNN",
+  ):
+    if hasattr(cv2.dnn, name):
+      gpu_b.add(int(getattr(cv2.dnn, name)))
+  for name in (
+    "DNN_TARGET_CUDA", "DNN_TARGET_CUDA_FP16", "DNN_TARGET_OPENCL",
+    "DNN_TARGET_OPENCL_FP16", "DNN_TARGET_VULKAN", "DNN_TARGET_FPGA",
+    "DNN_TARGET_MYRIAD", "DNN_TARGET_HDDL", "DNN_TARGET_NPU",
+  ):
+    if hasattr(cv2.dnn, name):
+      gpu_t.add(int(getattr(cv2.dnn, name)))
+  return gpu_b, gpu_t, int(cv2.dnn.DNN_TARGET_CPU)
+
+
+def _read_cv_net(path: str):
+  """Built-in OpenCV CPU engine. Never ENGINE_ORT, CUDA, or OpenCL."""
+  import cv2
+  for name in ("ENGINE_CLASSIC", "ENGINE_OPENCV", "ENGINE_NEW"):
+    engine = getattr(cv2.dnn, name, None)
+    if engine is None:
+      continue
+    try:
+      return cv2.dnn.readNetFromONNX(path, int(engine))
+    except TypeError:
+      break
+    except Exception:
+      continue
+  return cv2.dnn.readNetFromONNX(path)
+
+
+def _open_cv_dnn(path: str) -> _CvDnnSession:
+  """OpenCV's CPU DNN runner. Never OpenCL, CUDA, or Vulkan."""
+  import cv2
+  cv2.setNumThreads(1)
+  ocl = getattr(cv2, "ocl", None)
+  if ocl is not None and hasattr(ocl, "setUseOpenCL"):
+    ocl.setUseOpenCL(False)
+  net = _read_cv_net(path)
+  backend = int(cv2.dnn.DNN_BACKEND_OPENCV)
+  target = int(cv2.dnn.DNN_TARGET_CPU)
+  try:
+    net.setPreferableBackend(backend)
+    net.setPreferableTarget(target)
+  except Exception:
+    pass
+  got_b, got_t = backend, target
+  get_b = getattr(net, "getPreferableBackend", None)
+  get_t = getattr(net, "getPreferableTarget", None)
+  if get_b is not None:
+    got_b = int(get_b())
+  if get_t is not None:
+    got_t = int(get_t())
+  gpu_b, gpu_t, cpu_t = _cv_dnn_id_sets()
+  if not dnn_ids_are_cpu(got_b, got_t, gpu_backends=gpu_b, gpu_targets=gpu_t, cpu_target=cpu_t):
+    raise AssertionError("cv2.dnn backend=" + str(got_b) + " target=" + str(got_t) + " is not CPU")
+  if ocl is not None and hasattr(ocl, "useOpenCL") and ocl.useOpenCL():
+    raise AssertionError("cv2 OpenCL stayed on")
+  return _CvDnnSession(net)
+
+
+def _prepare_tinygrad_cache(sha: str) -> None:
+  """Point tinygrad's sqlite kernel cache at /data, keyed by weights sha.
+
+  ClangJITCompiler already passes -O2. It does not vectorize: the compile
+  is freestanding C, and LLVM's SLP/loop passes are a different renderer.
+  BEAM stays off (that search is the long compile). NOOPT stays off.
+  The cache is what makes the clang compile once per sha instead of every boot.
+  """
   pin_cpu_only_env()
+  cache = compile_cache_dir(sha)
+  try:
+    os.makedirs(cache, exist_ok=True)
+  except OSError:
+    return
+  os.environ["XDG_CACHE_HOME"] = cache
+  os.environ["CACHEDB"] = os.path.join(cache, "tinygrad", "cache.db")
+  os.environ["BEAM"] = "0"
+  os.environ["NOOPT"] = "0"
+  os.environ["CACHELEVEL"] = "2"
+  os.environ["CPU_COUNT"] = "1"
+
+
+def _open_tinygrad_cpu(sha: str = "") -> tuple[str, str]:
+  """Import tinygrad only after DEV=CPU. Do not probe QCOM or any GPU."""
+  _prepare_tinygrad_cache(sha)
   from tinygrad.device import Device
-  from tinygrad.helpers import DEV
+  from tinygrad.helpers import BEAM, CPU_COUNT, DEV, NOOPT
   DEV.value = "CPU"
+  BEAM.value = 0
+  NOOPT.value = 0
+  CPU_COUNT.value = 1
   opened = Device["CPU"]
   name = str(getattr(opened, "device", "CPU"))
   if not _device_is_cpu(name):
@@ -874,51 +1117,94 @@ def _open_tinygrad_cpu() -> tuple[str, str]:
   return name, renderer
 
 
+def _ort_session(path: str, threads: int, sha: str):
+  import onnxruntime as ort
+  opts = ort.SessionOptions()
+  opts.intra_op_num_threads = threads
+  opts.inter_op_num_threads = 1
+  opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+  try:
+    opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+  except Exception:
+    pass
+  optimized = os.path.join(compile_cache_dir(sha), "model.ort")
+  try:
+    os.makedirs(os.path.dirname(optimized), exist_ok=True)
+    if not os.path.isfile(optimized):
+      opts.optimized_model_filepath = optimized
+  except OSError:
+    optimized = ""
+  model = optimized if optimized and os.path.isfile(optimized) else path
+  sess = ort.InferenceSession(model, opts, providers=["CPUExecutionProvider"])
+  sess._nap_backend = "onnxruntime-cpu"
+  sess._nap_device = "CPU"
+  sess.compiled = True
+  sess._nap_sha = sha
+  return sess
+
+
+def _select_cpu_kind() -> str:
+  """Which CPU runner this process can import. Does not load weights.
+
+  System onnxruntime wins. Otherwise the aarch64 wheel under
+  /data/media/0/nap/pylib is inserted on sys.path (never the system venv).
+  cv2.dnn is next. tinygrad CLANG is the slow fallback and must not be
+  realized while engaged.
+  """
+  try:
+    from openpilot.selfdrive.speedsignd.install import ensure_vendored_runtime
+    ensure_vendored_runtime()
+  except Exception:
+    pass
+  try:
+    import onnxruntime  # noqa: F401
+    return "onnxruntime-cpu"
+  except Exception:
+    pass
+  if _cv2_dnn_available():
+    return "opencv-dnn-cpu"
+  try:
+    import tinygrad  # noqa: F401
+    return "tinygrad-clang"
+  except Exception:
+    return ""
+
+
+def _log_clang_fallback(kind: str) -> None:
+  """One warning when the CPU runner is CLANG only because onnxruntime did not import."""
+  from openpilot.selfdrive.speedsignd.install import clang_fallback_warning
+  text = clang_fallback_warning(kind)
+  if not text:
+    return
+  from openpilot.common.swaglog import cloudlog
+  cloudlog.warning(text)
+
+
 def _onnx_session(path: str) -> tuple[object | None, str]:
-  threads = limit_infer_threads()
+  """Pick a CPU session. Do not realize it here — that is the compile."""
+  limit_infer_threads()
   pin_cpu_only_env()
-  try:
-    import onnxruntime as ort
-    opts = ort.SessionOptions()
-    opts.intra_op_num_threads = threads
-    opts.inter_op_num_threads = 1
-    sess = ort.InferenceSession(path, opts, providers=["CPUExecutionProvider"])
-    # Graph optimize already ran on CPU. Later realizes must not compile again.
-    sess.compiled = True
-    return sess, assert_cpu_backend(sess)
-  except ImportError:
-    pass
-  except AssertionError:
-    raise
-  except Exception:
-    pass
-  try:
-    device, renderer = _open_tinygrad_cpu()
-    from tinygrad import Tensor
-    from tinygrad.nn.onnx import OnnxRunner
-    # Parse only. The first realize compiles; speedsignd refuses that while engaged.
-    runner = OnnxRunner(path)
-    sess = _TinyOrtSession(runner, Tensor, device=device, renderer=renderer)
-    return sess, assert_cpu_backend(sess)
-  except AssertionError:
-    raise
-  except Exception:
+  kind = _select_cpu_kind()
+  if kind == "tinygrad-clang":
+    _log_clang_fallback(kind)
+  if not kind:
     return None, ""
+  sha = _sha_short(path, n=64)
+  sess = _LazyCpuSession(path, sha, kind)
+  return sess, assert_cpu_backend(sess)
 
 
-class _TinyOrtSession:
-  """onnxruntime-shaped wrapper around tinygrad OnnxRunner, CPU/CLANG only."""
+class _CvDnnSession:
+  """cv2.dnn on DNN_BACKEND_OPENCV + DNN_TARGET_CPU. No OpenCL."""
 
-  def __init__(self, runner, tensor_cls, device: str = "CPU", renderer: str = ""):
-    self.runner = runner
-    self._tensor = tensor_cls
-    self._nap_device = device
-    self._nap_renderer = renderer
-    self._nap_backend = "tinygrad-clang" if "CLANG" in renderer.upper() else "tinygrad-cpu"
+  def __init__(self, net, input_name: str = "images"):
+    self.net = net
+    self._nap_backend = "opencv-dnn-cpu"
+    self._nap_device = "CPU"
+    self._nap_renderer = "opencv-dnn"
     self.compiled = False
     self._allow_compile = False
-    names = list(getattr(runner, "graph_inputs", {}) or {"images": None})
-    self._inputs = [type("I", (), {"name": names[0] if names else "images", "shape": [1, 3, YOLO_IMGSZ, YOLO_IMGSZ]})()]
+    self._inputs = [type("I", (), {"name": input_name, "shape": [1, 3, YOLO_IMGSZ, YOLO_IMGSZ]})()]
 
   def allow_compile(self, allow: bool) -> None:
     self._allow_compile = bool(allow)
@@ -929,6 +1215,112 @@ class _TinyOrtSession:
   def run(self, _outs, feed: dict):
     if not self.compiled and not self._allow_compile:
       raise RuntimeError("compile-blocked while driving")
+    blob = np.ascontiguousarray(next(iter(feed.values())), dtype=np.float32)
+    self.net.setInput(blob)
+    out = self.net.forward()
+    self.compiled = True
+    return [np.asarray(out)]
+
+
+class _LazyCpuSession:
+  """Build the CPU net on first allowed run, not at process start.
+
+  Session create for onnxruntime and the first tinygrad realize are the
+  compile. Both used to run from SpeedSignDetector() in main(), before
+  engagement was known. A warm stamp skips that wait.
+  """
+
+  def __init__(self, path: str, sha: str, kind: str):
+    self.path = path
+    self.sha = sha
+    self.kind = kind
+    self._impl = None
+    self._allow_compile = False
+    self._nap_backend = kind
+    self._nap_device = "CPU"
+    self._nap_renderer = "CLANG" if kind == "tinygrad-clang" else kind
+    self.compiled = bool(sha) and compile_cache_warm(sha)
+    self._inputs = [type("I", (), {"name": "images", "shape": [1, 3, YOLO_IMGSZ, YOLO_IMGSZ]})()]
+
+  def allow_compile(self, allow: bool) -> None:
+    self._allow_compile = bool(allow)
+    fn = getattr(self._impl, "allow_compile", None)
+    if fn is not None:
+      fn(bool(allow))
+
+  def get_inputs(self):
+    return self._inputs if self._impl is None else self._impl.get_inputs()
+
+  def _build(self):
+    threads = limit_infer_threads()
+    if self.kind == "onnxruntime-cpu":
+      return _ort_session(self.path, threads, self.sha)
+    if self.kind == "opencv-dnn-cpu":
+      return _open_cv_dnn(self.path)
+    device, renderer = _open_tinygrad_cpu(self.sha)
+    from tinygrad import Tensor
+    from tinygrad.nn.onnx import OnnxRunner
+    runner = OnnxRunner(self.path)
+    sess = _TinyOrtSession(
+      runner, Tensor, device=device, renderer=renderer, sha=self.sha, jit=True,
+    )
+    if self.compiled:
+      sess.compiled = True
+    return sess
+
+  def run(self, outs, feed: dict):
+    if self._impl is None:
+      if not self.compiled and not self._allow_compile:
+        raise RuntimeError("compile-blocked while driving")
+      self._impl = self._build()
+      if self.compiled:
+        self._impl.compiled = True
+      self._nap_backend = str(getattr(self._impl, "_nap_backend", self.kind))
+      self._nap_device = str(getattr(self._impl, "_nap_device", "CPU"))
+      self._nap_renderer = str(getattr(self._impl, "_nap_renderer", self._nap_renderer))
+      assert_cpu_backend(self._impl)
+      fn = getattr(self._impl, "allow_compile", None)
+      if fn is not None:
+        fn(self._allow_compile)
+    if not getattr(self._impl, "compiled", False) and not self._allow_compile:
+      raise RuntimeError("compile-blocked while driving")
+    out = self._impl.run(outs, feed)
+    if getattr(self._impl, "compiled", False):
+      self.compiled = True
+      write_compile_stamp(self.sha, self._nap_backend)
+    return out
+
+
+class _TinyOrtSession:
+  """onnxruntime-shaped wrapper around tinygrad OnnxRunner, CPU/CLANG only.
+
+  Clang at -O2 is still scalar (no LLVM SLP). TinyJit keeps the captured
+  graph so later runs do not retrace. The sqlite cache under /data is what
+  skips clang the next boot. BEAM and NOOPT stay off.
+  """
+
+  def __init__(self, runner, tensor_cls, device: str = "CPU", renderer: str = "",
+               sha: str = "", jit: bool = False):
+    self.runner = runner
+    self._tensor = tensor_cls
+    self._nap_device = device
+    self._nap_renderer = renderer
+    self._nap_backend = "tinygrad-clang" if "CLANG" in renderer.upper() else "tinygrad-cpu"
+    self._nap_sha = sha
+    self.compiled = False
+    self._allow_compile = False
+    self._want_jit = bool(jit)
+    self._jit = None
+    names = list(getattr(runner, "graph_inputs", {}) or {"images": None})
+    self._inputs = [type("I", (), {"name": names[0] if names else "images", "shape": [1, 3, YOLO_IMGSZ, YOLO_IMGSZ]})()]
+
+  def allow_compile(self, allow: bool) -> None:
+    self._allow_compile = bool(allow)
+
+  def get_inputs(self):
+    return self._inputs
+
+  def _realize(self, feed: dict):
     tensors = {}
     for k, v in feed.items():
       tensor = self._tensor(v)
@@ -948,9 +1340,47 @@ class _TinyOrtSession:
     if not _device_is_cpu(dev):
       raise AssertionError("speedsignd realized on " + dev + ", not CPU")
     self._nap_device = dev.split(":")[0].upper()
-    arr = val.numpy() if hasattr(val, "numpy") else np.asarray(val)
+    return val.numpy() if hasattr(val, "numpy") else np.asarray(val)
+
+  def _jit_call(self, blob):
+    name = self._inputs[0].name
+    return self._realize({name: blob})
+
+  def run(self, _outs, feed: dict):
+    if not self.compiled and not self._allow_compile:
+      raise RuntimeError("compile-blocked while driving")
+    # First realize is the compile. TinyJit captures the next call so the
+    # graph is not retraced. Kernel bytes come from the /data cache.
+    if self._want_jit and self.compiled:
+      if self._jit is None:
+        jit_cls = _tinyjit_cls()
+        self._jit = jit_cls(self._jit_call) if jit_cls is not None else None
+        if self._jit is None:
+          self._want_jit = False
+      if self._jit is not None:
+        blob = next(iter(feed.values()))
+        try:
+          return [np.asarray(self._jit(blob))]
+        except Exception:
+          self._want_jit = False
+          self._jit = None
+    arr = self._realize(feed)
     self.compiled = True
     return [arr]
+
+
+def _tinyjit_cls():
+  """TinyJit captures one CLANG graph. Missing tinygrad just runs directly."""
+  try:
+    from tinygrad import TinyJit
+    return TinyJit
+  except Exception:
+    pass
+  try:
+    from tinygrad.engine.jit import TinyJit
+    return TinyJit
+  except Exception:
+    return None
 
 
 def _is_yolo_input(shape) -> bool:
@@ -1065,16 +1495,28 @@ class SpeedSignDetector:
     return True
 
   def compile_ready(self) -> bool:
-    """False until the first realize. onnxruntime finishes that at session create."""
+    """False until warm-up or a per-sha cache stamp. Missing means not ready."""
     if self.onnx is None or self.onnx.session is None:
       return True
-    return bool(getattr(self.onnx.session, "compiled", True))
+    return bool(getattr(self.onnx.session, "compiled", False))
 
   def allow_compile(self, allow: bool) -> None:
     sess = None if self.onnx is None else self.onnx.session
     fn = getattr(sess, "allow_compile", None)
     if fn is not None:
       fn(bool(allow))
+
+  def compile_allowed_now(self) -> bool:
+    """Live flag the worker re-reads before realize.
+
+    A warm session (compiled) may run while engaged. Otherwise the flag
+    set by the main loop this tick wins, including the first frame of a
+    boot that is already engaged.
+    """
+    if self.compile_ready():
+      return True
+    sess = None if self.onnx is None else self.onnx.session
+    return bool(getattr(sess, "_allow_compile", False))
 
   def detect(self, y: np.ndarray, min_conf: float | None = None, rgb: np.ndarray | None = None,
              nv12=None) -> list[SpeedSign]:

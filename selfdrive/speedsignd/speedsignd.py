@@ -9,20 +9,22 @@ Stock modelV2 has no speedSign head — this is a separate process, default off.
 
 Safety: Logger On starts the process + HUD. Detect keeps running while
 openpilot is engaged. Inference is CPU only (onnxruntime
-CPUExecutionProvider, or tinygrad DEV=CPU / CLANG). It must not open the
-QCOM GPU modeld uses. The first realize compiles and is refused while
-engaged. One ONNX thread, SCHED_IDLE (else nice 19), pinned to little
+CPUExecutionProvider, else cv2.dnn on the CPU target, else tinygrad
+DEV=CPU / CLANG). It must not open the QCOM GPU modeld uses. The first
+realize compiles only while known-disengaged and is cached per weights
+sha. One ONNX thread, SCHED_IDLE (else nice 19), pinned to little
 core 2 — not core 0 (UI), 1 (sensord), 3 (pandad/encoderd), 4 (controlsd),
 5 (plannerd/radard), 6 (camerad), or 7 (modeld). While engaged the average
 is at most 25% of that core: after each infer the process idles at least
-3× the infer time. modelV2 frame drops add more rest. Any modelV2 frame
-skip, or modelExecutionTime above 50 ms, pauses at least 10 s. HUD lights
+3× the infer time. modelV2 frame drops add more rest. A real modelV2
+frame skip, or modelExecutionTime above 50 ms, pauses at least 10 s.
+A 20 Hz SubMaster poll of 20 Hz modelV2 is not that skip. HUD lights
 only when two reads agree on the same mph, then holds 45 s. JSONL stays a
 short line, skipped while engaged if disk stalls. SubMaster is polled at
-20 Hz. Unknown cereal after a short startup allows throttled detect. Not
-gated on park / Force Offroad. Detect copies one right-side 628×320 ROAD
-window (x 1300–1928, y 520–840) and letterboxes it to YOLO_IMGSZ. 4 Hz
-YOLO on a 3X starved modeld; the default stays 1 Hz.
+20 Hz. Unknown cereal after a short startup allows throttled detect, but
+not the compile. Not gated on park / Force Offroad. Detect copies one
+right-side 628×320 ROAD window (x 1300–1928, y 520–840) and letterboxes
+it to YOLO_IMGSZ. 4 Hz YOLO on a 3X starved modeld; the default stays 1 Hz.
 """
 from __future__ import annotations
 
@@ -30,6 +32,8 @@ import math
 import os
 
 # Before numpy / tinygrad / OpenBLAS import. One compute thread.
+# Package __init__ sets the same keys even earlier. Manager forks after
+# numpy is already loaded, so main() also calls limit_infer_threads().
 for _thread_key in (
   "OMP_NUM_THREADS",
   "OPENBLAS_NUM_THREADS",
@@ -40,8 +44,17 @@ for _thread_key in (
   "OPENCV_FOR_THREADS_NUM",
   "GOTO_NUM_THREADS",
   "TINYGRAD_NUM_THREADS",
+  "KMP_NUM_THREADS",
 ):
   os.environ[_thread_key] = "1"
+os.environ["OMP_DYNAMIC"] = "FALSE"
+os.environ["MKL_DYNAMIC"] = "FALSE"
+os.environ["OMP_WAIT_POLICY"] = "PASSIVE"
+os.environ["BEAM"] = "0"
+os.environ["NOOPT"] = "0"
+os.environ["CPU_COUNT"] = "1"
+os.environ["OPENCV_OPENCL_RUNTIME"] = "disabled"
+os.environ["OPENCV_DNN_OPENCL"] = "0"
 
 import threading
 import time
@@ -79,6 +92,8 @@ HZ_MAX = 4.0
 # Poll selfdriveState faster than detect. 100 Hz service + 1 Hz update makes
 # SubMaster.alive flap (timeout is 10/freq = 100 ms) and stuck the WAIT plate.
 SM_HZ = 20.0
+# modelV2 is published at 20 Hz. SubMaster keeps only the latest message.
+MODEL_HZ = 20.0
 # After this, unread cereal allows throttled detect instead of forever-WAIT.
 UNKNOWN_GRACE_S = 2.0
 # Historical tinygrad budget. A real 3X infer is several seconds, so this
@@ -116,6 +131,12 @@ SPEEDSIGND_CORES = (SPEEDSIGND_CORE,)
 IDLE_FACTOR = 3.0
 CPU_BUDGET = 1.0 / (1.0 + IDLE_FACTOR)
 CPU_BUDGET_SLACK = 0.03
+# Duty is averaged over this window. A 2–3 frame burst may run back-to-back;
+# the idle after it brings the trailing average back to 25%.
+DUTY_WINDOW_S = 10.0
+# Extra YOLO reads after the frame that scored ≥ SIGN_LIKE_CONF. Two extra
+# reads is three frames total, still on the tile that saw the sign.
+BURST_EXTRA = 2
 # modelV2.frameDropPerc. The lag alert fires near 20; back off earlier.
 MODEL_DROP_PERC = 5.0
 # modelV2.modelExecutionTime is seconds (perf_counter in modeld). 22–26 ms
@@ -123,6 +144,9 @@ MODEL_DROP_PERC = 5.0
 # or the model itself stalled. Pause at least 10 s. Same for any frameId skip.
 MODEL_EXEC_LIMIT_S = 0.050
 MODEL_GUARD_PAUSE_S = 10.0
+# Route 0000017f: a 177 s infer times IDLE_FACTOR made extra_ms 531828.
+# model-skip rest is capped so one slow compile cannot hide the plate for 9 min.
+MODEL_SKIP_BACKOFF_CAP_S = 60.0
 SECOND_LOOK_FRAMES = 2
 SECOND_LOOK_DEADLINE_S = 0.30
 VISION_TIMEOUT_MS = 200
@@ -383,6 +407,130 @@ def next_detect_mono(infer_end: float, infer_s: float, period_s: float, budget_s
   return (float(infer_end) - float(infer_s)) + gap
 
 
+def window_compute(spans: list[tuple[float, float]], t: float, window: float = DUTY_WINDOW_S) -> float:
+  """Infer seconds overlapping [t-window, t]. spans are (end, duration)."""
+  lo = float(t) - float(window)
+  total = 0.0
+  for end, dur in spans:
+    end_f = float(end)
+    dur_f = max(0.0, float(dur))
+    start = end_f - dur_f
+    a = max(start, lo)
+    b = min(end_f, float(t))
+    if b > a:
+      total += b - a
+  return total
+
+
+def earliest_budget_start(
+  spans: list[tuple[float, float]], now: float, next_dur: float,
+  window: float = DUTY_WINDOW_S, budget: float = CPU_BUDGET,
+) -> float:
+  """Earliest t ≥ now such that the infer [t, t+next_dur] keeps the window ≤ budget.
+
+  Past spans age out of the trailing window. A burst that already spent the
+  allowance waits here until idle has repaid it.
+  """
+  now_f = float(now)
+  next_dur = max(0.0, float(next_dur))
+  allowance = float(window) * float(budget)
+
+  def fits(t: float) -> bool:
+    finish = t + next_dur
+    used = window_compute(spans, finish, window)
+    return used + next_dur <= allowance + 1e-6
+
+  if fits(now_f):
+    return now_f
+  candidates = [now_f]
+  for end, _dur in spans:
+    candidates.append(float(end) + float(window) - next_dur)
+  for t in sorted(candidates):
+    t = max(now_f, t)
+    if fits(t):
+      return t
+  newest = max((float(end) for end, _dur in spans), default=now_f)
+  return max(now_f, newest + float(window) - next_dur)
+
+
+def sign_burst_trigger(diag: dict | None, signs=None) -> bool:
+  """True when any speed-sign class scored ≥ SIGN_LIKE_CONF.
+
+  sl_peak covers sl_NN below YOLO_MIN_CONF. A decoded sign, or an
+  sl_unreadable peak, counts too. neg_* does not.
+  """
+  diag = diag or {}
+  try:
+    if float(diag.get("sl_peak_conf") or 0.0) >= SIGN_LIKE_CONF:
+      return True
+  except (TypeError, ValueError):
+    pass
+  peak_name = str(diag.get("peak_name") or "")
+  try:
+    peak = float(diag.get("peak_conf") or 0.0)
+  except (TypeError, ValueError):
+    peak = 0.0
+  if peak >= SIGN_LIKE_CONF and peak_name.startswith(("sl_", "speedLimit")):
+    return True
+  for s in signs or []:
+    try:
+      if float(getattr(s, "conf", 0.0) or 0.0) >= SIGN_LIKE_CONF:
+        return True
+    except (TypeError, ValueError):
+      continue
+  return False
+
+
+def schedule_after_read(
+  *,
+  now: float,
+  infer_s: float,
+  period_s: float,
+  budget_s: float,
+  cap_s: float,
+  backoff_s: float,
+  sign_like: bool,
+  window_used: int,
+  window_count: int,
+  burst_left: int,
+  burst_window: int,
+  burst_cluster_s: float,
+  spans: list[tuple[float, float]],
+) -> tuple[float, int, int, int, float, bool]:
+  """Next detect time plus burst state.
+
+  Returns (next_mono, burst_left, burst_window, next_window, cluster_s, bursting_next).
+
+  Steady reads keep max(period, 4× infer). A sign-like score schedules up to
+  BURST_EXTRA more reads on the same tile, immediately, while that cluster
+  still fits in the 10 s × 25% allowance. The following non-burst start waits
+  until the trailing window is back at 25%. A model-guard backoff cancels the
+  burst. `budget_s` and `cap_s` stay on next_detect_mono; they do not add a
+  second wait.
+  """
+  infer_s = max(0.0, float(infer_s))
+  spans_now = list(spans) + [(float(now), infer_s)]
+  paced = next_detect_mono(float(now), infer_s, period_s, budget_s, cap_s, backoff_s)
+  duty_t = earliest_budget_start(spans_now, float(now), infer_s)
+  steady = max(paced, duty_t)
+  nwin = max(1, int(window_count))
+  next_window = (int(window_used) + 1) % nwin
+  allowance = DUTY_WINDOW_S * CPU_BUDGET
+  if float(backoff_s) > 0.0:
+    return steady, 0, int(window_used), next_window, 0.0, False
+  if int(burst_left) > 0:
+    cluster = float(burst_cluster_s) + infer_s
+    left = int(burst_left) - 1
+    if left > 0 and cluster + infer_s <= allowance + 1e-6:
+      return float(now), left, int(burst_window), int(burst_window), cluster, True
+    return steady, 0, int(burst_window), next_window, 0.0, False
+  if sign_like:
+    cluster = infer_s
+    if BURST_EXTRA > 0 and cluster + infer_s <= allowance + 1e-6:
+      return float(now), BURST_EXTRA, int(window_used), int(window_used), cluster, True
+  return steady, 0, int(window_used), next_window, 0.0, False
+
+
 @dataclass(frozen=True)
 class HostPressure:
   """CPU / disk / alert snapshot. No new cereal subscriber."""
@@ -477,10 +625,16 @@ def backoff_extra_s(infer_s: float, period_s: float, reason: str) -> float:
 
 
 def model_guard_rest_s(infer_s: float, period_s: float, reason: str, hard: bool) -> float:
-  """Frame-drop backoff, with a 10 s floor on a frame skip or modeld > 50 ms."""
+  """Frame-drop backoff, with a 10 s floor on a frame skip or modeld > 50 ms.
+
+  Any reason that includes model-skip is also capped at 60 s, hard or not.
+  model-drop and model-exec keep the uncapped 3× rest.
+  """
   extra = backoff_extra_s(infer_s, period_s, reason)
   if hard:
-    return max(extra, MODEL_GUARD_PAUSE_S)
+    extra = max(extra, MODEL_GUARD_PAUSE_S)
+  if reason and "model-skip" in reason:
+    return min(extra, MODEL_SKIP_BACKOFF_CAP_S)
   return extra
 
 
@@ -508,19 +662,38 @@ def reset_ratekeeper_if_behind(rk, now: float) -> bool:
   return False
 
 
+def model_frame_gap_allowed(dt_s: float, hz: float = MODEL_HZ) -> int:
+  """How far frameId may jump without modeld having dropped a frame.
+
+  Both sides are 20 Hz, and SubMaster keeps only the latest modelV2, so a
+  poll that lands between two publishes sees delta 2. A vision recv or an
+  infer that blocks this poll for dt seconds misses about dt*20 publishes.
+  +1 is that one coalesced message. frameDropPerc is the real modeld drop.
+  """
+  dt_s = max(0.0, float(dt_s))
+  return max(2, math.ceil(dt_s * float(hz)) + 1)
+
+
 @dataclass
 class ModelWatch:
   """modelV2 frame drops, frame-id gaps, and modelExecutionTime. No new socket."""
   last_frame: int | None = None
+  last_mono: float | None = None
   last_drop: float | None = None
   last_exec: float | None = None
   drop_hot: bool = False
   exec_hot: bool = False
   skipped: bool = False
 
-  def observe(self, frame_id: int | None, drop: float | None, exec_s: float | None = None) -> None:
-    if frame_id is not None and self.last_frame is not None and int(frame_id) > int(self.last_frame) + 1:
-      self.skipped = True
+  def observe(self, frame_id: int | None, drop: float | None, exec_s: float | None = None,
+              now: float | None = None) -> None:
+    if now is None:
+      now = time.monotonic()
+    if frame_id is not None and self.last_frame is not None and self.last_mono is not None:
+      gap = int(frame_id) - int(self.last_frame)
+      allowed = model_frame_gap_allowed(float(now) - float(self.last_mono))
+      if gap > allowed:
+        self.skipped = True
     if drop is not None:
       value = float(drop)
       # Jitter under 5% is not a drop. 5% is well before modeld's ~20% lag alert.
@@ -538,6 +711,7 @@ class ModelWatch:
           self.exec_hot = True
     if frame_id is not None:
       self.last_frame = int(frame_id)
+      self.last_mono = float(now)
 
   def hard_guard(self) -> bool:
     """Any skipped frame id, or modeld execution above 50 ms."""
@@ -965,8 +1139,9 @@ def live_sign_publish_fields(
   """msg.valid, mph, conf, weights_missing, detect_paused for liveSpeedSignNAP.
 
   When ONNX is missing, keep msg.valid so the HUD can show NO WT — never a
-  numpy-fallback mph. When OP is controlling, show WAIT and do not update
-  hold. Unknown cereal must not set detect_paused (no false WAIT).
+  numpy-fallback mph. Controlling does not freeze the hold: mph stays 0
+  until two different frames agree, then the plate shows that mph while
+  engaged. Unknown cereal must not set detect_paused (no false WAIT).
   """
   if weights_missing:
     return True, 0, 0.0, True, False
@@ -1002,15 +1177,24 @@ def format_read_timing(
   cpu_share: float | None = None,
   threads: int = 1,
   backend: str = "",
+  os_threads: int | None = None,
 ) -> str:
-  """One greppable line per finished read. `speedsignd timing`."""
+  """One greppable line per finished read. `speedsignd timing`.
+
+  `threads` is the pinned BLAS/OpenMP/OpenCV pool (1). `os_threads` is
+  /proc/self/status Threads, which also counts the main loop, the infer
+  worker, and VisionIPC. Route 0000017e logged the proc count in `threads`
+  and showed 11.
+  """
   share = "na" if cpu_share is None else f"{float(cpu_share):.3f}"
+  os_s = "" if os_threads is None else f"os_threads={int(os_threads)} "
   return (
     "speedsignd timing "
     + f"read_interval_ms={read_interval_ms:.0f} "
     + f"infer_ms={infer_ms:.0f} "
     + f"cpu_share={share} "
     + f"threads={int(threads)} "
+    + os_s
     + f"backend={backend or 'unset'} "
     + f"engaged={int(bool(engaged))} "
     + f"backoff={int(bool(backoff))} "
@@ -1037,13 +1221,16 @@ def format_backoff_timing(
   )
 
 
-def _log_infer_timing(cloudlog, infer_ms: list[float], skip_count: int, hz: float, engaged: bool) -> None:
+def _log_infer_timing(cloudlog, infer_ms: list[float], skip_count: int, hz: float, engaged: bool,
+                      threads: int = 1) -> None:
   n = len(infer_ms)
   mean_ms = sum(infer_ms) / n if n else 0.0
   max_ms = max(infer_ms) if n else 0.0
+  os_n = read_proc_thread_count()
+  os_s = "na" if os_n is None else str(int(os_n))
   cloudlog.info(
-    "speedsignd timing hz=%.2f infer_ms mean=%.1f max=%.1f n=%d skip=%d engaged=%d",
-    hz, mean_ms, max_ms, n, skip_count, int(bool(engaged)),
+    "speedsignd timing hz=%.2f infer_ms mean=%.1f max=%.1f n=%d skip=%d engaged=%d threads=%d os_threads=%s",
+    hz, mean_ms, max_ms, n, skip_count, int(bool(engaged)), int(threads), os_s,
   )
 
 
@@ -1103,7 +1290,7 @@ def second_look_sign(buf, bbox) -> SpeedSign | None:
   )
 
 
-def observe_model(watch: ModelWatch, sm) -> None:
+def observe_model(watch: ModelWatch, sm, now: float | None = None) -> None:
   try:
     if not sm.updated["modelV2"]:
       return
@@ -1115,6 +1302,7 @@ def observe_model(watch: ModelWatch, sm) -> None:
       getattr(msg, "frameId", None),
       getattr(msg, "frameDropPerc", None),
       getattr(msg, "modelExecutionTime", None),
+      now=time.monotonic() if now is None else now,
     )
   except Exception:
     return
@@ -1126,6 +1314,8 @@ def main():
   from openpilot.common.swaglog import cloudlog
   from openpilot.selfdrive.mapd.gps_fix import gps_sample_from_sm
 
+  # Child of manager: shrink the BLAS pool the parent already started.
+  limit_infer_threads(1)
   sched_name = yield_to_modeld()
 
   hz = parse_detect_hz(os.environ.get(HZ_ENV))
@@ -1146,6 +1336,9 @@ def main():
   if detector.onnx is not None and detector.onnx.session is not None:
     backend = assert_cpu_backend(detector.onnx.session)
   runtimes = describe_infer_runtimes()
+  os_threads = read_proc_thread_count()
+  from openpilot.selfdrive.speedsignd.install import runtime_missing, runtime_status_summary
+  runtime_label = runtime_status_summary()
   cloudlog.info(
     "speedsignd cpu-only asserted backend=%s runtimes=%s dev=%s qcom=%s gpu=%s cpu_count=%s",
     backend, runtimes, os.environ.get("DEV", ""), os.environ.get("QCOM", ""),
@@ -1153,11 +1346,20 @@ def main():
   )
   cloudlog.info(
     "speedsignd starting log=%s backend=%s onnx=%s sha=%s sm_hz=%.1f detect_hz=%.2f "
-    + "budget_ms=%.0f cap_ms=%.0f threads=%d cores=%s nice=%d sched=%s "
-    + "detect_while_engaged=1 crop_rgb=1 duty=%.2f",
+    + "budget_ms=%.0f cap_ms=%.0f threads=%d os_threads=%s cores=%s nice=%d sched=%s "
+    + "detect_while_engaged=1 crop_rgb=1 duty=%.2f runtime=%s",
     log_path, backend, onnx_path, weights_sha, SM_HZ, hz, INFER_BUDGET_MS, cap_ms, threads,
+    "na" if os_threads is None else str(int(os_threads)),
     ",".join(str(c) for c in SPEEDSIGND_CORES), SPEEDSIGND_NICE, sched_name, CPU_BUDGET,
+    runtime_label,
   )
+  # tinygrad-clang already logged its own fallback inside _onnx_session.
+  if runtime_missing() and backend != "tinygrad-clang":
+    cloudlog.warning(
+      "speedsignd runtime missing — Settings → NAP → Install weights also installs "
+      + "onnxruntime into /data/media/0/nap/pylib (not the system venv). "
+      + "The plate shows NO RT. CLANG will not run while engaged.",
+    )
   if detector.onnx is None:
     cloudlog.warning(
       "speedsignd: no ONNX at %s — numpy fallback will not see real roadside signs. "
@@ -1201,12 +1403,27 @@ def main():
   second_look: PendingSecondLook | None = None
   model_extended = False
   last_infer_s = period_s
+  window_i = 0
+  pending_window = 0
+  burst_left = 0
+  burst_window = 0
+  burst_cluster_s = 0.0
+  duty_spans: list[tuple[float, float]] = []
 
   while True:
     sm.update(0)
     observe_model(model_watch, sm)
     now_mono = time.monotonic()
     sample = engagement_from_sm(sm, now=now_mono, started_at=started_at)
+    # Refresh every tick, before any infer starts. The first frame of a boot
+    # that is already engaged sees controlling=True and does not compile.
+    # Unknown cereal is not permission either. The worker re-reads this flag
+    # inside run(), so a flip before realize still aborts.
+    detector.allow_compile(compile_allowed(
+      known=bool(sample.known),
+      controlling=bool(sample.controlling),
+      ready=detector.compile_ready(),
+    ))
     live_model = model_watch.reason()
     if live_model and not model_extended:
       hard_now = model_watch.hard_guard()
@@ -1215,6 +1432,9 @@ def main():
       # A frameDropPerc backoff still only extends a schedule that already exists.
       if next_detect > 0.0 or hard_now:
         next_detect = max(next_detect, now_mono + extra_now)
+      # A model pause is not a burst. Do not dump the extra reads when it ends.
+      burst_left = 0
+      burst_cluster_s = 0.0
       model_extended = True
       cloudlog.warning(
         "%s",
@@ -1237,6 +1457,12 @@ def main():
         next_detect = 0.0
         in_holdoff = False
       slot.resume()
+      # Engaged + not yet compiled: drop a queued result. The worker also
+      # re-reads allow_compile before realize, so boot-already-engaged never
+      # enters clang. A realize that has already entered clang cannot be
+      # killed; that only happens after a known-disengaged start.
+      if sample.controlling and slot.busy and not detector.compile_ready():
+        slot.pause()
     if last_allow != sample.allow_detect or last_paused != sample.detect_paused:
       cloudlog.info(
         "speedsignd detect %s (%s)",
@@ -1252,7 +1478,7 @@ def main():
       )
       last_unknown_warn = now_mono
     if now_mono - last_timing_log >= INFER_LOG_PERIOD_S:
-      _log_infer_timing(cloudlog, infer_ms, skip_count, hz, sample.controlling)
+      _log_infer_timing(cloudlog, infer_ms, skip_count, hz, sample.controlling, threads)
       infer_ms = []
       skip_count = 0
       last_timing_log = now_mono
@@ -1276,7 +1502,7 @@ def main():
         signs = outcome.signs
         infer_ms.append(outcome.infer_s * 1000.0)
         share = cpu_meter.sample(now_mono, read_proc_stat_jiffies())
-        threads_now = read_proc_thread_count() or 1
+        os_threads = read_proc_thread_count()
         cloudlog.info(
           "%s",
           format_read_timing(
@@ -1286,7 +1512,8 @@ def main():
             backoff=pending_backoff,
             reason=pending_reason,
             cpu_share=share,
-            threads=threads_now,
+            threads=threads,
+            os_threads=os_threads,
             backend=detector.backend_name(),
           ),
         )
@@ -1313,12 +1540,30 @@ def main():
               backend=detector.backend_name(),
             ),
           )
-        next_detect = max(
-          next_detect,
-          next_detect_mono(now_mono, outcome.infer_s, period_s, budget_s, cap_s, backoff_s=extra_s),
-        )
         raw = list(getattr(debounce, "last_raw", []))
         diag = outcome.diag if outcome.diag is not None else detector.diag_dict()
+        (
+          next_mono, burst_left, burst_window, window_i, burst_cluster_s, bursting_next,
+        ) = schedule_after_read(
+          now=now_mono,
+          infer_s=outcome.infer_s,
+          period_s=period_s,
+          budget_s=budget_s,
+          cap_s=cap_s,
+          backoff_s=extra_s,
+          sign_like=sign_burst_trigger(diag, raw),
+          window_used=pending_window,
+          window_count=2,
+          burst_left=burst_left,
+          burst_window=burst_window,
+          burst_cluster_s=burst_cluster_s,
+          spans=duty_spans,
+        )
+        duty_spans.append((now_mono, outcome.infer_s))
+        duty_spans = [(end, dur) for end, dur in duty_spans if now_mono - float(end) <= DUTY_WINDOW_S]
+        next_detect = max(next_detect, next_mono)
+        if bursting_next and not scheduled_backoff:
+          scheduled_reason = "burst"
         err = f" err={outcome.error}" if outcome.error else ""
         if outcome.error and not diag.get("error"):
           diag = dict(diag)
@@ -1335,15 +1580,20 @@ def main():
         last_infer_done = now_mono
         last_infer_s = outcome.infer_s
         last_skip_reason = "ok"
-        box = sign_like_bbox(outcome.signs, diag)
-        if box is not None:
-          second_look = PendingSecondLook(
-            bbox=box,
-            frames_left=SECOND_LOOK_FRAMES,
-            deadline=now_mono + SECOND_LOOK_DEADLINE_S,
-          )
-        else:
+        # A burst re-reads the same tile with YOLO. The OCR second look would
+        # spend those frames and push the confirm past the sign.
+        if bursting_next:
           second_look = None
+        else:
+          box = sign_like_bbox(outcome.signs, diag)
+          if box is not None:
+            second_look = PendingSecondLook(
+              bbox=box,
+              frames_left=SECOND_LOOK_FRAMES,
+              deadline=now_mono + SECOND_LOOK_DEADLINE_S,
+            )
+          else:
+            second_look = None
         if not raw and now_mono - last_empty_raw_log >= INFER_LOG_PERIOD_S:
           cloudlog.info(
             "speedsignd empty-raw %s",
@@ -1409,7 +1659,8 @@ def main():
       if not sample.allow_detect:
         slot.pause()
       else:
-        nv12 = copy_nv12_detect_crop(buf) if buf is not None else None
+        which = window_i
+        nv12 = copy_nv12_detect_crop(buf, which) if buf is not None else None
         if buf is None:
           last_skip_reason = detect_skip_reason(
             connected=True, onnx=detector.onnx is not None, busy=False, holdoff=False,
@@ -1442,12 +1693,18 @@ def main():
           engaged_now = bool(sample.controlling)
 
           ready = detector.compile_ready()
-          # Compile only when this read started disengaged. An already-realized
-          # graph runs while engaged and stays on CPU.
-          detector.allow_compile(not engaged_now)
+          # Compile only when this read is known-disengaged. Unknown cereal
+          # is not that. A warm cache (ready) runs while engaged, on CPU.
+          permitted = compile_allowed(
+            known=bool(sample.known), controlling=engaged_now, ready=ready,
+          )
+          detector.allow_compile(permitted)
 
           def _run(nv12=nv12, lat=lat, lon=lon, bearing=bearing, gps_ok=gps_ok,
                    engaged_now=engaged_now, stalled=stalled):
+            # Live flag, not the value captured when this read was scheduled.
+            if not detector.compile_allowed_now():
+              raise RuntimeError("compile-blocked while driving")
             signs_w = detect_if_allowed(
               nv12.y, lat, lon, bearing, gps_ok, detector, logger, time.monotonic(),
               controlling=engaged_now, rgb=None, debounce=debounce, nv12=nv12,
@@ -1455,7 +1712,7 @@ def main():
             )
             return signs_w[0], signs_w[1], detector.diag_dict()
 
-          if not compile_allowed(controlling=engaged_now, ready=ready):
+          if not permitted:
             last_skip_reason = "compile-wait"
             next_detect = max(next_detect, time.monotonic() + 1.0)
             if now_mono - last_gate_log >= INFER_LOG_PERIOD_S:
@@ -1468,6 +1725,7 @@ def main():
               )
               last_gate_log = now_mono
           elif slot.start(_run):
+            pending_window = which
             now_start = time.monotonic()
             pending_interval_ms = 0.0 if last_read_start <= 0.0 else (now_start - last_read_start) * 1000.0
             pending_backoff = scheduled_backoff

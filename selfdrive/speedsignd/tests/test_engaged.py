@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from openpilot.selfdrive.speedsignd.detect import SpeedSign
+from openpilot.selfdrive.speedsignd.detect import SpeedSign, compile_allowed
 from openpilot.selfdrive.speedsignd.hud import live_sign_view
 from openpilot.selfdrive.speedsignd.jsonl import JsonlLogger
 from openpilot.selfdrive.speedsignd.speedsignd import (
@@ -217,6 +217,34 @@ def test_first_recv_frame_zero_is_seen():
   assert sample.known is True
   assert sample.allow_detect is True
   assert sample.detect_paused is False
+
+
+def test_boot_already_engaged_does_not_compile():
+  """First frame at t=0 is already controlling. That is not a compile window.
+
+  Route 0000017f finished a 177 s clang compile while engaged because that
+  build treated unread cereal as disengaged. Unknown is also refused.
+  """
+  sm = _Sm(
+    {"selfdriveState": 1},
+    {"selfdriveState": _ss(enabled=True, active=True, state="enabled")},
+    seen={"selfdriveState": True},
+  )
+  start = 1000.0
+  sample = engagement_from_sm(sm, now=start, started_at=start)
+  assert sample.known is True
+  assert sample.controlling is True
+  assert sample.allow_detect is True
+  assert not compile_allowed(known=sample.known, controlling=sample.controlling, ready=False)
+  assert compile_allowed(known=sample.known, controlling=sample.controlling, ready=True)
+
+  unread = _Sm({}, {})
+  unknown = engagement_from_sm(unread, now=start, started_at=start)
+  assert unknown.known is False
+  assert not compile_allowed(known=unknown.known, controlling=unknown.controlling, ready=False)
+  later = engagement_from_sm(unread, now=start + UNKNOWN_GRACE_S + 1.0, started_at=start)
+  assert later.allow_detect is True
+  assert not compile_allowed(known=later.known, controlling=later.controlling, ready=False)
 
 
 def test_engagement_from_sm_active_controlling():

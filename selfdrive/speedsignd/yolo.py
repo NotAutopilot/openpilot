@@ -12,7 +12,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from openpilot.selfdrive.speedsignd.detect_types import MUTCD_MPH, SpeedSign
+from openpilot.selfdrive.speedsignd.detect_types import MUTCD_MPH, US_POSTED_MPH, SpeedSign
 from openpilot.selfdrive.speedsignd.nv12 import native_detect_window
 from openpilot.selfdrive.speedsignd.weights_manifest import (
   YOLO_CLASS_NAMES,
@@ -364,23 +364,48 @@ def decode_yolov8(
   return found
 
 
-def prefer_refine(_sign: SpeedSign, mph: int, conf: float) -> bool:
-  """Prefer crop digits over YOLO class when the read is a confident MUTCD mph.
+def ocr_dropped_digit(class_mph: int, ocr_mph: int) -> bool:
+  """True when OCR is a shorter prefix or suffix of the class (45 read as 5)."""
+  src = str(int(class_mph))
+  dst = str(int(ocr_mph))
+  if not dst or len(dst) >= len(src):
+    return False
+  return src.startswith(dst) or src.endswith(dst)
+
+
+def _posted_ocr(mph) -> int | None:
+  try:
+    value = int(mph)
+  except (TypeError, ValueError):
+    return None
+  return value if value in US_POSTED_MPH else None
+
+
+def prefer_refine(sign: SpeedSign, mph: int, conf: float) -> bool:
+  """Prefer crop digits over YOLO class when the read is a real posted limit.
 
   Justin's parked 50 is class 65 @ 0.73 with cls=50:0.00. Do not require a
-  runner-up margin — the 50 head is not in the race.
+  runner-up margin — the 50 head is not in the race. A value outside 5–85
+  step 5 never replaces the class, and a dropped digit (45 → 5) does not either.
   """
-  return mph in MUTCD_MPH and conf >= REFINE_OVERRIDE_CONF
+  ocr = _posted_ocr(mph)
+  if ocr is None or conf < REFINE_OVERRIDE_CONF:
+    return False
+  raw = sign.class_mph if sign.class_mph is not None else sign.mph
+  class_i = _posted_ocr(raw)
+  if class_i is not None and ocr_dropped_digit(class_i, ocr):
+    return False
+  return True
 
 
 def refine_mph(sign: SpeedSign, y: np.ndarray | None, read_mph) -> SpeedSign:
   """Digit read on every in-threshold speed-limit crop. Does not invent a hit.
 
-  If the crop returns a different MUTCD mph with confidence, sign.mph becomes
-  that read. The HUD still requires a second frame, and a class/OCR
-  contradiction is not a vote. sl_unreadable (mph not in MUTCD, no class_mph)
-  is left unchanged — the OCR second look is the only way that box becomes
-  an mph. Logs keep both class_mph and refine_mph.
+  A different posted limit (5–85, step 5) at the override floor replaces
+  sign.mph. Anything else — 4, 46, 100, a dropped digit such as 45 → 5 —
+  leaves the class mph alone and is not stored as refine_mph, so it cannot
+  contradict the class into a blank vote. sl_unreadable (mph not in MUTCD,
+  no class_mph) is left unchanged. Logs keep both class_mph and refine_mph.
   """
   if sign.class_mph is None and int(sign.mph) not in MUTCD_MPH:
     return sign
@@ -400,18 +425,30 @@ def refine_mph(sign: SpeedSign, y: np.ndarray | None, read_mph) -> SpeedSign:
   if crop.size == 0:
     return sign
   mph, conf = read_mph(crop)
-  class_mph = sign.class_mph if sign.class_mph is not None else sign.mph
+  raw_class = sign.class_mph if sign.class_mph is not None else sign.mph
+  try:
+    class_i = int(raw_class)
+  except (TypeError, ValueError):
+    class_i = None
+  ocr_i = _posted_ocr(mph)
+  dropped = (
+    ocr_i is not None and class_i is not None and class_i in US_POSTED_MPH
+    and ocr_dropped_digit(class_i, ocr_i)
+  )
+  usable = ocr_i is not None and not dropped
   tagged = replace(
     sign,
-    class_mph=int(class_mph),
+    class_mph=class_i if sign.class_mph is not None else sign.class_mph,
     class_conf=float(sign.class_conf or sign.conf),
-    refine_mph=int(mph) if mph is not None and mph in MUTCD_MPH else None,
-    refine_conf=float(conf) if mph is not None and mph in MUTCD_MPH else 0.0,
+    refine_mph=ocr_i if usable else None,
+    refine_conf=float(conf) if usable else 0.0,
   )
-  if mph is None or mph not in MUTCD_MPH:
+  if not usable or ocr_i is None:
     return tagged
-  if mph == sign.mph:
-    return replace(tagged, conf=float(min(1.0, max(sign.conf, conf))))
-  if prefer_refine(sign, int(mph), float(conf)):
-    return replace(tagged, mph=int(mph), conf=float(conf))
+  if ocr_i == int(sign.mph):
+    return replace(tagged, conf=float(min(1.0, max(float(sign.conf), float(conf)))))
+  if prefer_refine(sign, ocr_i, float(conf)):
+    if class_i in US_POSTED_MPH and ocr_i not in US_POSTED_MPH:
+      return tagged
+    return replace(tagged, mph=ocr_i, conf=float(conf))
   return tagged

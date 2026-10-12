@@ -34,8 +34,13 @@ from openpilot.selfdrive.speedsignd.speedsignd import (
   format_read_timing,
   infer_overran,
   join_reasons,
+  BURST_EXTRA,
+  DUTY_WINDOW_S,
   next_detect_mono,
   parse_detect_hz,
+  schedule_after_read,
+  sign_burst_trigger,
+  window_compute,
   parse_proc_stat_jiffies,
   parse_proc_thread_count,
   pressure_reason,
@@ -306,26 +311,66 @@ def test_driving_cores_stay_with_modeld_and_controlsd():
 
 def test_model_frame_drop_and_skip_are_backoff_reasons():
   watch = ModelWatch()
-  watch.observe(10, 0.0)
-  watch.observe(11, 1.0)
+  watch.observe(10, 0.0, now=0.0)
+  watch.observe(11, 1.0, now=0.05)
   assert watch.reason() == ""
-  watch.observe(12, 6.0)
+  watch.observe(12, 6.0, now=0.10)
   assert watch.reason() == "model-drop"
-  watch.observe(15, 6.0)
+  watch.observe(15, 6.0, now=0.10)
   assert watch.reason() == "model-drop+model-skip"
   assert watch.consume() == "model-drop+model-skip"
   assert watch.reason() == "model-drop"
-  watch.observe(16, 1.0)
+  watch.observe(16, 1.0, now=0.15)
   # A hot drop stays until the next infer consumes it, then clears once it is under 5%.
   assert watch.consume() == "model-drop"
   assert watch.reason() == ""
   skipped = ModelWatch()
-  skipped.observe(1, 0.0)
-  skipped.observe(4, 0.0)
+  skipped.observe(1, 0.0, now=0.0)
+  skipped.observe(4, 0.0, now=0.0)
   assert skipped.reason() == "model-skip"
   assert skipped.consume() == "model-skip"
   assert skipped.reason() == ""
   assert join_reasons("model-drop", "cpu-budget", "model-drop") == "model-drop+cpu-budget"
+
+
+def test_submaster_coalesce_is_not_a_model_skip():
+  """20 Hz poll of 20 Hz modelV2. Delta 2 is one coalesced message, not a drop.
+
+  Route 0000017e flagged almost every read model-skip because any frameId
+  gap above 1 latched until consume(), including the frames published while
+  this process was inside recv or the infer thread.
+  """
+  from openpilot.selfdrive.speedsignd.speedsignd import model_frame_gap_allowed
+  assert model_frame_gap_allowed(0.0) == 2
+  assert model_frame_gap_allowed(0.05) == 2
+  assert model_frame_gap_allowed(0.2) == 5
+  assert model_frame_gap_allowed(5.8) >= 116
+
+  coalesced = ModelWatch()
+  coalesced.observe(100, 0.0, 0.022, now=1.0)
+  coalesced.observe(102, 0.0, 0.022, now=1.0)
+  assert coalesced.reason() == ""
+  assert not coalesced.hard_guard()
+
+  blocked = ModelWatch()
+  blocked.observe(100, 0.0, 0.022, now=10.0)
+  # 200 ms vision recv at 20 Hz, plus the coalesced message.
+  blocked.observe(105, 0.0, 0.022, now=10.2)
+  assert blocked.reason() == ""
+
+  infer = ModelWatch()
+  infer.observe(100, 0.0, 0.022, now=20.0)
+  # 5.8 s infer on the same core starves the 20 Hz poll. modeld itself
+  # kept publishing; frameDropPerc stayed 0 on the drive.
+  infer.observe(216, 0.0, 0.022, now=25.8)
+  assert infer.reason() == ""
+  assert not infer.hard_guard()
+
+  real = ModelWatch()
+  real.observe(100, 0.0, 0.022, now=30.0)
+  real.observe(120, 0.0, 0.022, now=30.2)
+  assert real.reason() == "model-skip"
+  assert real.hard_guard()
 
 
 def test_model_skip_or_exec_over_50ms_pauses_at_least_10s():
@@ -354,8 +399,8 @@ def test_model_skip_or_exec_over_50ms_pauses_at_least_10s():
   assert slow.reason() == ""
 
   skipped = ModelWatch()
-  skipped.observe(1, 0.0, 0.022)
-  skipped.observe(4, 0.0, 0.022)
+  skipped.observe(1, 0.0, 0.022, now=0.0)
+  skipped.observe(4, 0.0, 0.022, now=0.0)
   assert skipped.reason() == "model-skip"
   assert skipped.hard_guard()
   # A short infer's 3× backoff is under 10 s; the hard guard raises the floor.
@@ -367,6 +412,11 @@ def test_model_skip_or_exec_over_50ms_pauses_at_least_10s():
   assert drop.reason() == "model-drop"
   assert not drop.hard_guard()
   assert model_guard_rest_s(4.0, 1.0, drop.reason(), False) == 12.0
+  # Route 0000017f: 177 s infer × 3 = 531 s. model-skip rest caps at 60 s.
+  assert model_guard_rest_s(177.0, 1.0, "model-skip", True) == 60.0
+  assert model_guard_rest_s(177.0, 1.0, "model-skip", False) == 60.0
+  assert model_guard_rest_s(177.0, 1.0, "model-skip+cpu-load", True) == 60.0
+  assert model_guard_rest_s(0.2, 1.0, "model-skip", True) == 10.0
 
 
 def test_cpu_share_meter_and_budget():
@@ -382,3 +432,98 @@ def test_cpu_share_meter_and_budget():
   assert not cpu_over_budget(0.27)
   assert cpu_over_budget(0.29)
   assert not cpu_over_budget(None)
+
+
+def _sched(**kwargs):
+  base = dict(
+    now=10.0, infer_s=0.627, period_s=1.0, budget_s=0.100, cap_s=0.0, backoff_s=0.0,
+    sign_like=False, window_used=0, window_count=2, burst_left=0, burst_window=0,
+    burst_cluster_s=0.0, spans=[],
+  )
+  base.update(kwargs)
+  return schedule_after_read(**base)
+
+
+def test_steady_gap_stays_four_times_infer_without_a_burst():
+  """Route 00000181: 627 ms infer, read gap about 2.5 s, duty 0.25."""
+  infer = 0.627
+  nxt, left, _bwin, win, cluster, bursting = _sched(infer_s=infer, sign_like=False)
+  assert not bursting and left == 0 and cluster == 0.0
+  assert abs(nxt - (10.0 - infer + infer * 4.0)) < 1e-6
+  assert win == 1
+  assert DUTY_WINDOW_S == 10.0
+  assert BURST_EXTRA == 2
+  assert abs(infer / (infer * 4.0) - CPU_BUDGET) < 1e-9
+
+
+def test_burst_rereads_the_same_tile_then_idles_the_window_back():
+  """Three back-to-back frames fit in 10 s × 25%. The next paced read waits."""
+  infer = 0.627
+  assert 3.0 * infer <= DUTY_WINDOW_S * CPU_BUDGET
+  spans: list[tuple[float, float]] = []
+  now = 10.0
+  nxt, left, bwin, win, cluster, bursting = _sched(
+    now=now, infer_s=infer, sign_like=True, spans=spans,
+  )
+  assert bursting and left == 2 and bwin == 0 and win == 0
+  assert abs(nxt - now) < 1e-9
+  spans.append((now, infer))
+  now = now + infer
+  nxt, left, bwin, win, cluster, bursting = _sched(
+    now=now, infer_s=infer, sign_like=True, burst_left=left, burst_window=bwin,
+    burst_cluster_s=cluster, spans=spans, window_used=0,
+  )
+  assert bursting and left == 1 and win == 0
+  spans.append((now, infer))
+  now = now + infer
+  nxt, left, _bwin, win, _cluster, bursting = _sched(
+    now=now, infer_s=infer, sign_like=True, burst_left=left, burst_window=0,
+    burst_cluster_s=cluster, spans=spans, window_used=0,
+  )
+  assert not bursting and left == 0
+  assert win == 1
+  paced = (now - infer) + infer * 4.0
+  assert nxt + 1e-9 >= paced
+  finish = nxt + infer
+  used = window_compute(spans + [(now, infer)], finish, DUTY_WINDOW_S)
+  assert used + infer <= DUTY_WINDOW_S * CPU_BUDGET + 1e-6
+
+
+def test_burst_on_a_full_window_is_repaid_by_idle():
+  infer = 0.627
+  gap = infer * 4.0
+  now = 30.0
+  spans = [(now - 3 * gap, infer), (now - 2 * gap, infer), (now - gap, infer)]
+  nxt, left, bwin, win, _cluster, bursting = _sched(
+    now=now, infer_s=infer, sign_like=True, spans=spans,
+  )
+  assert bursting and left == BURST_EXTRA and win == bwin
+  assert abs(nxt - now) < 1e-9
+  # After the cluster, do not start again until the trailing 10 s is ≤ 25%.
+  cluster_end = now + 2 * infer
+  spans2 = spans + [(now, infer), (now + infer, infer)]
+  nxt2, left2, _b, win2, _c, bursting2 = _sched(
+    now=cluster_end, infer_s=infer, sign_like=False, burst_left=1, burst_window=0,
+    burst_cluster_s=2 * infer, spans=spans2, window_used=0,
+  )
+  assert not bursting2 and left2 == 0 and win2 == 1
+  assert nxt2 > cluster_end + infer
+  finish = nxt2 + infer
+  used = window_compute(spans2 + [(cluster_end, infer)], finish, DUTY_WINDOW_S)
+  assert used + infer <= DUTY_WINDOW_S * CPU_BUDGET + 1e-6
+
+
+def test_model_guard_cancels_a_burst():
+  nxt, left, _b, win, cluster, bursting = _sched(
+    sign_like=True, backoff_s=10.0, burst_left=2, burst_cluster_s=0.627,
+  )
+  assert not bursting and left == 0 and cluster == 0.0
+  assert nxt >= 10.0 + 10.0 - 1e-6
+  assert win == 1
+
+
+def test_sign_burst_trigger_is_the_speed_class_not_a_negative():
+  assert sign_burst_trigger({"sl_peak_conf": 0.15, "sl_peak_name": "sl_45"})
+  assert not sign_burst_trigger({"sl_peak_conf": 0.14, "peak_conf": 0.20, "peak_name": "neg_yellow"})
+  assert sign_burst_trigger({"peak_conf": 0.20, "peak_name": "sl_unreadable", "sl_peak_conf": 0.0})
+  assert not sign_burst_trigger({"sl_peak_conf": 0.0, "peak_conf": 0.0})

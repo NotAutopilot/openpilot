@@ -27,6 +27,25 @@ HF_PT_SHA256 = "74089754755d904d724e07ec9d74488427decc11c1c8af323e2b4524664575ae
 ASSET_SHA256 = "1131200b7fe2d400596e09d7680fc3a26a08dcd8952acfdf261170bdb22d3d28"
 ASSET_BYTES = 12658953
 
+# CPU onnxruntime for the stock 3X. The image has neither onnxruntime nor
+# cv2.dnn (route 00000180: onnxruntime-absent(ModuleNotFoundError),
+# cv2-dnn-absent). This is the PyPI CPU wheel, not onnxruntime-gpu.
+# ELF AArch64, tag cp312, manylinux_2_28, max GLIBC_2.28, NEEDED only
+# libc/libstdc++/libm/libgcc_s/libdl/librt/libpthread/ld-linux-aarch64.
+# openpilot requires Python >=3.12.3,<3.13. AGNOS 18.4 is newer than 2.28.
+# Same 1.31.0 CPU build measured ~12 ms / ~180 GFLOP/s on one x86 thread.
+ORT_VERSION = "1.31.0"
+ORT_PYTHON = "cp312"
+ORT_PLATFORM = "manylinux_2_28_aarch64"
+ORT_WHEEL = "onnxruntime-1.31.0-cp312-cp312-manylinux_2_28_aarch64.whl"
+ORT_SHA256 = "35758d7606d578ec5b9d65f6e8a1f488013194c3f6097038a3223cb26d35ef9a"
+ORT_BYTES = 21420804
+ORT_URL = (
+  "https://files.pythonhosted.org/packages/53/1a/"
+  + "561b43ca1536d9e81d1785bb8a1a260a9e314ef6d04976ba0411c652bda1/"
+  + ORT_WHEEL
+)
+
 USER_AGENT = "NotAutopilot-speedsignd/1.0 (https://github.com/jmbrunick/openpilot)"
 
 # Ultralytics YOLOv8n export at imgsz=320. ~2.2 GFLOP, about 4× cheaper than

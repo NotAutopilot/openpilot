@@ -149,6 +149,41 @@ def test_native_window_covers_the_road_test_signs():
   assert YOLO_IMGSZ == 320
 
 
+def test_upper_window_covers_town_signs_above_the_lower_tile():
+  """Town plates sat at y 340–795, x 968–1928. y=340 is above the lower tile."""
+  from openpilot.selfdrive.speedsignd.nv12 import (
+    NATIVE_UPPER_H,
+    NATIVE_UPPER_W,
+    NATIVE_UPPER_X,
+    NATIVE_UPPER_Y,
+    native_detect_windows,
+    native_upper_window,
+  )
+  lower = (1300, 520, 628, 320)
+  upper = native_upper_window(1208, 1928)
+  assert upper == (NATIVE_UPPER_X, NATIVE_UPPER_Y, NATIVE_UPPER_W, NATIVE_UPPER_H)
+  assert upper == (1288, 260, 640, 320)
+  assert native_detect_windows(1208, 1928) == (lower, upper)
+  ux, uy, uw, uh = upper
+  assert ux % 2 == uy % 2 == uw % 2 == uh % 2 == 0
+  assert ux + uw == 1928 and uy + uh == 580
+  # y=340 is inside the upper tile and above the lower tile's top.
+  assert uy <= 340 < uy + uh
+  assert 340 < lower[1]
+  # The lower tile still owns the bottom of the town band (y through 795).
+  assert lower[1] <= 520 and lower[1] + lower[3] >= 795
+  # Overlap so a sign on the boundary is in one of the two tiles.
+  assert uy + uh > lower[1]
+  # Left tail x 968–1288 is outside both tiles. A third tile is not added.
+  assert ux > 968
+  buf = _nv12_buf(1928, 1208, y=128, u=128, v=128)
+  crop = copy_nv12_detect_crop(buf, 1)
+  assert crop is not None
+  assert crop.crop == upper
+  assert crop.y.shape == (320, 640)
+  assert copy_nv12_detect_crop(buf).crop == lower
+
+
 def test_copy_nv12_detect_crop_is_native_320_and_keeps_chroma():
   buf = _nv12_buf(1928, 1208, y=128, u=128, v=128)
   crop = copy_nv12_detect_crop(buf)

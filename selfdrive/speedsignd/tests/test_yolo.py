@@ -27,6 +27,7 @@ from openpilot.selfdrive.speedsignd.yolo import (
   is_unreadable_name,
   letterbox_rgb,
   nms_xyxy,
+  ocr_dropped_digit,
   prefer_refine,
   refine_mph,
   road_detect_crop,
@@ -446,6 +447,28 @@ def test_onnx_detect_overrides_65_class_on_painted_50():
 
 def test_yolo_min_conf_constant():
   assert YOLO_MIN_CONF == 0.40
+
+
+def test_refine_never_turns_a_valid_class_into_a_dropped_digit():
+  """Route 00000181: OCR produced 5 from a 45. The class must stay 45."""
+  sign = SpeedSign(
+    mph=45, conf=0.89, bbox=(10, 10, 40, 50),
+    class_mph=45, class_conf=0.89,
+  )
+  y = np.zeros((80, 80), np.uint8)
+  for bad in (5, 4, 46, 100, None):
+    out = refine_mph(sign, y, lambda _c, bad=bad: (bad, 0.95))
+    assert out.mph == 45
+    assert out.class_mph == 45
+    assert out.refine_mph is None
+  assert ocr_dropped_digit(45, 5)
+  assert ocr_dropped_digit(45, 4)
+  assert not ocr_dropped_digit(65, 50)
+  assert not ocr_dropped_digit(35, 55)
+  assert not prefer_refine(sign, 5, 0.95)
+  assert not prefer_refine(sign, 100, 0.95)
+  kept = refine_mph(sign, y, lambda _c: (40, 0.90))
+  assert kept.mph == 40 and kept.class_mph == 45 and kept.refine_mph == 40
 
 
 def test_onnx_nv12_crop_path_offsets_and_chroma():
