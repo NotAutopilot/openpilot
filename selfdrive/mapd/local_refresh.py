@@ -42,7 +42,8 @@ from openpilot.selfdrive.mapd.gps_fix import (
   read_live_gnss,
 )
 from openpilot.selfdrive.mapd.maps_manifest import LICENSE, LICENSE_URL
-from openpilot.selfdrive.mapd.mn_statutory import FILL_NOTES, FILL_SOURCE, bbox_intersects_minnesota
+from openpilot.selfdrive.mapd.mn_statutory import FILL_NOTES, FILLABLE_HIGHWAY_REGEX as MN_FILLABLE_REGEX, bbox_intersects_minnesota
+from openpilot.selfdrive.mapd.us_statutory import FILLABLE_HIGHWAY_REGEX as US_FILLABLE_REGEX, is_fill_source
 from openpilot.selfdrive.mapd.osm_db import OsmSpeedLimitDB
 from openpilot.selfdrive.mapd.roundabout_map import ROLE_RING, rb_rows_from_overpass
 from openpilot.selfdrive.mapd.overpass import (
@@ -145,7 +146,7 @@ def merge_ways_into_db(
     for w in ways:
       OsmSpeedLimitDB.insert_way(
         con, w["way_id"], w["name"], w["highway"], w["maxspeed_ms"], w["coords"],
-        junction=w.get("junction") or "",
+        junction=w.get("junction") or "", estimated=bool(w.get("estimated")),
       )
       inserted += 1
     OsmSpeedLimitDB.recount_ways(con)
@@ -309,13 +310,16 @@ def refresh_local_maps(
     persist_last_gps_if_possible(loc.lat, loc.lon)
 
   bbox = bbox_from_center(loc.lat, loc.lon, radius_km)
-  fill_unmarked = bbox_intersects_minnesota(bbox)
+  # Every state: untagged drivable roads get the state default (us_statutory).
+  # Minnesota keeps MN 169.14 incl. residential streets, so its query is wider.
+  fill_unmarked = True
+  in_mn = bbox_intersects_minnesota(bbox)
   _p(
     f"Refresh radius {REFRESH_RADIUS_MILES:.0f} miles ({radius_km:.1f} km). "
     + f"Overpass bbox south,west,north,east={bbox[0]:.4f},{bbox[1]:.4f},{bbox[2]:.4f},{bbox[3]:.4f}"
   )
-  if fill_unmarked:
-    _p("Minnesota bbox: fetching all fillable highways and applying MN statutory fills for unmarked ways.")
+  _p("Fetching drivable highways; unmarked ways get state default limits (estimated)"
+     + (", MN 169.14 incl. residential." if in_mn else "."))
 
   _ensure_us_base(dest)
 
@@ -326,22 +330,23 @@ def refresh_local_maps(
       timeout_s=OVERPASS_HTTP_TIMEOUT_S,
       query_timeout=OVERPASS_QUERY_TIMEOUT_S,
       include_unmarked=fill_unmarked,
+      unmarked_regex=MN_FILLABLE_REGEX if in_mn else US_FILLABLE_REGEX,
     )
   ways = ways_from_overpass(payload, fill_unmarked=fill_unmarked)
   rb_rows = rb_rows_from_overpass(payload)
-  tagged_n = sum(1 for w in ways if w.get("source") != FILL_SOURCE)
+  tagged_n = sum(1 for w in ways if not is_fill_source(w.get("source")))
   filled_n = len(ways) - tagged_n
   if fill_unmarked:
     _p(
       f"Received {len(ways)} highway ways from OSM "
-      f"({tagged_n} tagged maxspeed, {filled_n} MN statutory fills)."
+      + f"({tagged_n} tagged maxspeed, {filled_n} estimated state-default fills)."
     )
   else:
     _p(f"Received {len(ways)} maxspeed ways from OSM.")
   if not ways:
     raise RefreshMapsError(
       "No usable highway speed limits found in OSM for this 100-mile area. "
-      "Previous maps were left unchanged."
+      + "Previous maps were left unchanged."
     )
 
   extra_meta = {
@@ -354,7 +359,7 @@ def refresh_local_maps(
     "local_refresh_fill_unmarked": "1" if fill_unmarked else "0",
   }
   if fill_unmarked:
-    extra_meta["fill_source"] = FILL_SOURCE
+    extra_meta["fill_source"] = "us_statutory (<ST>_default, MN_169.14)"
     extra_meta["fill_notes"] = FILL_NOTES
     extra_meta["local_refresh_tagged_ways"] = str(tagged_n)
     extra_meta["local_refresh_filled_ways"] = str(filled_n)

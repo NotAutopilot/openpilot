@@ -12,8 +12,8 @@ OpenStreetMap data is ODbL: © OpenStreetMap contributors.
 https://www.openstreetmap.org/copyright
 
 Size basis (Taginfo US, 2026-09): ~3.40 million ways with a maxspeed tag.
-Measured osm-us-speed-limits-v4: ~204 MiB zst → ~570 MiB sqlite. Fetch requires
-854 MiB free on the dest filesystem (zst + sqlite + 80 MiB margin).
+Measured osm-us-speed-limits-v5: ~399 MiB zst → ~1094 MiB sqlite. Fetch requires
+1573 MiB free on the dest filesystem (zst + sqlite + 80 MiB margin).
 """
 from __future__ import annotations
 
@@ -28,10 +28,10 @@ LICENSE_URL = "https://www.openstreetmap.org/copyright"
 
 # Host + tag for the prebuilt DB. Bump the tag when republishing a newer extract.
 GITHUB_REPO = "jmbrunick/openpilot"
-RELEASE_TAG = "osm-us-speed-limits-v4"
+RELEASE_TAG = "osm-us-speed-limits-v5"
 ASSET_NAME = "speed_limits_us.sqlite.zst"
 # First-install revision; must match committed maps-index.json.
-RELEASE_REVISION = "4"
+RELEASE_REVISION = "5"
 
 # Live index Download US Maps fetches when GitHub is reachable (small JSON).
 # Refresh maps does not use this URL — it queries Overpass around the vehicle.
@@ -42,17 +42,17 @@ MAPS_INDEX_URL = (
   + f"/selfdrive/mapd/{MAPS_INDEX_FILENAME}"
 )
 
-# Measured osm-us-speed-limits-v4 (~204 MiB zst → ~570 MiB sqlite, roundabouts rb_ways).
+# Measured osm-us-speed-limits-v5 (~399 MiB zst → ~1094 MiB sqlite: posted + state-default ways, rb_ways, rail_crossings).
 # Peak on dest fs is zst + sqlite.partial before the zst is deleted.
-ASSET_ZST_BYTES = 204 * 1024 * 1024
-ASSET_SQLITE_BYTES = 570 * 1024 * 1024
+ASSET_ZST_BYTES = 399 * 1024 * 1024
+ASSET_SQLITE_BYTES = 1094 * 1024 * 1024
 FREE_MARGIN_BYTES = 80 * 1024 * 1024
-MIN_FREE_MIB = 854
-MIN_FREE_BYTES = MIN_FREE_MIB * 1024 * 1024  # 204+570+80 MiB
+MIN_FREE_MIB = 1573
+MIN_FREE_BYTES = MIN_FREE_MIB * 1024 * 1024  # 399+1094+80 MiB
 
 # SHA-256 of the Release **zst** asset (not the decompressed sqlite).
 # Fetch verifies this on the downloaded .zst BEFORE decompress.
-ASSET_SHA256 = "664f8c9c564cf69405cf29e6977081f7b84f9a275a9e8c46bff755caea0f20ca"
+ASSET_SHA256 = "b171e03591963c26322fea2329d6a8362308413f1b6e87e4e37bd888a7187fd5"
 # Optional SHA-256 of the decompressed sqlite. Empty = do not hash dest.
 SQLITE_SHA256 = ""
 

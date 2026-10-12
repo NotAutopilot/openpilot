@@ -1,7 +1,7 @@
 """Download a prebuilt NAP OSM speed-limit sqlite from a GitHub Release.
 
 Stages on the destination filesystem (not /tmp). US pack peak is the zst plus
-the sqlite.partial before the zst is deleted: ~204 MiB + ~570 MiB.
+the sqlite.partial before the zst is deleted: ~399 MiB + ~1094 MiB.
 
 Downloads retry (DOWNLOAD_ATTEMPTS, backoff) and resume with HTTP Range from
 .download/<asset>.partial, also across taps. Only a SHA-256 mismatch throws
