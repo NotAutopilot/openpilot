@@ -119,6 +119,17 @@ def _row_estimated(row) -> bool:
     return False
 
 
+# Estimated (state-default) limits never exceed this on the car, so a road wrongly
+# classed rural (e.g. I-94 through Bismarck at ND's 80) cannot raise MAX past 65.
+# Posted OSM limits are not capped.
+ESTIMATED_CAP_MS = 65 * 0.44704
+
+
+def _row_limit_ms(row) -> float:
+  v = float(row["maxspeed_ms"] or 0.0)
+  return min(v, ESTIMATED_CAP_MS) if _row_estimated(row) else v
+
+
 def _pack_coords(coords: list[tuple[float, float]]) -> bytes:
   # float32 is ~1 m at US longitudes — enough for MAX_MATCH_DISTANCE_M.
   buf = bytearray(_COORDS_HDR.pack(len(coords)))
@@ -683,7 +694,7 @@ class OsmSpeedLimitDB:
       if junction_is_roundabout(_row_junction(row)):
         rings[int(row["way_id"])] = {
           "way_id": int(row["way_id"]), "coords": _unpack_coords(row["coords"]), "lanes": 0,
-          "maxspeed_ms": float(row["maxspeed_ms"]), "junction": _row_junction(row),
+          "maxspeed_ms": _row_limit_ms(row), "junction": _row_junction(row),
         }
     approaches = []
     for row in self._rb_candidates(float(lat), float(lon), pad):
@@ -750,7 +761,7 @@ class OsmSpeedLimitDB:
       if score < best_score:
         best_score = score
         best = SpeedLimitMatch(
-          speed_limit_ms=float(row["maxspeed_ms"]),
+          speed_limit_ms=_row_limit_ms(row),
           way_id=int(row["way_id"]),
           road_name=name,
           highway=highway,
@@ -999,7 +1010,7 @@ class OsmSpeedLimitDB:
         on_roundabout=on_rb,
         approaching=(not on_rb),
         distance_m=0.0 if on_rb else float(dist),
-        speed_limit_ms=float(row["maxspeed_ms"]),
+        speed_limit_ms=_row_limit_ms(row),
         way_id=int(row["way_id"]),
       )
       # Prefer on-ring, then nearer ahead.

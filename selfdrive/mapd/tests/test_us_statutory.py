@@ -119,3 +119,23 @@ def test_untagged_piece_between_posted_takes_posted_limit():
 
 def test_mn_ramp_capped():
   assert default_maxspeed_mph("MN", "motorway_link", {}, urban=False) == 45
+
+
+def test_estimated_limit_capped_at_65_on_car(tmp_path):
+  from openpilot.selfdrive.mapd.osm_db import OsmSpeedLimitDB
+  path = str(tmp_path / "cap.sqlite")
+  con = OsmSpeedLimitDB.create(path)
+  lat = 46.8328
+  OsmSpeedLimitDB.insert_way(con, 1, "I 94", "motorway", 80 * CV.MPH_TO_MS, [(lat, -100.86), (lat, -100.84)], estimated=True)
+  OsmSpeedLimitDB.insert_way(con, 2, "I 94", "motorway", 80 * CV.MPH_TO_MS, [(lat + 0.1, -100.86), (lat + 0.1, -100.84)])
+  OsmSpeedLimitDB.insert_way(con, 3, "Main", "primary", 45 * CV.MPH_TO_MS, [(lat + 0.2, -100.86), (lat + 0.2, -100.84)], estimated=True)
+  con.commit()
+  con.close()
+  db = OsmSpeedLimitDB(path)
+  assert db.open()
+  est = db.lookup(lat, -100.85, bearing_deg=90)
+  posted = db.lookup(lat + 0.1, -100.85, bearing_deg=90)
+  low = db.lookup(lat + 0.2, -100.85, bearing_deg=90)
+  assert est.estimated and abs(est.speed_limit_ms - 65 * CV.MPH_TO_MS) < 0.01
+  assert not posted.estimated and abs(posted.speed_limit_ms - 80 * CV.MPH_TO_MS) < 0.01
+  assert abs(low.speed_limit_ms - 45 * CV.MPH_TO_MS) < 0.01
