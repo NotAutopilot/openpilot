@@ -40,7 +40,7 @@ The US speed-limits sqlite is **not in git** (too large; ODbL still requires att
 
 | | |
 |---|---|
-| Release tag | `osm-us-speed-limits-v4` on `jmbrunick/openpilot` |
+| Release tag | `osm-us-speed-limits-v5` on `jmbrunick/openpilot` |
 | Asset | `speed_limits_us.sqlite.zst` |
 | SHA-256 | of the **zst** (`ASSET_SHA256`), verified **before** decompress. Dest sqlite is not hashed unless `SQLITE_SHA256` is set. `--sha256 ''` skips. |
 | Install path | `/data/media/0/osm/speed_limits.sqlite` |
@@ -273,3 +273,7 @@ Policy tests include lead precedence, fetch of a tiny sqlite over HTTP, and Refr
 - Python-only `selfdrive/mapd`. Device needs `zstandard` (already an openpilot dep) to decompress the Release asset.
 - Cereal: `liveMapDataNAP` on custom reserved 0. Rebuild so `params_keys.h` picks up the new params.
 - `mapd` is an onroad managed process in `system/manager/process_config.py`.
+
+## Rail crossings (pack v5, data only)
+
+Pack schema 5 adds `rail_crossings` (node_id, lat, lon, way_id, kind, barrier, light, crossing): OSM `railway=level_crossing` / `railway=crossing` nodes that lie on a drivable highway way, with `crossing:barrier`, `crossing:light` and `crossing=*`. 250,339 in the US (2026-10-11 extracts), ~4.9 MB of the zst. `selfdrive/mapd/rail_crossings.py: crossings_ahead(con, lat, lon, bearing_deg, horizon_m, lateral_m)` returns them nearest-first. No alert/UI yet; older packs simply return [].

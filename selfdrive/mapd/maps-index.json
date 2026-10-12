@@ -1,8 +1,8 @@
 {
-  "revision": "4",
+  "revision": "5",
   "asset_name": "speed_limits_us.sqlite.zst",
-  "asset_url": "https://github.com/jmbrunick/openpilot/releases/download/osm-us-speed-limits-v4/speed_limits_us.sqlite.zst",
-  "sha256": "664f8c9c564cf69405cf29e6977081f7b84f9a275a9e8c46bff755caea0f20ca",
-  "bytes": 213762114,
-  "notes": "v3 speed ways (incl. MN 169.14 fills around Benson) + US roundabouts (rb_ways, pack schema 4): rings, approaches, ring advisory speeds, mini-roundabouts."
+  "asset_url": "https://github.com/jmbrunick/openpilot/releases/download/osm-us-speed-limits-v5/speed_limits_us.sqlite.zst",
+  "sha256": "b171e03591963c26322fea2329d6a8362308413f1b6e87e4e37bd888a7187fd5",
+  "bytes": 418098016,
+  "notes": "Pack schema 5: current posted OSM limits + estimated state-default limits for untagged roads in every state (ways.estimated) + US roundabouts (rb_ways) + rail crossings on drivable roads (rail_crossings)."
 }
