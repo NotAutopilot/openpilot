@@ -13,13 +13,11 @@ import urllib.request
 
 from openpilot.selfdrive.mapd.maps_manifest import USER_AGENT
 from openpilot.selfdrive.mapd.mn_statutory import (
-  FILL_SOURCE,
   FILLABLE_HIGHWAY_REGEX,
   PlaceIndex,
-  is_urban_way,
   places_from_overpass,
-  statutory_maxspeed_ms,
 )
+from openpilot.selfdrive.mapd.us_statutory import default_maxspeed_ms, inherit_posted_neighbors, is_fill_source, state_index
 from openpilot.selfdrive.mapd.speed_limit import parse_maxspeed
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
@@ -39,6 +37,7 @@ def overpass_query(
   timeout_s: int = 180,
   include_unmarked: bool = False,
   include_roundabouts: bool = True,
+  unmarked_regex: str = FILLABLE_HIGHWAY_REGEX,
 ) -> str:
   """Bbox query. Tagged maxspeed only, or all fillable highways + place polygons (MN fill).
 
@@ -57,7 +56,7 @@ way(bn.rbn)["highway"]->.ap;"""
     return f"""
 [out:json][timeout:{int(timeout_s)}];{rb_sets}
 (
-  way["highway"~"{FILLABLE_HIGHWAY_REGEX}"]{bbox};
+  way["highway"~"{unmarked_regex}"]{bbox};
   way["place"~"^(city|town|village)$"]{bbox};
   rel["place"~"^(city|town|village)$"]{bbox};
   way["boundary"="administrative"]["admin_level"="8"]{bbox};
@@ -88,10 +87,11 @@ def fetch_overpass(
   query_timeout: int = 180,
   include_unmarked: bool = False,
   include_roundabouts: bool = True,
+  unmarked_regex: str = FILLABLE_HIGHWAY_REGEX,
 ) -> dict:
   """POST a bbox highway query. Raises RuntimeError with a retryable message on timeout/HTTP failure."""
   q = overpass_query(*bbox, timeout_s=query_timeout, include_unmarked=include_unmarked,
-                     include_roundabouts=include_roundabouts)
+                     include_roundabouts=include_roundabouts, unmarked_regex=unmarked_regex)
   data = urllib.parse.urlencode({"data": q}).encode()
   req = urllib.request.Request(url, data=data, headers={"User-Agent": USER_AGENT})
   try:
@@ -129,19 +129,21 @@ def resolve_way_speed(
   *,
   fill_unmarked: bool = False,
   places: PlaceIndex | None = None,
+  state: str | None = None,
 ) -> tuple[float | None, str]:
-  """Return (maxspeed_ms, source). source is 'osm' or MN_169.14. Tagged numeric wins."""
+  """Return (maxspeed_ms, source). source is 'osm', MN_169.14 or '<ST>_default'. Tagged numeric wins.
+
+  Untagged ways get the state default (us_statutory) when fill_unmarked; the
+  state comes from the way's position unless given.
+  """
   ms = tagged_maxspeed_ms(tags)
   if ms is not None:
     return ms, "osm"
   if not fill_unmarked:
     return None, ""
-  highway = str(tags.get("highway") or "")
-  urban = is_urban_way(tags, coords, places)
-  filled = statutory_maxspeed_ms(highway, tags, urban=urban)
-  if filled is None:
-    return None, ""
-  return filled, FILL_SOURCE
+  if state is None:
+    state = state_index().state_of_way(coords)
+  return default_maxspeed_ms(state, str(tags.get("highway") or ""), tags, coords, places)
 
 
 def ways_from_overpass(payload: dict, *, fill_unmarked: bool = False) -> list[dict]:
@@ -167,6 +169,9 @@ def ways_from_overpass(payload: dict, *, fill_unmarked: bool = False) -> list[di
       "maxspeed_ms": ms,
       "coords": coords,
       "source": source,
+      "estimated": is_fill_source(source),
       "junction": tags.get("junction") or "",
     })
+  if fill_unmarked:
+    inherit_posted_neighbors(out)
   return out

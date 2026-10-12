@@ -170,12 +170,18 @@ def install_label(snap: dict) -> str:
     return f"Install & reboot with {target}" if target else "Install & reboot"
 
 
+# Native Software panel (selfdrive/ui/layouts/settings/software.py): the INSTALL
+# button is shown and enabled whenever ui_state.is_offroad() and UpdateAvailable.
+# It has no engaged or updater-busy check. While onroad it is hidden and the panel
+# shows this line instead. is_offroad() is "not deviceState.started", which
+# hardwared publishes as IsOnroad.
+ONROAD_TEXT = "Updates are only downloaded while the car is off."
+
+
 def install_blocked(snap: dict) -> str:
-    """Same locks as the Reboot control: not while the car is on or openpilot is engaged."""
-    if snap.get("engaged"):
-        return "Install is locked while openpilot is engaged."
+    """Same rule as the native INSTALL button: available only while offroad."""
     if snap.get("onroad"):
-        return "Install is locked while the car is on."
+        return ONROAD_TEXT
     return ""
 
 
@@ -212,7 +218,7 @@ def software_status(snap: dict) -> dict:
     if snap["disable_updates"]:
         blocked = PAUSED_TEXT
     elif snap["onroad"]:
-        blocked = "Updates are only checked and downloaded while the car is off."
+        blocked = ONROAD_TEXT
     elif not snap["updater_running"]:
         blocked = STOPPED_TEXT
 
@@ -240,7 +246,7 @@ def software_status(snap: dict) -> dict:
         "can_check": not busy and not blocked,
         # Download is offered only after a check found something new to fetch.
         "can_download": not busy and not blocked and snap["fetch_available"] and not snap["update_available"],
-        "can_install": bool(snap["update_available"]) and not busy and not install_blocked(snap),
+        "can_install": bool(snap["update_available"]) and not install_blocked(snap),
         "install_blocked_reason": install_blocked(snap),
         "install_label": install_label(snap),
         "step": step,
@@ -347,6 +353,6 @@ def handle_software(payload: dict, params, pinger=ping_updated, running=None) ->
         if _flag(params, "DisableUpdates"):
             raise SoftwareError("Updates are paused (DisableUpdates is on), so Check and Download are blocked.")
         if _flag(params, "IsOnroad"):
-            raise SoftwareError("Updates are only checked and downloaded while the car is off.")
+            raise SoftwareError(ONROAD_TEXT)
         pinger("HUP" if action == "download" else "USR1")
     return read_software(params, running=running)

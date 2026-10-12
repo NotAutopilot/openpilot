@@ -126,7 +126,7 @@ def test_page_has_check_and_download_buttons_and_no_go_offline():
   assert html.count('actions.appendChild(swButton(') == 3
   assert '"Check"' in html and '"Download"' in html
   # Install & reboot is only added when a downloaded update is ready
-  assert "if (data.update_available && !swPending && !data.busy)" in html
+  assert "if (data.update_available && data.can_install)" in html
 
 
 def test_download_greyed_until_check_finds_update():
@@ -231,11 +231,11 @@ def test_install_label_keeps_slash_branch_names():
   assert read_software(params, running=True)["install_label"] == "Install & reboot with 0.10.1 / cursor/mcu-web-ui-c588"
 
 
-def test_install_blocked_onroad_engaged_or_without_update():
+def test_install_blocked_onroad_or_without_update():
   ready = {"UpdaterNewDescription": "0.10.1 / nap-dev / abc1234 / 2026-10-08"}
   cases = (
-    ({"UpdateAvailable": True, "IsOnroad": True}, "car is on"),
-    ({"UpdateAvailable": True, "IsOnroad": True, "IsEngaged": True}, "engaged"),
+    ({"UpdateAvailable": True, "IsOnroad": True}, "only downloaded while the car is off"),
+    ({"UpdateAvailable": True, "IsOnroad": True, "IsEngaged": True}, "only downloaded while the car is off"),
     ({}, "No downloaded update"),
   )
   for bools, words in cases:
@@ -317,3 +317,22 @@ def test_http_software_round_trip(monkeypatch):
   finally:
     httpd.shutdown()
     httpd.server_close()
+
+
+def test_install_matches_native_offroad_and_update_available():
+  """Native INSTALL: visible+enabled iff is_offroad() and UpdateAvailable; no engaged/busy check."""
+  ready = {"UpdaterNewDescription": "0.11.1 / nap-dev / 245b476 / 2026-10-11"}
+  # stale IsEngaged while offroad (the reported case) must not lock install
+  params = FakeParams(values=dict(ready), bools={"UpdateAvailable": True, "IsEngaged": True})
+  snap = read_software(params, running=True)
+  assert snap["can_install"] is True and snap["install_blocked_reason"] == ""
+  handle_software({"action": "install", "confirm": True}, params, pinger=lambda *_a: None, running=True)
+  assert ("DoReboot", True) in params.writes
+  # updater busy does not hide the native button either
+  snap = read_software(FakeParams(values=dict(ready, UpdaterState="checking..."), bools={"UpdateAvailable": True}), running=True)
+  assert snap["can_install"] is True
+  # onroad: unavailable, same text as the native panel
+  snap = read_software(FakeParams(values=dict(ready), bools={"UpdateAvailable": True, "IsOnroad": True}), running=True)
+  assert snap["can_install"] is False
+  assert snap["install_blocked_reason"] == "Updates are only downloaded while the car is off."
+  assert snap["blocked_reason"] == "Updates are only downloaded while the car is off."

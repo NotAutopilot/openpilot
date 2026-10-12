@@ -12,6 +12,7 @@ from openpilot.selfdrive.mapd.roundabout import (
   RB_V_MAX_MS,
   RoundaboutHint,
   apply_roundabout_plan,
+  rb_profile_v_ms,
   roundabout_outer_curvature_bias,
   roundabout_outer_path_offset_m,
 )
@@ -115,7 +116,9 @@ def test_long_enable_in_funnel_applies_ease_immediately():
     v45, v_cruise, v_cruise, 0.40, hint, LOOKAHEAD_EARLY,
   )
   assert rb_v is not None
-  assert abs(rb_v - 20.0 * CV.MPH_TO_MS) < 1e-6
+  # Oct 11: MAX follows the 0.7 m/s² profile (no step); the late hint keeps the Willmar −a floor.
+  assert abs(rb_v - rb_profile_v_ms(86.0, 20.0 * CV.MPH_TO_MS)) < 1e-6
+  assert rb_v < v45
   assert v_c <= rb_v
   assert v_hud <= rb_v
   assert a_tgt <= RB_A_FLOOR_MS2

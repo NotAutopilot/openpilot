@@ -26,7 +26,7 @@ from openpilot.selfdrive.mapd.map_speed_policy import (
   MapCruiseHold, apply_map_speed_kph, decide_map_cruise, effective_map_limit_ms,
   map_slew_a_ms2, read_map_speed_params, should_write_preap_pedal, slew_map_speed_ms,
 )
-from openpilot.selfdrive.mapd.roundabout import live_map_roundabout_hint, roundabout_ease_v_ms
+from openpilot.selfdrive.mapd.roundabout import live_map_roundabout_hint, roundabout_ease_v_ms, roundabout_target_ms
 from openpilot.selfdrive.controls.lib.curve_follow import MODE_ACTIVE, MODE_SHADOW, read_curve_follow_mode
 from openpilot.selfdrive.controls.lib.curve_max_hold import CurveMaxHold
 from openpilot.selfdrive.controls.lib.radar_status_log import RadarStatusLogger
@@ -101,13 +101,27 @@ def _unwind_ring_speed_set(hold, pre, ring_kph: float) -> bool:
   return changed
 
 
-def _ring_exit_target_ms(hold, lim, posted_kph) -> float | None:
-  """Posted limit, else the pre-ring set. None when nothing is known."""
+def _ring_exit_target_ms(hold, lim, posted_kph, detect_v_ms: float | None = None) -> float | None:
+  """Posted limit, else the pre-ring MAX. None when nothing is known.
+
+  MAX is a hard ceiling: a driver-set pre-ring MAX (stalk sticky / held)
+  is restored exactly, even if the car was faster when the ring was first
+  detected. Only a map-auto MAX (policy_kph, no driver set) with no posted
+  limit now may rise to the detection speed, since that MAX was never a
+  driver choice and the map no longer has a limit to restore toward.
+  """
   if hold.sticky_set_kph is None and lim is not None and float(lim) > 0.0:
     return float(lim)
-  for val in (hold.sticky_set_kph, hold.held_max_kph, hold.policy_kph, posted_kph):
+  for val in (hold.sticky_set_kph, hold.held_max_kph):
     if val is not None and float(val) > 0.0:
       return float(val) * CV.KPH_TO_MS
+  if hold.policy_kph is not None and float(hold.policy_kph) > 0.0:
+    pol = float(hold.policy_kph) * CV.KPH_TO_MS
+    if detect_v_ms is not None and float(detect_v_ms) > pol:
+      return float(detect_v_ms)
+    return pol
+  if posted_kph is not None and float(posted_kph) > 0.0:
+    return float(posted_kph) * CV.KPH_TO_MS
   return None
 
 
@@ -603,7 +617,8 @@ class Car:
       # posted / pre-ring MAX. MAX stays a hard ceiling (the slew target).
       # Gap lock still owns the lead gap; this does not raise it.
       floor_ms = max(float(getattr(self, "_rb_target_ms", 0.0) or 0.0), float(CS.vEgo))
-      target_ms = _ring_exit_target_ms(self._map_hold, None if dec.sticky else lim, posted_kph)
+      target_ms = _ring_exit_target_ms(self._map_hold, None if dec.sticky else lim, posted_kph,
+                                       getattr(self, "_rb_detect_v_ms", None))
       preap_v_cruise_kph, self._map_slew_ms = _apply_ring_exit_max(
         target_ms, floor_ms, self._map_speed_lookahead, self._map_speed_accel,
       )
@@ -622,9 +637,13 @@ class Car:
       self._last_pedal_kph = None
       self._pedal_self_write_kph = None
     if rb_lim is not None:
-      ring_kph = float(rb_lim) * CV.MS_TO_KPH
+      # Latch / unwind key on the ring target, not the approach profile
+      # value (rb_lim ramps down along the 0.7 m/s² profile).
+      rb_target_ms = roundabout_target_ms(rb_hint.speed_limit_ms)
+      ring_kph = rb_target_ms * CV.MS_TO_KPH
       if not was_on_ring or getattr(self, "_rb_pre", None) is None:
         self._rb_pre = _snapshot_cruise_hold(self._map_hold)
+        self._rb_detect_v_ms = float(CS.vEgo)
       else:
         _refresh_ring_snapshot(self._rb_pre, self._map_hold, ring_kph)
       _unwind_ring_speed_set(self._map_hold, self._rb_pre, ring_kph)
@@ -633,7 +652,7 @@ class Car:
         restore = None if self._rb_pre is None else self._rb_pre.get("held_max_kph")
         if restore is not None and not _kph_near(restore, ring_kph):
           eng._nap_held_max_kph = restore
-      self._rb_target_ms = float(rb_lim)
+      self._rb_target_ms = rb_target_ms
       self._rb_active = True
     else:
       self._rb_active = False

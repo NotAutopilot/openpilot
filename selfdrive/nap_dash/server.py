@@ -33,6 +33,7 @@ except Exception:  # pragma: no cover - unit tests without zmq
       print(msg)
   cloudlog = _PrintLog()
 
+from openpilot.selfdrive.nap_dash.force_offroad_api import AckError, handle_ack, read_ack
 from openpilot.selfdrive.nap_dash.settings import SettingError
 from openpilot.selfdrive.nap_dash.system_api import (
   SoftwareError,
@@ -151,6 +152,11 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_json(network_status())
       except Exception as exc:
         return self.send_json({"error": str(exc)}, 500)
+    if path == "/api/force_offroad":
+      try:
+        return self.send_json(read_ack(_params()))
+      except Exception as exc:
+        return self.send_json({"error": str(exc)}, 500)
     if path == "/api/software":
       try:
         return self.send_json(read_software(_params()))
@@ -167,6 +173,8 @@ class Handler(BaseHTTPRequestHandler):
       payload = json.loads(self.rfile.read(n).decode() or "{}")
       if path == "/api/software":
         return self.send_json(handle_software(payload, _params()))
+      if path == "/api/force_offroad":
+        return self.send_json(handle_ack(payload, _params()))
       if path != "/api/set":
         return self.send_json({"error": "not found"}, 404)
       action = str(payload.get("action") or "").strip().lower()
@@ -174,7 +182,11 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_json({"error": "engaging openpilot from the web is not allowed"}, 400)
       name = str(payload.get("param") or payload.get("name") or "")
       snap = locked_write(name, payload.get("value"), bool(payload.get("confirm")))
+      # Lets the page raise the steering Yes/No right after the tap, not on the next poll.
+      snap["force_offroad_ack"] = read_ack(_params())
       return self.send_json(snap)
+    except AckError as exc:
+      return self.send_json({"error": str(exc)}, 400)
     except SoftwareError as exc:
       return self.send_json({"error": str(exc)}, 400)
     except SettingError as exc:

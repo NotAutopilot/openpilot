@@ -30,6 +30,7 @@ from openpilot.selfdrive.mapd.constants import (
 )
 from openpilot.selfdrive.mapd.roundabout import (
   RB_FUNNEL_M,
+  rb_decel_onset_m,
   RB_FUNNEL_MIN_M,
   RB_ON_WAY_M,
   RB_SEARCH_PAD_DEG,
@@ -107,6 +108,26 @@ class SpeedLimitMatch:
   next_speed_limit_ms: float = 0.0
   next_distance_m: float = 0.0
   coords: tuple[tuple[float, float], ...] = ()
+  # True when the limit is a NAP state-default estimate (no posted maxspeed in OSM).
+  estimated: bool = False
+
+
+def _row_estimated(row) -> bool:
+  try:
+    return bool(row["estimated"])
+  except (IndexError, KeyError):
+    return False
+
+
+# Estimated (state-default) limits never exceed this on the car, so a road wrongly
+# classed rural (e.g. I-94 through Bismarck at ND's 80) cannot raise MAX past 65.
+# Posted OSM limits are not capped.
+ESTIMATED_CAP_MS = 65 * 0.44704
+
+
+def _row_limit_ms(row) -> float:
+  v = float(row["maxspeed_ms"] or 0.0)
+  return min(v, ESTIMATED_CAP_MS) if _row_estimated(row) else v
 
 
 def _pack_coords(coords: list[tuple[float, float]]) -> bytes:
@@ -441,7 +462,8 @@ class OsmSpeedLimitDB:
         min_lon REAL NOT NULL,
         max_lon REAL NOT NULL,
         coords BLOB NOT NULL,
-        junction TEXT
+        junction TEXT,
+        estimated INTEGER NOT NULL DEFAULT 0
       );
       CREATE VIRTUAL TABLE ways_rtree USING rtree(
         way_id, min_lat, max_lat, min_lon, max_lon
@@ -490,11 +512,14 @@ class OsmSpeedLimitDB:
     cols = {str(r[1]) for r in con.execute("PRAGMA table_info(ways)")}
     if "junction" not in cols:
       con.execute("ALTER TABLE ways ADD COLUMN junction TEXT")
+    if "estimated" not in cols:
+      # 1 = NAP state-default estimate (MN_169.14 / <ST>_default), 0 = OSM maxspeed.
+      con.execute("ALTER TABLE ways ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0")
 
   @staticmethod
   def insert_way(con: sqlite3.Connection, way_id: int, name: str, highway: str,
                  maxspeed_ms: float, coords: list[tuple[float, float]],
-                 junction: str = "") -> None:
+                 junction: str = "", estimated: bool = False) -> None:
     OsmSpeedLimitDB.ensure_junction_column(con)
     coords = simplify_coords(coords)
     if len(coords) < 2 or maxspeed_ms <= 0:
@@ -505,8 +530,10 @@ class OsmSpeedLimitDB:
     min_lon, max_lon = min(lons), max(lons)
     blob = _pack_coords(coords)
     con.execute(
-      "INSERT OR REPLACE INTO ways(way_id, name, highway, maxspeed_ms, min_lat, max_lat, min_lon, max_lon, coords, junction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      (int(way_id), name or "", highway or "", float(maxspeed_ms), min_lat, max_lat, min_lon, max_lon, blob, junction or ""),
+      "INSERT OR REPLACE INTO ways(way_id, name, highway, maxspeed_ms, min_lat, max_lat, min_lon, max_lon, coords, junction, estimated) "
+      + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      (int(way_id), name or "", highway or "", float(maxspeed_ms), min_lat, max_lat, min_lon, max_lon, blob, junction or "",
+       1 if estimated else 0),
     )
     con.execute(
       "INSERT OR REPLACE INTO ways_rtree(way_id, min_lat, max_lat, min_lon, max_lon) VALUES (?, ?, ?, ?, ?)",
@@ -667,7 +694,7 @@ class OsmSpeedLimitDB:
       if junction_is_roundabout(_row_junction(row)):
         rings[int(row["way_id"])] = {
           "way_id": int(row["way_id"]), "coords": _unpack_coords(row["coords"]), "lanes": 0,
-          "maxspeed_ms": float(row["maxspeed_ms"]), "junction": _row_junction(row),
+          "maxspeed_ms": _row_limit_ms(row), "junction": _row_junction(row),
         }
     approaches = []
     for row in self._rb_candidates(float(lat), float(lon), pad):
@@ -734,12 +761,13 @@ class OsmSpeedLimitDB:
       if score < best_score:
         best_score = score
         best = SpeedLimitMatch(
-          speed_limit_ms=float(row["maxspeed_ms"]),
+          speed_limit_ms=_row_limit_ms(row),
           way_id=int(row["way_id"]),
           road_name=name,
           highway=highway,
           distance_m=float(dist),
           coords=tuple((float(c[0]), float(c[1])) for c in coords),
+          estimated=_row_estimated(row),
         )
     return best
 
@@ -930,8 +958,14 @@ class OsmSpeedLimitDB:
   def find_roundabout(
     self, lat: float, lon: float, bearing_deg: float | None = None,
     current_highway: str | None = None,
+    v_ego_ms: float | None = None,
   ) -> RoundaboutHint:
-    """Upcoming / current OSM circulating ring within the ~200 m funnel.
+    """Upcoming / current OSM circulating ring within the speed-based funnel.
+
+    Funnel = rb_decel_onset_m(v_ego): 140 m at town speed, ~340 m from
+    55 mph, max 450 m. Once a ring is hinted it stays latched out to the
+    450 m reach so slowing down (which shrinks the onset) cannot drop the
+    hint mid-approach and fire an early "exit" MAX restore.
 
     Does not apply MIN_ZONE_LENGTH_M — a typical RB is a short along-heading
     stub and would otherwise be dropped as cross-street bleed. Sharp corners
@@ -960,7 +994,9 @@ class OsmSpeedLimitDB:
       if not way_is_roundabout(coords, _row_junction(row), row["highway"] or ""):
         continue
       east_m, north_m, dist = _closest_xy_on_polyline(float(lat), float(lon), coords)
-      if dist > RB_FUNNEL_M:
+      way_id = int(row["way_id"])
+      latched = way_id == getattr(self, "_rb_latch_way", 0)
+      if dist > (RB_FUNNEL_M if latched else rb_decel_onset_m(v_ego_ms)):
         continue
       if bearing_deg is not None and dist > RB_ON_WAY_M:
         along = _along_heading_m(east_m, north_m, float(bearing_deg))
@@ -974,7 +1010,7 @@ class OsmSpeedLimitDB:
         on_roundabout=on_rb,
         approaching=(not on_rb),
         distance_m=0.0 if on_rb else float(dist),
-        speed_limit_ms=float(row["maxspeed_ms"]),
+        speed_limit_ms=_row_limit_ms(row),
         way_id=int(row["way_id"]),
       )
       # Prefer on-ring, then nearer ahead.
@@ -983,6 +1019,7 @@ class OsmSpeedLimitDB:
       if best is None or rank < best_rank:
         best = hint
         best_dist = dist
+    self._rb_latch_way = best.way_id if best is not None else 0
     return best if best is not None else RoundaboutHint()
 
   def _reset_way_memory(self) -> None:
@@ -1128,4 +1165,5 @@ class OsmSpeedLimitDB:
       distance_m=match.distance_m,
       next_speed_limit_ms=next_limit,
       next_distance_m=next_dist,
+      estimated=match.estimated,
     )

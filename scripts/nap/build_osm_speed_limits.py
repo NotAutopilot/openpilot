@@ -45,23 +45,20 @@ from openpilot.selfdrive.mapd.mn_statutory import (
   FILL_SOURCE,
   PlaceIndex,
   benson_fill_bbox,
-  in_minnesota,
   is_urban_place_tags,
 )
+from openpilot.selfdrive.mapd.us_statutory import fillable_highway, inherit_posted_neighbors, is_fill_source, state_index
 from openpilot.selfdrive.mapd.osm_db import OsmSpeedLimitDB
 from openpilot.selfdrive.mapd.overpass import bbox_from_center, resolve_way_speed, ways_from_overpass
 from openpilot.selfdrive.mapd.roundabout_map import (
   ROLE_RING,
   is_ring_tags,
+  mini_roundabout_way,
   rb_rows_from_overpass,
   roundabout_rows,
 )
 from openpilot.selfdrive.mapd.speed_limit import parse_maxspeed
 
-_FILLABLE_HINT = (
-  "motorway", "trunk", "primary", "secondary", "tertiary",
-  "unclassified", "residential", "living_street", "alley",
-)
 
 
 def _parse_bbox(text: str) -> tuple[float, float, float, float]:
@@ -98,7 +95,7 @@ def _area_outer_rings(a) -> list[list[tuple[float, float]]]:
 
 def _places_from_pyosmium(pbf: str) -> PlaceIndex:
   try:
-    import osmium  # type: ignore
+    import osmium
   except ImportError as e:
     raise RuntimeError(
       "Reading .osm.pbf needs pyosmium (pip install osmium) or convert with osmium-tool first."
@@ -108,7 +105,7 @@ def _places_from_pyosmium(pbf: str) -> PlaceIndex:
 
   class H(osmium.SimpleHandler):
     def area(self, a):
-      tags = {k: v for k, v in a.tags}
+      tags = dict(a.tags)
       if not is_urban_place_tags(tags):
         return
       rings = _area_outer_rings(a)
@@ -127,9 +124,10 @@ def _ways_from_pyosmium(
   bbox: tuple[float, float, float, float] | None = None,
   fill_unmarked: bool = False,
   places: PlaceIndex | None = None,
+  mn_only: bool = False,
 ) -> list[dict]:
   try:
-    import osmium  # type: ignore
+    import osmium
   except ImportError as e:
     raise RuntimeError(
       "Reading .osm.pbf needs pyosmium (pip install osmium) or convert with osmium-tool first."
@@ -139,16 +137,13 @@ def _ways_from_pyosmium(
 
   class H(osmium.SimpleHandler):
     def way(self, w):
-      tags = {k: v for k, v in w.tags}
+      tags = dict(w.tags)
       highway = tags.get("highway") or ""
       if not highway:
         return
       tagged = parse_maxspeed(tags.get("maxspeed")) or parse_maxspeed(tags.get("maxspeed:forward"))
-      if fill_unmarked:
-        hw = highway.lower()
-        if tagged is None and not any(hw == k or hw.startswith(k + "_") for k in _FILLABLE_HINT):
-          return
-      elif tagged is None:
+      if tagged is None and not (fill_unmarked and fillable_highway("MN", highway.lower())):
+        # MN's class set is the widest (adds residential/alley); the state check is below.
         return
       coords = []
       try:
@@ -163,9 +158,14 @@ def _ways_from_pyosmium(
       if bbox is not None and not _bbox_intersects_way(coords, bbox):
         return
       fill = fill_unmarked
-      if fill and not in_minnesota(coords[0][0], coords[0][1]) and not in_minnesota(coords[-1][0], coords[-1][1]):
-        fill = False
-      ms, source = resolve_way_speed(tags, coords, fill_unmarked=fill, places=places)
+      state = None
+      if fill and tagged is None:
+        state = state_index().state_of_way(coords)
+        if mn_only and state != "MN":
+          fill = False
+        elif not fillable_highway(state, highway.lower()):
+          return
+      ms, source = resolve_way_speed(tags, coords, fill_unmarked=fill, places=places, state=state)
       if ms is None:
         return
       out.append({
@@ -175,18 +175,22 @@ def _ways_from_pyosmium(
         "maxspeed_ms": ms,
         "coords": coords,
         "source": source,
+        "estimated": is_fill_source(source),
         "junction": tags.get("junction") or "",
       })
 
   print(f"Reading highway ways from {pbf}…", file=sys.stderr, flush=True)
-  H().apply_file(pbf, locations=True)
+  H().apply_file(pbf, locations=True, filters=[osmium.filter.KeyFilter("highway")])
+  if fill_unmarked:
+    n = inherit_posted_neighbors(out)
+    print(f"  {n} estimated ways took the posted limit of the same road at their ends", file=sys.stderr, flush=True)
   return out
 
 
 def _rb_rows_from_pyosmium(pbf: str, *, bbox: tuple[float, float, float, float] | None = None) -> list[dict]:
   """Roundabout rings (any maxspeed) + approach roads touching them. Two passes over the PBF."""
   try:
-    import osmium  # type: ignore
+    import osmium
   except ImportError as e:
     raise RuntimeError(
       "Reading .osm.pbf needs pyosmium (pip install osmium) or convert with osmium-tool first."
@@ -209,6 +213,16 @@ def _rb_rows_from_pyosmium(pbf: str, *, bbox: tuple[float, float, float, float] 
     return nodes, coords
 
   class Rings(osmium.SimpleHandler):
+    def node(self, n):
+      tags = {t.k: t.v for t in n.tags}
+      if tags.get("highway") != "mini_roundabout" or not n.location.valid():
+        return
+      lat, lon = float(n.location.lat), float(n.location.lon)
+      if bbox is not None and not _bbox_intersects_way([(lat, lon)], bbox):
+        return
+      ring_nodes.add(int(n.id))
+      generic.append(mini_roundabout_way(int(n.id), lat, lon, tags))
+
     def way(self, w):
       tags = {t.k: t.v for t in w.tags}
       if not is_ring_tags(tags):
@@ -234,15 +248,16 @@ def _rb_rows_from_pyosmium(pbf: str, *, bbox: tuple[float, float, float, float] 
       generic.append({"way_id": int(w.id), "tags": tags, "node_ids": got[0], "coords": got[1]})
 
   print(f"Reading roundabout rings from {pbf}…", file=sys.stderr, flush=True)
-  Rings().apply_file(pbf, locations=True)
+  # Only objects with a highway key reach Python (big speedup on large PBFs).
+  Rings().apply_file(pbf, locations=True, filters=[osmium.filter.KeyFilter("highway")])
   if ring_nodes:
     print(f"Reading approach roads for {len(generic)} ring ways…", file=sys.stderr, flush=True)
-    Approaches().apply_file(pbf, locations=True)
+    Approaches().apply_file(pbf, locations=True, filters=[osmium.filter.KeyFilter("highway")])
   return roundabout_rows(generic)
 
 
 def _count_sources(ways: list[dict]) -> tuple[int, int]:
-  filled = sum(1 for w in ways if w.get("source") == FILL_SOURCE)
+  filled = sum(1 for w in ways if is_fill_source(w.get("source")))
   tagged = len(ways) - filled
   return tagged, filled
 
@@ -257,7 +272,7 @@ def write_db(path: str, ways: list[dict], extra_meta: dict | None = None,
   for w in ways:
     OsmSpeedLimitDB.insert_way(
       con, w["way_id"], w["name"], w["highway"], w["maxspeed_ms"], w["coords"],
-      junction=w.get("junction") or "",
+      junction=w.get("junction") or "", estimated=bool(w.get("estimated")),
     )
     n += 1
     if n % 100000 == 0:
@@ -306,7 +321,9 @@ def main(argv: list[str] | None = None) -> int:
   p.add_argument("--benson", action="store_true",
                  help="Use the ~100 mile Benson, MN bbox clipped to Minnesota")
   p.add_argument("--fill-mn-statutory", action="store_true",
-                 help="Fill unmarked fillable highways with Minn. Stat. 169.14 estimates (NAP pack only)")
+                 help="Fill unmarked fillable highways with Minn. Stat. 169.14 estimates, Minnesota only (NAP pack only)")
+  p.add_argument("--fill-us-defaults", action="store_true",
+                 help="Fill unmarked drivable highways with each state's default limit (us_statutory; MN = 169.14)")
   p.add_argument("--merge-into", help="Existing NAP sqlite to overlay the bbox into (keeps US tagged coverage)")
   p.add_argument("--no-roundabouts", action="store_true",
                  help="Skip the rb_ways table (roundabout rings + approach roads, pack v4+)")
@@ -321,7 +338,8 @@ def main(argv: list[str] | None = None) -> int:
   elif (args.lat is None) ^ (args.lon is None):
     p.error("provide both --lat and --lon")
 
-  fill = bool(args.fill_mn_statutory)
+  fill = bool(args.fill_mn_statutory or args.fill_us_defaults)
+  mn_only = bool(args.fill_mn_statutory and not args.fill_us_defaults)
   places: PlaceIndex | None = None
   if fill and args.pbf:
     places = _places_from_pyosmium(args.pbf)
@@ -335,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
       rb_rows = rb_rows_from_overpass(payload)
     source = os.path.basename(args.from_json)
   elif args.pbf:
-    ways = _ways_from_pyosmium(args.pbf, bbox=bbox, fill_unmarked=fill, places=places)
+    ways = _ways_from_pyosmium(args.pbf, bbox=bbox, fill_unmarked=fill, places=places, mn_only=mn_only)
     if not args.no_roundabouts:
       rb_rows = _rb_rows_from_pyosmium(args.pbf, bbox=bbox)
     source = os.path.basename(args.pbf)
@@ -346,14 +364,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Roundabouts: {rings} ring ways, {len(rb_rows) - rings} approach pieces (no maxspeed needed)", file=sys.stderr)
 
   tagged, filled = _count_sources(ways)
-  print(f"Prepared {len(ways)} ways ({tagged} tagged OSM maxspeed, {filled} {FILL_SOURCE} fills)", file=sys.stderr)
+  print(f"Prepared {len(ways)} ways ({tagged} tagged OSM maxspeed, {filled} estimated state-default fills)", file=sys.stderr)
 
   extra_meta: dict[str, str] = {"source": source}
   if bbox is not None:
     extra_meta["fill_bbox"] = ",".join(f"{x:.6f}" for x in bbox)
     extra_meta["fill_center"] = f"{BENSON_LAT},{BENSON_LON}" if args.benson else ""
   if fill:
-    extra_meta["fill_source"] = FILL_SOURCE
+    extra_meta["fill_source"] = FILL_SOURCE if mn_only else "us_statutory (<ST>_default, MN_169.14)"
     extra_meta["fill_notes"] = FILL_NOTES
     extra_meta["tagged_way_count"] = str(tagged)
     extra_meta["filled_way_count"] = str(filled)

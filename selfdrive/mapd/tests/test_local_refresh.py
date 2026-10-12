@@ -522,12 +522,13 @@ def test_mn_refresh_fills_unmarked_and_does_not_wipe(tmp_path):
   filled = db.lookup(BENSON_LAT + 0.01, BENSON_LON, bearing_deg=90.0)
   assert filled is not None and filled.way_id == 101
   assert abs(filled.speed_limit_ms - 30 * CV.MPH_TO_MS) < 0.2
+  assert filled.estimated and not tagged.estimated
   skipped = db.lookup(BENSON_LAT + 0.02, BENSON_LON, bearing_deg=90.0)
   assert skipped is None
   nyc = db.lookup(NYC[0], NYC[1], bearing_deg=90.0)
   assert nyc is not None and nyc.way_id == 2
   db.close()
-  assert OsmSpeedLimitDB.meta_get(dest, "fill_source") == FILL_SOURCE
+  assert FILL_SOURCE in (OsmSpeedLimitDB.meta_get(dest, "fill_source") or "")
 
 
 def test_sf_refresh_does_not_fill_unmarked_residential(tmp_path):

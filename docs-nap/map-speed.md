@@ -40,14 +40,16 @@ The US speed-limits sqlite is **not in git** (too large; ODbL still requires att
 
 | | |
 |---|---|
-| Release tag | `osm-us-speed-limits-v3` on `jmbrunick/openpilot` |
+| Release tag | `osm-us-speed-limits-v5` on `jmbrunick/openpilot` |
 | Asset | `speed_limits_us.sqlite.zst` |
 | SHA-256 | of the **zst** (`ASSET_SHA256`), verified **before** decompress. Dest sqlite is not hashed unless `SQLITE_SHA256` is set. `--sha256 ''` skips. |
 | Install path | `/data/media/0/osm/speed_limits.sqlite` |
 | Staging | `/data/media/0/osm/.download/` on the dest filesystem (not `/tmp`) |
-| Size | **~200 MiB zst → ~541 MiB sqlite**. Fetch needs **850 MiB** free on `/data`. |
+| Size | **~204 MiB zst → ~570 MiB sqlite**. Fetch needs **854 MiB** free on `/data`. |
 
 On the comma 3X: **Settings → NAP → Map Speed Limit → Download US Maps** (offroad), or `python -m scripts.nap.fetch_osm_maps`. That is the first-install of the published US pack. Frequent local updates: **Refresh maps** (or `python -m scripts.nap.refresh_osm_maps`) — live OSM within **100 miles** (~160.9 km), merged into the installed sqlite. `mapd` reloads the sqlite every ~15s onroad — no reboot. To unlock those buttons without parking, Settings → triple-tap **NAP** → **Force Offroad** (see [force-offroad.md](force-offroad.md)).
+
+Download US Maps retries timeouts and dropped connections up to 8 times with backoff ("Retrying… (n)" on screen) and resumes with HTTP Range from `/data/media/0/osm/.download/*.partial`. If it still fails, tap Download again: it resumes from the kept partial for the same asset. Only a SHA-256 mismatch deletes the partial.
 
 If a previous download died with ENOSPC, remove leftovers then retry:
 
@@ -82,17 +84,86 @@ Put the **zst** SHA-256 in `selfdrive/mapd/maps_manifest.py` **and** bump `selfd
 On the 3X (offroad, Wi-Fi):
 
 1. **Location.** Wait up to **10s** for a GNSS fix (`gpsLocationExternal`, then `gpsLocation`). Refresh accepts the last received plausible lat/lon (not 0,0), including samples older than 2.5s and accuracy up to 200 m (yard/tree cover). mapd's onroad MAX match still uses 2.5s / 50 m. Otherwise last stored GPS (`LastGPSPosition` param or `/data/params/d/LastGPSPosition`). A successful fix is persisted so the next offroad tap works. If still nothing: start openpilot onroad until the GPS icon/fix is up for about a minute, then retry. Maps will **not** guess a city.
-2. **Query OSM.** Reuses Overpass / `scripts.nap.download_osm_speed_limits` / mapd builders for highway ways in that box. Does **not** download the full US Geofabrik PBF on the 3X. Tagged numeric `maxspeed` is authoritative. When the box intersects Minnesota, the query includes fillable highways **without** maxspeed and applies Minn. Stat. 169.14 estimates locally (never uploaded to osm.org) so Refresh maps does not wipe unmarked pack fills.
-3. **Merge.** Copy the installed `/data/media/0/osm/speed_limits.sqlite` onto `/data` (not `/tmp`), delete/replace `way_id`s whose bbox intersects the 100-mile box, insert the Overpass ways (tagged + MN fills), keep the rest of the US pack. If no sqlite is installed yet, Download US Maps runs first, then the overlay — never a 100-mile-only dest file.
+2. **Query OSM.** Reuses Overpass / `scripts.nap.download_osm_speed_limits` / mapd builders for highway ways in that box. Does **not** download the full US Geofabrik PBF on the 3X. Tagged numeric `maxspeed` is authoritative. The query also includes drivable highways **without** maxspeed (motorway…unclassified; plus residential/alley inside Minnesota) and applies the state default fill below locally (never uploaded to osm.org), so Refresh maps does not wipe the pack's estimated fills.
+3. **Merge.** Copy the installed `/data/media/0/osm/speed_limits.sqlite` onto `/data` (not `/tmp`), delete/replace `way_id`s whose bbox intersects the 100-mile box, insert the Overpass ways (tagged + estimated state-default fills), keep the rest of the US pack. If no sqlite is installed yet, Download US Maps runs first, then the overlay — never a 100-mile-only dest file.
 4. **Atomic install.** `os.replace` onto dest. Overpass timeout / HTTP / merge failure prints a real error and leaves the previous good sqlite. Retry-safe. mapd reloads ~15s onroad — no reboot. Progress (querying OSM, merging, installing) shows on the existing script-runner UI.
 
 Overpass can be slow in a dense metro. Wait or retry; the old maps stay put.
+
+## US default fills (estimated limits)
+
+Many US roads have no `maxspeed` in OSM (e.g. US-212 and town streets in Watertown, SD — route 00000185 matched nothing). Pack v5 and Refresh maps fill those ways with the **state default** for the road class. Posted OSM `maxspeed` always wins.
+
+- **Flag:** filled ways have `ways.estimated = 1` (posted = 0); `SpeedLimitMatch.estimated` exposes it. Sources: `<ST>_default`, or `MN_169.14` for Minnesota (the existing MN statute logic, `mn_statutory.py`, unchanged and now statewide). The car currently treats estimated limits **exactly like** the Minnesota fills always were (same Cap/Follow/lookahead) — no special handling yet; the flag is there so it can.
+- **Classes filled:** motorway, trunk, primary, secondary, tertiary (+ links), unclassified. **Not** residential/living_street/alley/service outside Minnesota (they would roughly triple the pack for streets that are nearly always 25 mph). Unposted `*_link` ramps are capped at **45 mph**.
+- **Urban vs rural:** a way is urban if its midpoint is inside an OSM `place=city|town|village` or city/town/village admin_level=8 polygon, or it has a `sidewalk` tag (same heuristic as the MN fills).
+- **State:** from simplified US Census state polygons (`selfdrive/mapd/data/us_states.json`, public domain, via PublicaMundi/MappingAPI); shore roads use the nearest state within 0.1°.
+- **Values:**
+  - Interstate (motorway) rural/urban and expressway: IIHS "Maximum posted speed limits", Oct 2026 — https://www.iihs.org/research-areas/speed/speed-limit-laws (Montana: night values).
+  - Rural trunk/primary: IIHS "other roads" capped at **65**; rural secondary/tertiary/unclassified: IIHS "other roads" capped at **55** (IIHS figures are ceilings, not what an unmarked road carries).
+  - Urban district: **25** unless the state code sets another default: IL 625 ILCS 5/11-601 (30), IN IC 9-21-5-2 (30), MN 169.14 subd. 2 (30), NY VTL 1180 / city default (30), TX Transp. Code 545.352(b) (30), FL 316.183 (30), GA O.C.G.A. 40-6-181 (30), NC G.S. 20-141(b) (35), PA 75 Pa.C.S. 3362 (35).
+- These are estimates. Local ordinances, school zones and engineering-study postings differ; tag real limits in OSM to override.
+
+| State | Rural interstate | Urban interstate | Expressway (trunk/primary tagged expressway/motorroad) | Rural trunk/primary | Rural secondary/tertiary/unclassified | Urban (in city/town/village) |
+|---|---|---|---|---|---|---|
+| AK | 65 | 55 | 65 | 55 | 55 | 25 |
+| AL | 70 | 70 | 65 | 65 | 55 | 25 |
+| AR | 75 | 65 | 75 | 65 | 55 | 25 |
+| AZ | 75 | 65 | 65 | 65 | 55 | 25 |
+| CA | 70 | 65 | 70 | 65 | 55 | 25 |
+| CO | 75 | 65 | 65 | 65 | 55 | 25 |
+| CT | 65 | 55 | 65 | 55 | 55 | 25 |
+| DC | 55 | 55 | 55 | 25 | 25 | 25 |
+| DE | 65 | 55 | 65 | 55 | 55 | 25 |
+| FL | 70 | 65 | 70 | 65 | 55 | 30 |
+| GA | 70 | 70 | 65 | 65 | 55 | 30 |
+| HI | 60 | 60 | 55 | 45 | 45 | 25 |
+| IA | 70 | 65 | 70 | 65 | 55 | 25 |
+| ID | 75 | 75 | 70 | 65 | 55 | 25 |
+| IL | 70 | 55 | 65 | 55 | 55 | 30 |
+| IN | 70 | 55 | 60 | 55 | 55 | 30 |
+| KS | 75 | 75 | 75 | 65 | 55 | 25 |
+| KY | 65 | 65 | 65 | 55 | 55 | 25 |
+| LA | 75 | 70 | 70 | 65 | 55 | 25 |
+| MA | 65 | 65 | 65 | 55 | 55 | 25 |
+| MD | 70 | 70 | 70 | 55 | 55 | 25 |
+| ME | 75 | 75 | 75 | 60 | 55 | 25 |
+| MI | 70 | 70 | 70 | 55 | 55 | 25 |
+| MN | 70 | 70 | 65 | 55 | 55 | 30 (residential 30, alley 10) — Minn. Stat. 169.14 rules, unchanged |
+| MO | 75 | 60 | 75 | 65 | 55 | 25 |
+| MS | 70 | 70 | 70 | 65 | 55 | 25 |
+| MT | 80 | 65 | 70 | 65 | 55 | 25 |
+| NC | 70 | 70 | 70 | 55 | 55 | 35 |
+| ND | 80 | 75 | 70 | 65 | 55 | 25 |
+| NE | 75 | 70 | 70 | 65 | 55 | 25 |
+| NH | 65 | 65 | 55 | 55 | 55 | 25 |
+| NJ | 65 | 55 | 65 | 55 | 55 | 25 |
+| NM | 75 | 75 | 65 | 55 | 55 | 25 |
+| NV | 80 | 65 | 70 | 65 | 55 | 25 |
+| NY | 65 | 65 | 65 | 55 | 55 | 30 |
+| OH | 70 | 65 | 70 | 55 | 55 | 25 |
+| OK | 75 | 70 | 70 | 65 | 55 | 25 |
+| OR | 65 | 55 | 65 | 65 | 55 | 25 |
+| PA | 70 | 70 | 70 | 55 | 55 | 35 |
+| RI | 65 | 55 | 55 | 55 | 55 | 25 |
+| SC | 70 | 70 | 60 | 55 | 55 | 25 |
+| SD | 80 | 80 | 70 | 65 | 55 | 25 |
+| TN | 70 | 70 | 70 | 65 | 55 | 25 |
+| TX | 75 | 75 | 75 | 65 | 55 | 30 |
+| UT | 75 | 70 | 75 | 65 | 55 | 25 |
+| VA | 70 | 70 | 65 | 55 | 55 | 25 |
+| VT | 65 | 55 | 50 | 50 | 50 | 25 |
+| WA | 70 | 60 | 60 | 60 | 55 | 25 |
+| WI | 70 | 70 | 70 | 55 | 55 | 25 |
+| WV | 70 | 55 | 65 | 55 | 55 | 25 |
+| WY | 75 | 75 | 70 | 65 | 55 | 25 |
 
 ## Roundabouts in the pack (schema v4)
 
 Pack schema **v4** (`meta.pack_schema = 4`) adds `rb_ways` / `rb_nodes`: every OSM way tagged `junction=roundabout` (with or without `maxspeed` / `lanes`) plus the highway ways that touch a ring (approach/exit roads), stored in travel direction (two-way roads both ways). Rings without `maxspeed` get no speed-limit row, so the MAX/limit behavior is unchanged; they only feed roundabout detection and ring geometry. `build_osm_speed_limits.py` includes them by default; `--no-roundabouts` builds the old v3 layout. v3 packs still load (no rb tables = no ring geometry).
 
-- **Getting rings on the device:** Settings → NAP → Map Speed Limit → **Refresh maps**. The 100-mile Overpass query now also fetches `junction=roundabout` ways and their approach roads, and the merge adds `rb_ways` even onto an installed v3 pack. A v4 US first-install pack is **not published yet** (maps-index.json still points at v3), so Download US Maps alone does not add rings.
+- **Getting rings on the device:** Settings → NAP → Map Speed Limit → **Refresh maps**. The 100-mile Overpass query now also fetches `junction=roundabout` ways and their approach roads, and the merge adds `rb_ways` even onto an installed v3 pack. The v4 US first-install pack (`osm-us-speed-limits-v4`) includes rings for all 50 states + DC, so Download US Maps adds them.
+- **Advisory and mini-roundabouts:** a ring's `maxspeed:advisory` is stored when it is lower than the posted `maxspeed` (or when there is no posted limit). `highway=mini_roundabout` nodes become a synthetic 7 m ring (way_id = −node id) in PBF builds, so the funnel sees them; roads through the node are its approaches. Refresh maps (Overpass) does not add mini-roundabouts yet.
 - **Ring slow-down target:** when the ring geometry is known, `roundaboutSpeedLimit` uses a comfort speed from the lane radius (lateral ≤ ~2.5 m/s², clamped 15–20 mph; e.g. Soco Rd/Dellwood ≈ 15.8 mph) instead of the default 20 mph.
 - **Roundabout Steering Assist** (`NAPRoundaboutAssist`, Settings → NAP → Driving Mannerisms, **default Off**, Tesla Pre-AP only): on a mapped ring, blends the model curvature toward the lane circle (hold right entry until ~8–10 m before the ring, correction slewed ≤ 0.07/s, weight from GNSS/map-match confidence). The camera path keeps authority on lane edges and driver torque overrides as usual. It depends on GNSS accuracy (validated only in replay), hence default Off. mapd publishes the matched ring to `NAPRoundaboutRing`.
 
@@ -104,7 +175,7 @@ Download US Maps still uses the GitHub Release + `maps-index.json`. Bump those w
 2. Attach `speed_limits_us.sqlite.zst` to a **new** GitHub Release on `jmbrunick/openpilot` (e.g. `osm-us-speed-limits-v3`). Do not replace the in-git JSON with the 204MB zst.
 3. SHA-256 the **zst** (`sha256sum speed_limits_us.sqlite.zst`).
 4. Bump `selfdrive/mapd/maps-index.json`:
-   - `revision` — integer or dotted semver, must be **greater** than the previous value (current first-install is `"3"`)
+   - `revision` — integer or dotted semver, must be **greater** than the previous value (current first-install is `"4"`)
    - `asset_url` — Release download URL for the new zst
    - `asset_name` — usually `speed_limits_us.sqlite.zst`
    - `sha256` — hex digest of the zst
@@ -202,3 +273,7 @@ Policy tests include lead precedence, fetch of a tiny sqlite over HTTP, and Refr
 - Python-only `selfdrive/mapd`. Device needs `zstandard` (already an openpilot dep) to decompress the Release asset.
 - Cereal: `liveMapDataNAP` on custom reserved 0. Rebuild so `params_keys.h` picks up the new params.
 - `mapd` is an onroad managed process in `system/manager/process_config.py`.
+
+## Rail crossings (pack v5, data only)
+
+Pack schema 5 adds `rail_crossings` (node_id, lat, lon, way_id, kind, barrier, light, crossing): OSM `railway=level_crossing` / `railway=crossing` nodes that lie on a drivable highway way, with `crossing:barrier`, `crossing:light` and `crossing=*`. 250,339 in the US (2026-10-11 extracts), ~4.9 MB of the zst. `selfdrive/mapd/rail_crossings.py: crossings_ahead(con, lat, lon, bearing_deg, horizon_m, lateral_m)` returns them nearest-first. No alert/UI yet; older packs simply return [].

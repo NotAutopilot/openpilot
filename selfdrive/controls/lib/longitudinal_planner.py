@@ -65,7 +65,7 @@ from openpilot.selfdrive.mapd.map_speed_policy import (
   cap_planner_v_cruise_ms, map_climb_replaces_mpc, map_in_track_deadband, map_track_accel_ms2,
   map_track_decel_ms2, read_map_speed_params,
 )
-from openpilot.selfdrive.mapd.roundabout import apply_roundabout_plan, live_map_roundabout_hint
+from openpilot.selfdrive.mapd.roundabout import RB_DECEL_JERK_MS3, apply_roundabout_plan, live_map_roundabout_hint
 from openpilot.selfdrive.controls.lib.hill_climb import (
   apply_hill_climb, read_hypermile_hill_climb,
 )
@@ -553,8 +553,14 @@ class LongitudinalPlanner:
 
     # Maps-off / display still eases into an RB (card may not have dropped MAX).
     # Kinematic a from apply_roundabout_plan — not map_track_decel comfort.
+    # Oct 11: jerk-limit the onset of the ring −a (no brick-wall step).
     if rb_v is not None:
-      output_a_target = min(float(output_a_target), float(a_rb_plan))
+      a_jl_prev = float(getattr(self, "_rb_a_jl", 0.0))
+      a_rb_jl = max(float(a_rb_plan), a_jl_prev - RB_DECEL_JERK_MS3 * self.dt)
+      self._rb_a_jl = a_rb_jl
+      output_a_target = min(float(output_a_target), a_rb_jl)
+    else:
+      self._rb_a_jl = 0.0
 
     # Curve preview: accel ceiling from the model path (0–5 s) that slows
     # ahead of a bend, finished ~1.5 s before the tight point, and holds

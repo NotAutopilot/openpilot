@@ -9,6 +9,7 @@ import json
 import math
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,7 +17,7 @@ from openpilot.common.constants import CV
 from openpilot.selfdrive.mapd.local_refresh import merge_ways_into_db
 from openpilot.selfdrive.mapd.osm_db import OsmSpeedLimitDB
 from openpilot.selfdrive.mapd.overpass import overpass_query, ways_from_overpass
-from openpilot.selfdrive.mapd.roundabout import roundabout_target_ms
+from openpilot.selfdrive.mapd.roundabout import RB_PROFILE_BUFFER_M, roundabout_target_ms
 from openpilot.selfdrive.mapd.roundabout_map import (
   PARAM_RING, ROLE_APPROACH, ROLE_RING, RingCache, RingGeometry, local_xy, rb_rows_from_overpass,
   ring_geometry, roundabout_comfort_speed_ms,
@@ -29,8 +30,9 @@ SOCO_CENTER = (35.52208, -83.02814)
 # R128 17:37:59.9 CT, first mapd hint ~192 m east of the ring (westbound on Dellwood Rd).
 R128_FIRST_HINT = (35.52224, -83.02645)   # decel onset (RB_DECEL_ONSET_M = 140): ~131 m out
 # A tagged speed way near the ring (synthetic, not in OSM) to prove speed matching is unchanged.
+SPEED_COORDS: list[tuple[float, float]] = [(35.5240, -83.0330), (35.5240, -83.0230)]
 SPEED_WAY = {"way_id": 900000001, "name": "Test Rd", "highway": "primary", "maxspeed_ms": 45 * CV.MPH_TO_MS,
-             "coords": [(35.5240, -83.0330), (35.5240, -83.0230)], "junction": ""}
+             "coords": SPEED_COORDS, "junction": ""}
 
 
 def _payload():
@@ -201,7 +203,7 @@ def test_overpass_queries_include_rings_and_approaches():
 
 def test_extra_rb_elements_do_not_change_speed_ways():
   base = {"elements": [{"type": "way", "id": SPEED_WAY["way_id"], "tags": {"highway": "primary", "maxspeed": "45 mph"},
-                        "geometry": [{"lat": a, "lon": b} for a, b in SPEED_WAY["coords"]]}]}
+                        "geometry": [{"lat": a, "lon": b} for a, b in SPEED_COORDS]}]}
   combined = {"elements": base["elements"] + _payload()["elements"]}
   assert ways_from_overpass(combined) == ways_from_overpass(base)
 
@@ -238,7 +240,7 @@ def test_builder_from_json_writes_pack_v4(tmp_path):
   src = tmp_path / "in.json"
   payload = _payload()
   payload["elements"].append({"type": "way", "id": SPEED_WAY["way_id"], "tags": {"highway": "primary", "maxspeed": "45 mph"},
-                              "nodes": [1, 2], "geometry": [{"lat": a, "lon": b} for a, b in SPEED_WAY["coords"]]})
+                              "nodes": [1, 2], "geometry": [{"lat": a, "lon": b} for a, b in SPEED_COORDS]})
   src.write_text(json.dumps(payload))
   out = tmp_path / "out.sqlite"
   assert build_main(["--from-json", str(src), "--out", str(out)]) in (0, None)
@@ -421,6 +423,12 @@ def _set_ring(md, *, on=False, approaching=True, ring_mph=15.8, dist=120.0):
   md.roundaboutSpeedLimit, md.roundaboutDistance, md.roundaboutWayId = ring_mph * CV.MPH_TO_MS, dist, SOCO_WAY
 
 
+def _profile_mph(dist=120.0, ring_mph=15.8):
+  """Oct 11: approach MAX follows the 0.7 m/s² profile down to the ring target (no 18 mph step)."""
+  from openpilot.selfdrive.mapd.roundabout import rb_profile_v_ms, roundabout_target_ms
+  return rb_profile_v_ms(dist, roundabout_target_ms(ring_mph * CV.MPH_TO_MS)) / CV.MPH_TO_MS
+
+
 def _hud_mph(h):
   return h.v_cruise_helper.v_cruise_kph / CV.MPH_TO_KPH
 
@@ -433,8 +441,12 @@ def test_card_ring_hint_drops_hud_max_without_speed_match():
   md.speedLimitValid, md.speedLimit = False, 0.0
   _set_ring(md)
   run(h, cs, 1.0)
+  assert _hud_mph(h) == pytest.approx(_profile_mph(), abs=0.3)
+  assert _hud_mph(h) < 45.0 - 5.0
+  assert h._map_slew_ms == pytest.approx(_profile_mph() * CV.MPH_TO_MS, abs=0.05)
+  _set_ring(md, dist=RB_PROFILE_BUFFER_M)
+  run(h, cs, 0.2)
   assert _hud_mph(h) == pytest.approx(18.0, abs=0.3)
-  assert h._map_slew_ms == pytest.approx(18.0 * CV.MPH_TO_MS, abs=0.05)
 
 
 def test_card_ring_hint_same_max_with_or_without_speed_match():
@@ -447,7 +459,7 @@ def test_card_ring_hint_same_max_with_or_without_speed_match():
   _set_ring(md_b)                                # no match
   run(a, cs_a, 1.0)
   run(b, cs_b, 1.0)
-  assert _hud_mph(a) == pytest.approx(_hud_mph(b), abs=1e-6) == pytest.approx(18.0, abs=0.3)
+  assert _hud_mph(a) == pytest.approx(_hud_mph(b), abs=1e-6) == pytest.approx(_profile_mph(), abs=0.3)
 
 
 def test_card_ring_hint_needs_a_valid_map_message():
@@ -503,6 +515,9 @@ def test_ring_exit_ramps_max_up_from_current_speed():
   _set_ring(md, on=False, approaching=True, ring_mph=15.0, dist=135.0)
   cs.vEgo = 36.0 * CV.MPH_TO_MS
   run(h, cs, 0.4)
+  assert _hud_mph(h) == pytest.approx(min(40.0, _profile_mph(135.0, 15.0)), abs=0.4)
+  _set_ring(md, on=True, approaching=False, ring_mph=15.0, dist=0.0)
+  run(h, cs, 0.2)
   assert _hud_mph(h) == pytest.approx(18.0, abs=0.4)
 
   _leave_ring(md)
@@ -556,7 +571,7 @@ def test_ring_exit_above_the_limit_eases_down():
   """Over the posted limit, MAX starts at current speed and does not step to the ring."""
   h, cs, md, run = _card_harness(30.0)
   run(h, cs, 1.0)
-  _set_ring(md, approaching=True, ring_mph=15.0, dist=100.0)
+  _set_ring(md, approaching=True, ring_mph=15.0, dist=RB_PROFILE_BUFFER_M)
   run(h, cs, 0.2)
   assert _hud_mph(h) == pytest.approx(18.0, abs=0.4)
   _leave_ring(md)
@@ -569,3 +584,98 @@ def test_ring_exit_above_the_limit_eases_down():
       assert hud > prev - 0.5
     prev = hud
   assert _hud_mph(h) > 38.0
+
+
+def _ring_way(tags):
+  coords = [(45.0 + 0.0002 * math.sin(a), -95.0 + 0.0003 * math.cos(a)) for a in [i * math.pi / 4 for i in range(9)]]
+  return {"way_id": 1, "tags": {"highway": "tertiary", "junction": "roundabout", **tags},
+          "node_ids": list(range(100, 109)), "coords": coords}
+
+
+@pytest.mark.parametrize("tags, mph", [
+  ({"maxspeed": "30 mph", "maxspeed:advisory": "15 mph"}, 15),
+  ({"maxspeed": "20 mph", "maxspeed:advisory": "25 mph"}, 20),
+  ({"maxspeed:advisory": "15 mph"}, 15),
+  ({"maxspeed": "25 mph"}, 25),
+])
+def test_ring_advisory_uses_lower_speed(tags, mph):
+  from openpilot.selfdrive.mapd.roundabout_map import roundabout_rows
+  rows = roundabout_rows([_ring_way(tags)])
+  assert rows[0]["role"] == ROLE_RING
+  assert rows[0]["maxspeed_ms"] == pytest.approx(mph * CV.MPH_TO_MS, abs=0.05)
+
+
+def test_approach_ignores_advisory():
+  from openpilot.selfdrive.mapd.roundabout_map import roundabout_rows
+  ring = _ring_way({})
+  road = {"way_id": 2, "tags": {"highway": "primary", "maxspeed": "45 mph", "maxspeed:advisory": "15 mph"},
+          "node_ids": [100, 200], "coords": [ring["coords"][0], (45.0, -94.99)]}
+  app = [r for r in roundabout_rows([ring, road]) if r["role"] == ROLE_APPROACH]
+  assert app and all(r["maxspeed_ms"] == pytest.approx(45 * CV.MPH_TO_MS, abs=0.05) for r in app)
+
+
+def test_mini_roundabout_is_small_ring_with_approaches():
+  from openpilot.selfdrive.mapd.roundabout_map import MINI_RB_RADIUS_M, mini_roundabout_way, roundabout_rows
+  lat, lon = 45.12, -95.04
+  mini = mini_roundabout_way(555, lat, lon, {"highway": "mini_roundabout"})
+  assert mini["way_id"] == -555
+  road = {"way_id": 3, "tags": {"highway": "residential"}, "node_ids": [554, 555, 556],
+          "coords": [(lat - 0.001, lon), (lat, lon), (lat + 0.001, lon)]}
+  rows = roundabout_rows([mini, road])
+  rings = [r for r in rows if r["role"] == ROLE_RING]
+  assert len(rings) == 1 and len([r for r in rows if r["role"] == ROLE_APPROACH]) == 2
+  geo = ring_geometry(rings)
+  assert geo is not None
+  assert 6.0 <= geo.radius_m <= 8.0 and abs(geo.radius_m - MINI_RB_RADIUS_M) < 0.5
+  from openpilot.selfdrive.mapd.roundabout import RB_V_MIN_MS
+  # A 7 m ring is tighter than any comfort target: the funnel floor applies.
+  assert roundabout_target_ms(roundabout_comfort_speed_ms(geo.radius_m, geo.lanes, geo.maxspeed_ms)) \
+    == pytest.approx(RB_V_MIN_MS, abs=0.01)
+
+
+# --- Oct 11: ring exit restore with / without a posted limit ------------------------------------------------------
+# MAX is a hard ceiling: a driver-set pre-ring MAX is restored exactly; only a map-auto MAX (no driver set,
+# no posted limit now) may rise to the speed the car had when the ring was first detected.
+
+
+KPH = CV.MPH_TO_KPH
+
+
+def _ring_exit_target_ms(*a):
+  from openpilot.selfdrive.car.card import _ring_exit_target_ms as f
+  return f(*a)
+
+
+def _hold(sticky=None, held=None, policy=None):
+  return SimpleNamespace(sticky_set_kph=None if sticky is None else sticky * KPH,
+                         held_max_kph=None if held is None else held * KPH,
+                         policy_kph=None if policy is None else policy * KPH)
+
+
+def test_posted_limit_wins_when_no_driver_sticky():
+  assert _ring_exit_target_ms(_hold(policy=30), 45 * CV.MPH_TO_MS, None, 26 * CV.MPH_TO_MS) == pytest.approx(45 * CV.MPH_TO_MS)
+
+
+def test_no_posted_driver_set_restores_exactly_watertown():
+  """Route 00000185 17:03:07: stalk-set 35.2 mph, detected at 26.5 mph, SD has no posted limit."""
+  t = _ring_exit_target_ms(_hold(held=35.2), None, None, 26.5 * CV.MPH_TO_MS)
+  assert t == pytest.approx(35.2 * CV.MPH_TO_MS)
+
+
+def test_driver_set_is_a_ceiling_even_below_detection_speed():
+  t = _ring_exit_target_ms(_hold(sticky=30), None, None, 45 * CV.MPH_TO_MS)
+  assert t == pytest.approx(30 * CV.MPH_TO_MS)
+  t = _ring_exit_target_ms(_hold(held=30), None, None, 45 * CV.MPH_TO_MS)
+  assert t == pytest.approx(30 * CV.MPH_TO_MS)
+
+
+def test_map_auto_max_rises_to_detection_speed_without_posted():
+  t = _ring_exit_target_ms(_hold(policy=30), None, None, 45 * CV.MPH_TO_MS)
+  assert t == pytest.approx(45 * CV.MPH_TO_MS)
+  t = _ring_exit_target_ms(_hold(policy=50), None, None, 45 * CV.MPH_TO_MS)
+  assert t == pytest.approx(50 * CV.MPH_TO_MS)
+  assert _ring_exit_target_ms(_hold(policy=30), None, None, None) == pytest.approx(30 * CV.MPH_TO_MS)
+
+
+def test_nothing_known():
+  assert _ring_exit_target_ms(_hold(), None, None, 40 * CV.MPH_TO_MS) is None
