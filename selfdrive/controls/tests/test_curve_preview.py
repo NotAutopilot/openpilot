@@ -128,6 +128,9 @@ def test_highway_bend_preview_is_a_lift():
   # Oct 13: cap about -0.8 at every speed (was -0.35 on the highway).
   assert min(accels) >= -0.81
   assert min(accels) <= -0.1
+  # The raw ceiling itself is clamped: a tight bend close ahead never asks past the cap.
+  raw = curve_preview_accel(30.0, [1.0, 2.0, 3.0], [30.0, 60.0, 90.0], [1.0 / 30.0] * 3)
+  assert -0.81 <= raw <= -0.7
 
 
 def _drive_lagged(v0, bend, seconds, lag_s=1.5):
