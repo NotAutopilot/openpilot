@@ -10,6 +10,7 @@ import os
 PARAM_KEY = "NAPSpeedSignLog"
 LOG_FILENAME = "speed_signs.jsonl"
 ONNX_FILENAME = "speed_sign.onnx"
+PROPOSER_FILENAME = "sign_proposer.onnx"
 PYLIB_DIRNAME = "pylib"
 
 
@@ -39,3 +40,11 @@ def default_pylib_dir() -> str:
   if override:
     return override
   return os.path.join(nap_data_dir(), PYLIB_DIRNAME)
+
+
+def default_proposer_path() -> str:
+  """Two-stage strip proposer (Release speed-sign-proposer-v1)."""
+  override = os.environ.get("NAP_SPEED_SIGN_PROPOSER")
+  if override:
+    return override
+  return os.path.join(nap_data_dir(), PROPOSER_FILENAME)
