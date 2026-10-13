@@ -54,7 +54,7 @@ def test_13s_hung_power_draw_read_does_not_stop_2hz_device_state():
       release.wait(13.0)
       hang_done.set()
       return 9.9
-    return 3.3
+    return 9.9 if hang_done.is_set() else 3.3
   cache = SysReadCache({"power_draw": 0.0, "som_power_draw": 0.0, "memory": 0})
   readers = {"power_draw": lambda: 1.1, "som_power_draw": som_power_draw, "memory": lambda: 42}
   end = threading.Event()
