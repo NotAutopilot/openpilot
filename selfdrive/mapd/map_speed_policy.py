@@ -16,6 +16,54 @@ from openpilot.selfdrive.mapd.constants import (
   map_accel_a_ms2, map_brake_a_ms2, map_track_taper_ms,
 )
 
+# Oct 13 map limits. Untagged state defaults (OSM way with no maxspeed, filled
+# by the pack) are estimates: Ridgewood Rd (tertiary, Sartell/St Joseph city
+# polygon) went 55 -> 30 and the car braked 45 -> 33 mph at -1.6 m/s².
+MAP_SOURCE_TAGGED = "osm"
+MAP_SOURCE_DEFAULT = "osm_default"
+# A drop to a default limit never brakes harder than this.
+DEFAULT_DROP_A_MS2 = 0.5
+# Untagged rural minor roads keep 55 along the same road.
+RURAL_MINOR_HIGHWAYS = frozenset({"secondary", "secondary_link", "tertiary", "tertiary_link"})
+RURAL_KEEP_MS = 55.0 * CV.MPH_TO_MS
+
+
+def map_source_for(estimated: bool, sign: bool = False) -> str:
+  """liveMapDataNAP.source value: sign override, tagged OSM, or state default."""
+  if sign:
+    return "sign"
+  return MAP_SOURCE_DEFAULT if estimated else MAP_SOURCE_TAGGED
+
+
+def keep_rural_default_ms(limit_ms: float, *, estimated: bool, highway: str, road_name: str,
+                          prev: tuple[str, str, float] | None) -> float:
+  """Keep 55 on an untagged secondary/tertiary when the same road was already 55+.
+
+  prev is (road_name, highway, published limit) from the last cycle. A tagged
+  limit, another road, or another class is returned unchanged.
+  """
+  lim = float(limit_ms)
+  hw = str(highway or "").strip().lower()
+  if not estimated or hw not in RURAL_MINOR_HIGHWAYS or lim >= RURAL_KEEP_MS - 0.3:
+    return lim
+  if prev is None:
+    return lim
+  p_name, p_hw, p_lim = prev
+  base = hw.replace("_link", "")
+  if not road_name or p_name != road_name or str(p_hw or "").replace("_link", "") != base:
+    return lim
+  if float(p_lim) >= RURAL_KEEP_MS - 0.3:
+    return RURAL_KEEP_MS
+  return lim
+
+
+def default_drop_cap_ms(cap_ms: float, prev_ms: float | None, v_ego_ms: float, dt: float) -> float:
+  """Ceiling that follows a lower DEFAULT limit down at DEFAULT_DROP_A_MS2 at most."""
+  cap = float(cap_ms)
+  start = max(float(v_ego_ms), cap) if prev_ms is None else float(prev_ms)
+  return max(cap, start - DEFAULT_DROP_A_MS2 * max(0.0, float(dt)))
+
+
 # Keep in sync with openpilot.selfdrive.car.cruise (avoid importing cereal here).
 V_CRUISE_MIN = 8
 V_CRUISE_MAX = 145

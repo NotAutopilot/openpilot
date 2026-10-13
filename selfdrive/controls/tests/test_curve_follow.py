@@ -364,7 +364,7 @@ def test_mode_param_reader_defaults_to_shadow_and_clamps():
 
 # 13 --------------------------------------------------------------------
 def test_release_buffer_is_one_named_constant_and_is_wired(monkeypatch):
-  assert RELEASE_BEFORE_TIGHTEST_S == pytest.approx(1.0)
+  assert RELEASE_BEFORE_TIGHTEST_S == pytest.approx(1.5)
   v = 15.0
   xs = (v * T).tolist()
   ks = [0.0 if x < 70.0 else 1.0 / 40.0 for x in xs]

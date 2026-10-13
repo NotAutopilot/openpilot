@@ -27,9 +27,15 @@ import math
 from openpilot.selfdrive.controls.lib.curve_max_hold import curve_speed_for_curvature
 from openpilot.selfdrive.modeld.constants import ModelConstants
 
-PREVIEW_HORIZON_S = 5.0
-# Finish slowing this long before the tight point.
-PREVIEW_LEAD_S = 1.5
+# Oct 13: the bend was seen only 3–5 s ahead, so slowing began 0.6–6 s AFTER
+# turn-in and plateaued at -0.35…-0.43, shedding 5–8 mph mid-curve. Look out
+# 7 s so slowing starts ~2.5–3 s before turn-in (Justin's lift point).
+PREVIEW_HORIZON_S = 7.0
+# Actuator lag compensation: pedal/regen response trails the command by
+# ~1.5 s, so the command finishes 1.5 s before the tight point and the car
+# itself is done slowing by the apex.
+PREVIEW_LAG_S = 1.5
+PREVIEW_LEAD_S = PREVIEW_LAG_S
 # Room is never shorter than this much travel, so a small overspeed near
 # the car asks for a proportional ease, not a wall.
 PREVIEW_MIN_ROOM_S = 2.0
@@ -37,8 +43,9 @@ PREVIEW_MIN_ROOM_M = 5.0
 PREVIEW_MIN_V_MS = 5.0
 # Comfort decel and build jerk vs speed: firm in town, a lift on the highway.
 PREVIEW_DECEL_BP_MS = [10.0, 25.0]
-PREVIEW_DECEL_MS2 = [1.0, 0.35]
-PREVIEW_JERK_MS3 = [1.0, 0.4]
+# Oct 13: about -0.8 m/s² cap (~60 % of his -1.4 lift-off), every speed.
+PREVIEW_DECEL_MS2 = [0.8, 0.8]
+PREVIEW_JERK_MS3 = [1.0, 0.8]
 PREVIEW_RELEASE_JERK_MS3 = 1.0
 PREVIEW_TAU_S = 0.30
 PREVIEW_MAX_ABS_CURVATURE = 0.2  # ignore nonsense samples (r < 5 m)

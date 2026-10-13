@@ -62,10 +62,11 @@ from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.selfdrive.mapd.constants import MODE_CAP, MODE_FOLLOW, map_accel_a_ms2, map_brake_a_ms2
 from openpilot.selfdrive.mapd.map_speed_policy import (
+  MAP_SOURCE_DEFAULT, default_drop_cap_ms,
   cap_planner_v_cruise_ms, map_climb_replaces_mpc, map_in_track_deadband, map_track_accel_ms2,
   map_track_decel_ms2, read_map_speed_params,
 )
-from openpilot.selfdrive.mapd.roundabout import RB_DECEL_JERK_MS3, apply_roundabout_plan, live_map_roundabout_hint
+from openpilot.selfdrive.mapd.roundabout import RB_DECEL_JERK_MS3, RingExitGate, apply_roundabout_plan, live_map_roundabout_hint
 from openpilot.selfdrive.controls.lib.hill_climb import (
   apply_hill_climb, read_hypermile_hill_climb,
 )
@@ -406,6 +407,21 @@ class LongitudinalPlanner:
       except Exception:
         md = None
       rb_hint = live_map_roundabout_hint(md)
+      try:
+        self._map_default = str(getattr(md, "source", "") or "") == MAP_SOURCE_DEFAULT
+      except Exception:
+        self._map_default = False
+      # Oct 13: right blinker on the ring + leaving it ends the ring clamp
+      # (same gate as card's MAX). The blinker alone does nothing.
+      if not hasattr(self, "_rb_exit_gate"):
+        self._rb_exit_gate = RingExitGate()
+      try:
+        rb_curv = float(getattr(sm['controlsState'], "curvature", 0.0))
+        rb_right = bool(getattr(sm['carState'], "rightBlinker", False))
+      except Exception:
+        rb_curv, rb_right = 0.0, False
+      if self._rb_exit_gate.update(rb_hint, rb_right, rb_curv, self.dt):
+        rb_hint = None
     if (not force_slow_decel) and self._is_preap and self._map_speed_mode in (MODE_CAP, MODE_FOLLOW):
       v_cruise = cap_planner_v_cruise_ms(v_hud_ms, None, mode=self._map_speed_mode)
     if not force_slow_decel:
@@ -936,7 +952,14 @@ class LongitudinalPlanner:
       long_on = (cs.enableLongControl is True) and (cs.cruiseState.enabled is True)
     except Exception:
       long_on = True
-    v_cap = float(self._unified_v_cap_ms)
+    map_cap = float(self._unified_v_cap_ms)
+    # Oct 13: a drop to an untagged state default follows down at <= 0.5 m/s².
+    if getattr(self, "_map_default", False) and map_cap > 0.0:
+      self._default_cap_ms = default_drop_cap_ms(map_cap, getattr(self, "_default_cap_ms", None), v_ego, self.dt)
+      map_cap = float(self._default_cap_ms)
+    else:
+      self._default_cap_ms = None
+    v_cap = map_cap
     # True cornering (vehicle-model curvature) with the speed-dependent
     # lateral target, not the steer model (which reads ~12% high at speed).
     v_curve = curve_speed_for_curvature(float(self._corner_curvature))
@@ -954,7 +977,7 @@ class LongitudinalPlanner:
     a_map = None
     if override is None and self._map_speed_mode in (MODE_CAP, MODE_FOLLOW):
       a_map = map_track_decel_ms2(
-        v_ego, float(self._unified_v_cap_ms), map_brake_a_ms2(self._map_speed_lookahead),
+        v_ego, map_cap, map_brake_a_ms2(self._map_speed_lookahead),
       )
     if self.curve_preview_a < PREVIEW_FREE_A_MS2:
       a_map = self.curve_preview_a if a_map is None else min(float(a_map), self.curve_preview_a)

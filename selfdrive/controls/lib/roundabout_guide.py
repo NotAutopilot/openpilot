@@ -106,6 +106,13 @@ def _interp(x: float, xp: tuple[float, float], fp: tuple[float, float]) -> float
   return fp[0] + (fp[1] - fp[0]) * (x - xp[0]) / (xp[1] - xp[0])
 
 
+def _hint_on_ring(hint) -> bool:
+  try:
+    return bool(hint is not None and getattr(hint, "on_roundabout", False))
+  except Exception:
+    return False
+
+
 def _wrap(a: float) -> float:
   return (a + math.pi) % (2.0 * math.pi) - math.pi
 
@@ -807,9 +814,13 @@ class RoundaboutAssist:
                       float(getattr(g, "bearingAccuracyDeg", 0.0) or 0.0), lat_s)
       return   # one source per cycle; external preferred when present
 
-  def _sync_latched_param(self) -> None:
-    """modeld reads this (a different process) to suppress ALC tips while the car is on the ring."""
-    latched = self.latched
+  def _sync_latched_param(self, on_ring: bool = False) -> None:
+    """modeld reads this (a different process) to suppress ALC tips while the car is on the ring.
+
+    Oct 13: also set whenever the map says we are on a roundabout, assist on
+    or off, so the exit blinker in a ring never arms an automatic lane change.
+    """
+    latched = bool(self.latched or on_ring)
     if latched == self._latched_param:
       return
     self._latched_param = latched
@@ -830,8 +841,7 @@ class RoundaboutAssist:
       self.guide.update(t, v_ego, yaw_rate, model_k, enabled=False, lat_active=False)
       if self.guide.latched:
         self.guide.reset_state()      # toggled Off on the ring: nothing carried over
-      if self._latched_param:
-        self._sync_latched_param()
+      self._sync_latched_param(on_ring=_hint_on_ring(hint))
       return float(model_k)
     dt = 0.0 if self._last_t is None else min(max(t - self._last_t, 0.0), 0.1)
     self._last_t = t
@@ -849,7 +859,7 @@ class RoundaboutAssist:
     edges = edges_from_model(model_v2, v_ego) if (on and model_v2 is not None) else None
     out = self.guide.update(t, v_ego, yaw_rate, model_k, enabled=on, lat_active=lat_active, edges=edges, driver=driver)
     self.active = self.guide.phase in (ACTIVE, EXITING)
-    self._sync_latched_param()
+    self._sync_latched_param(on_ring=_hint_on_ring(hint))
     self._log(t, model_k, out, v_ego, model_v2, driver, on)
     return out
 

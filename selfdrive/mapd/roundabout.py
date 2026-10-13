@@ -24,13 +24,15 @@ from openpilot.selfdrive.mapd.constants import LOOKAHEAD_NORMAL
 # for 35->18 mph and was late / abrupt from a 55 mph approach (needs ~340 m
 # at 0.7 m/s²). Onset = (v² − v_ring²)/(2·0.7) + 30 m, clamped 140–450 m.
 RB_ONSET_A_MS2 = 0.7
-RB_ONSET_MARGIN_M = 30.0
+RB_ONSET_MARGIN_M = 70.0  # Oct 13: +40 m with the earlier final ramp
 RB_ONSET_MIN_M = 140.0
 RB_ONSET_MAX_M = 450.0
 # MAX profile reaches ring speed this far before the ring line.
-RB_PROFILE_BUFFER_M = 15.0
-# Kinematic −a ceiling: never brick-wall.
-RB_A_MAX_DECEL_MS2 = -1.5
+# Oct 13: 15 m left the final slowdown firming to -1.2…-1.9 in the last
+# 60–130 m. 55 m starts that final slowdown ~40 m earlier.
+RB_PROFILE_BUFFER_M = 55.0
+# Kinematic −a ceiling: never brick-wall. Oct 13: about -1.0 (was -1.5).
+RB_A_MAX_DECEL_MS2 = -1.0
 # Planner jerk limit on the ring −a onset (m/s³).
 RB_DECEL_JERK_MS3 = 1.5
 # Detect / start ease by this distance (the decel onset). Must still have fired by MIN.
@@ -102,7 +104,7 @@ class RoundaboutHint:
 
 
 def rb_decel_onset_m(v_ego_ms: float | None, v_ring_ms: float | None = None) -> float:
-  """Distance before the ring to start easing: (v² − v_ring²)/(2·0.7) + 30 m, 140–450 m."""
+  """Distance before the ring to start easing: (v² − v_ring²)/(2·0.7) + RB_ONSET_MARGIN_M, 140–450 m."""
   if v_ego_ms is None:
     return RB_ONSET_MIN_M
   vr = RB_V_MIN_MS if v_ring_ms is None else float(v_ring_ms)
@@ -266,6 +268,68 @@ def apply_roundabout_plan(
     output_a_target = min(float(output_a_target), a_rb)
   output_a_target = min(float(output_a_target), 0.0)
   return v_cruise_ms, v_hud_ms, float(output_a_target), float(rb_v)
+
+
+# Oct 13 exit restore (Justin): restore only when the RIGHT blinker is on
+# while on the ring AND the car is actually leaving it (curvature unwinding
+# from the ring's peak). The blinker alone never restores. With no signal,
+# the restore waits until the car is fully off the ring (the hint clears).
+RB_EXIT_PEAK_MIN_K = 0.02      # 1/m: we have really been circulating (R < 50 m)
+RB_EXIT_UNWIND_FRAC = 0.55     # ring-direction curvature below this share of the peak
+RB_EXIT_HOLD_S = 0.3           # both conditions this long
+RB_EXIT_RESTORE_MPHS = 1.75    # restore rate, 1.5–2 mph/s
+RB_EXIT_RESTORE_MS2 = RB_EXIT_RESTORE_MPHS * CV.MPH_TO_MS
+
+
+class RingExitGate:
+  """True once the driver signals right on the ring and the car is leaving it.
+
+  Latched until the ring hint clears (or a different ring appears). Pure:
+  card (MAX) and the planner (a clamp) each run one with the same inputs.
+  """
+
+  def __init__(self) -> None:
+    self.reset()
+
+  def reset(self) -> None:
+    self.released = False
+    self._way = 0
+    self._peak = 0.0
+    self._sign = 0.0
+    self._both_s = 0.0
+
+  def update(self, hint: RoundaboutHint | None, right_blinker: bool, curvature: float | None,
+             dt: float) -> bool:
+    if hint is None or not (hint.on_roundabout or hint.approaching):
+      self.reset()
+      return False
+    way = int(getattr(hint, "way_id", 0) or 0)
+    if way and self._way and way != self._way:
+      self.reset()
+    if way:
+      self._way = way
+    if self.released:
+      return True
+    if not hint.on_roundabout:
+      self._both_s = 0.0
+      return False
+    try:
+      k = float(curvature) if curvature is not None else 0.0
+    except (TypeError, ValueError):
+      k = 0.0
+    if not math.isfinite(k):
+      k = 0.0
+    if abs(k) > self._peak:
+      self._peak = abs(k)
+      self._sign = 1.0 if k > 0.0 else -1.0
+    unwinding = self._peak >= RB_EXIT_PEAK_MIN_K and k * self._sign < RB_EXIT_UNWIND_FRAC * self._peak
+    if bool(right_blinker) and unwinding:
+      self._both_s += max(0.0, float(dt))
+    else:
+      self._both_s = 0.0
+    if self._both_s + 1e-9 >= RB_EXIT_HOLD_S:
+      self.released = True
+    return self.released
 
 
 def live_map_roundabout_hint(md) -> RoundaboutHint | None:
