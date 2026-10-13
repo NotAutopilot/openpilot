@@ -360,7 +360,7 @@ def _would_shift(side: int, clearance: float) -> float:
   return float(side) * need
 
 
-def cone_shift_target(sample: "ConeLineSample", *, v_ego: float, clearance: float,
+def cone_shift_target(sample: ConeLineSample, *, v_ego: float, clearance: float,
                       lead_in_span: bool, overhead: bool, lane_room: float | None) -> float:
   """Signed in-lane path shift, +right, away from an active cone line. 0 = none.
 
