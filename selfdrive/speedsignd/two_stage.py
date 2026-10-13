@@ -5,7 +5,7 @@ strip x 964-1928, y 525-875 of the 1928x1208 ROAD frame, resized to 352x128.
 ~0.3 GFLOP, ~110 ms on one 3X core, so 2 Hz is ~22 % of a core. Skipped below
 2 m/s (GPS speed / modelV2 velocity; no carState subscriber).
 
-Stage 2 (read): proposals are linked into tracks (IoU or centre distance).
+Stage 2 (read): proposals are linked into tracks (IoU or center distance).
 A track must be seen twice. When it is near its largest (box height >= 60 px,
 near the right edge, growth has stopped, or the track was lost) we copy one
 square native crop around it (3x the box, clamped 240-480 px), letterbox it to

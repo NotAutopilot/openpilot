@@ -1333,7 +1333,7 @@ def main():
   hold = LiveSignHold()
   debounce = SignDebounce()
   # Two-stage reader: strip proposer + tracker + one sharp read per sign.
-  # Missing proposer file -> legacy fixed tiles (unchanged behaviour).
+  # Missing proposer file -> legacy fixed tiles (unchanged behavior).
   proposer = two_stage.Proposer(default_proposer_path())
   tracker = two_stage.SignTracker()
   two_period_s = 1.0 / two_stage.PROPOSER_HZ
@@ -1780,6 +1780,7 @@ def main():
                     engaged_now=engaged_now, stalled=stalled):
             if not detector.compile_allowed_now():
               raise RuntimeError("compile-blocked while driving")
+            assert job is not None
             strip_c, cap_c, tid, rect, t_fr = job
             t0 = time.monotonic()
             props = proposer.propose(strip_c)

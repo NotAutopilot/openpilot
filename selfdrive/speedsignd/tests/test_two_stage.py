@@ -9,7 +9,7 @@ from openpilot.selfdrive.speedsignd.nv12 import Nv12DetectCrop
 
 def test_decode_maps_strip_to_frame():
   raw = np.zeros((1, 5, 4), np.float32)
-  raw[0, :, 0] = [176, 64, 20, 20, 0.9]   # strip centre
+  raw[0, :, 0] = [176, 64, 20, 20, 0.9]   # strip center
   raw[0, :, 1] = [10, 10, 5, 5, 0.05]     # below threshold
   out = ts.decode_proposals(raw, ts.STRIP_RECT)
   assert len(out) == 1
