@@ -84,6 +84,8 @@ def hud_confirm_visible(view: LiveSignView | None = None, *, show_mph: bool = Fa
                         show_runtime_missing: bool = False) -> bool:
   """Yes/No accuracy overlay: only when a real mph is on the plate, never for NO WT / NO RT / WAIT."""
   if view is not None:
+    if getattr(view, "answered", False):
+      return False
     show_mph = view.show_mph
     mph = view.mph
     show_missing_weights = view.show_missing_weights
@@ -156,6 +158,7 @@ class LiveSignView:
   show_missing_weights: bool = False
   show_detect_paused: bool = False
   show_runtime_missing: bool = False
+  answered: bool = False  # driver already tapped Yes for this plate: no buttons
 
   @property
   def show(self) -> bool:
@@ -507,3 +510,45 @@ class LiveSignHold:
     if not live:
       return False, 0, 0.0
     return True, self.mph, self.conf
+
+
+# After a Yes/No tap: hide the question at once and do not re-ask the same mph
+# shortly after (no track id on the wire; the same mph within the window is
+# treated as the same sign).
+REASK_SUPPRESS_S = 60.0
+CONFIRMED_PLATE_MAX_S = 900.0
+
+
+class AnswerGate:
+  """Yes keeps a button-free plate of the confirmed mph until a different live
+  mph arrives (or 15 min). No clears the plate while that mph is live and for
+  REASK_SUPPRESS_S after. Diagnostics plates (NO WT / NO RT / WAIT) pass through."""
+
+  def __init__(self) -> None:
+    self.mph: int = 0
+    self.yes: bool = False
+    self.t: float = -1e9
+
+  def answer(self, mph: int, yes: bool, now: float) -> None:
+    self.mph, self.yes, self.t = int(mph), bool(yes), float(now)
+
+  def filter(self, view: LiveSignView, now: float) -> LiveSignView:
+    if view.show_missing_weights or view.show_runtime_missing or view.show_detect_paused:
+      return view
+    if self.mph <= 0:
+      return view
+    age = now - self.t
+    live = int(view.mph) if view.show_mph else 0
+    if live and live != self.mph:
+      if self.yes and age > REASK_SUPPRESS_S:
+        self.mph = 0
+      return view
+    if self.yes:
+      if age > CONFIRMED_PLATE_MAX_S:
+        self.mph = 0
+        return view
+      return LiveSignView(show_mph=True, mph=self.mph, answered=True)
+    if live == self.mph or age <= REASK_SUPPRESS_S:
+      return LiveSignView()
+    self.mph = 0
+    return view

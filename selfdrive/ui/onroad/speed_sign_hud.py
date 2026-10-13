@@ -13,13 +13,16 @@ lines matching speedsignd. Manual driving (moving OK) still runs detect.
 
 Yes/No ("is this accurate?") appears only with a live mph — not for NO WT
 or NO RT.
-Taps are logged to speedsign_feedback/ (JSONL + crop JPEG); they do not change cruise, HUD MAX, or map speed.
+Taps are logged to speedsign_feedback/ (JSONL + crop JPEG). Yes also applies the
+confirmed limit (speedsignd/confirmed_limit.py); No is log-only. A tap hides the
+question at once (AnswerGate).
 """
 from __future__ import annotations
 
 import pyray as rl
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.speedsignd.hud import (
+  AnswerGate,
   HUD_CONFIRM_NO,
   HUD_CONFIRM_PROMPT,
   HUD_CONFIRM_YES,
@@ -223,8 +226,16 @@ def draw_accuracy_overlay(
   _draw_confirm_button(no, HUD_CONFIRM_NO, font, font_size, _NO_BG, pressed_no, _NO_BG_PRESSED)
 
 
+_GATE = AnswerGate()
+
+
+def _now() -> float:
+  import time
+  return time.monotonic()
+
+
 def _draw_live_sign(rect_fn, rect: rl.Rectangle, font_bold, font_label, digit_size: int, label_size: int) -> LiveSignView:
-  view = live_sign_from_sm(ui_state.sm, logger_enabled())
+  view = _GATE.filter(live_sign_from_sm(ui_state.sm, logger_enabled()), _now())
   if not view.show:
     return view
   if view.show_missing_weights or view.show_runtime_missing:
@@ -260,7 +271,7 @@ class SpeedSignHud(Widget):
     self._font_label: rl.Font = gui_app.font(FontWeight.SEMI_BOLD)
 
   def _update_state(self) -> None:
-    self._view = live_sign_from_sm(ui_state.sm, logger_enabled())
+    self._view = _GATE.filter(live_sign_from_sm(ui_state.sm, logger_enabled()), _now())
 
   def _layout(self) -> None:
     sign = tici_sign_rect(self._rect) if self._tici else mici_sign_rect(self._rect)
@@ -293,7 +304,11 @@ class SpeedSignHud(Widget):
     if last[0] == int(self._view.mph) and now - last[1] < 3.0:
       return
     self._last_answer = (int(self._view.mph), now)
-    on_confirm_accuracy(self._view.mph, hit)
+    mph = int(self._view.mph)
+    # Hide the question (and prompt) this frame; Yes keeps a plain plate.
+    _GATE.answer(mph, hit, now)
+    self._view = _GATE.filter(self._view, now)
+    on_confirm_accuracy(mph, hit)
 
   def _render(self, rect: rl.Rectangle) -> None:
     if not self._view.show:
