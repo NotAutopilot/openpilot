@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -358,6 +359,57 @@ def _dir_bytes(d: str) -> int:
   return n
 
 
+REALDATA_PREFIX = "speedsign_"
+_SEG_RE = re.compile(r"^[0-9a-f]{8}--[0-9a-f]{10}--\d+$")
+CURRENT_SEG_MAX_AGE_S = 300.0
+
+
+def current_segment_dir(root: str | None = None, now: float | None = None) -> str | None:
+  """Newest loggerd segment folder under realdata, if written in the last 5 min."""
+  if root is None:
+    try:
+      from openpilot.system.hardware.hw import Paths
+      root = Paths.log_root()
+    except Exception:
+      return None
+  now = time.time() if now is None else now  # noqa: TID251  compare with file mtimes
+  best, best_m = None, -1.0
+  try:
+    with os.scandir(root) as it:
+      for e in it:
+        if not (_SEG_RE.match(e.name) and e.is_dir(follow_symlinks=False)):
+          continue
+        m = e.stat(follow_symlinks=False).st_mtime
+        if m > best_m:
+          best, best_m = e.path, m
+  except OSError:
+    return None
+  if best is None or now - best_m > CURRENT_SEG_MAX_AGE_S:
+    return None
+  return best
+
+
+def copy_to_realdata(rec: dict, line: str, d: str, root: str | None = None, now: float | None = None) -> str | None:
+  """Mirror one feedback row (+ crop) into the current route segment folder.
+
+  athena uploadFilesToUrls only reaches files under realdata, so harvest can
+  pull speedsign_feedback.jsonl / speedsign_<stamp>_<yes|no>_<mph>.jpg per
+  segment. The uploader never auto-sends these names (not qlog/qcamera).
+  """
+  seg = current_segment_dir(root, now=now)
+  if seg is None:
+    return None
+  try:
+    with open(os.path.join(seg, REALDATA_PREFIX + FEEDBACK_JSONL), "a") as f:
+      f.write(line)
+    jpg = rec.get("jpg")
+    if jpg and os.path.isfile(os.path.join(d, jpg)):
+      shutil.copyfile(os.path.join(d, jpg), os.path.join(seg, REALDATA_PREFIX + jpg))
+    return os.path.basename(seg)
+  except OSError:
+    return None
+
+
 def record_answer(displayed_mph: int, yes: bool, d: str | None = None, now: float | None = None) -> dict | None:
   """UI Yes/No: append feedback.jsonl (+confirmed.jsonl on Yes), keep the crop JPEG.
 
@@ -405,6 +457,7 @@ def record_answer(displayed_mph: int, yes: bool, d: str | None = None, now: floa
     if yes and not rec["stale_pending"]:
       with open(os.path.join(d, CONFIRMED_JSONL), "a") as f:
         f.write(line)
+    rec["realdata"] = copy_to_realdata(rec, line, d, now=now)
     return rec
   except Exception:
     return None

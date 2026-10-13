@@ -22,6 +22,10 @@ from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import V_CRUISE_UNSET, VCruiseHelper
 from openpilot.selfdrive.mapd.constants import MANUAL_SET_EPS_KPH, map_accel_a_ms2
+from openpilot.selfdrive.speedsignd.confirmed_limit import (
+  PARAM as SIGN_CONFIRMED_PARAM, ConfirmedLimitHold, ConfirmedMapData, parse_confirmed,
+)
+from openpilot.selfdrive.mapd.constants import MODE_CAP as _SIGN_MODE_CAP, MODE_FOLLOW as _SIGN_MODE_FOLLOW
 from openpilot.selfdrive.mapd.map_speed_policy import (
   MapCruiseHold, apply_map_speed_kph, decide_map_cruise, effective_map_limit_ms,
   map_slew_a_ms2, read_map_speed_params, should_write_preap_pedal, slew_map_speed_ms,
@@ -294,6 +298,8 @@ class Car:
     self._pedal_self_write_kph: float | None = None
     self._follow_stalk_mono: float = 0.0
     self._follow_gesture = FollowStalkGesture()
+    self._sign_hold = ConfirmedLimitHold()
+    self._sign_confirmed: tuple[int, float] | None = None
     self._refresh_map_speed_params()
 
     self.is_metric = self.params.get_bool("IsMetric")
@@ -449,6 +455,16 @@ class Car:
     raw_posted_kph = None
     if md is not None and md.speedLimit > 0:
       raw_posted_kph = float(md.speedLimit) * CV.MS_TO_KPH
+    # Driver-confirmed sign (HUD YES only): stands in for the OSM posted
+    # limit until OSM changes zone or a newer YES (confirmed_limit.py).
+    map_mode = self._map_speed_mode
+    sign_kph = self._sign_hold.update(getattr(self, "_sign_confirmed", None), raw_posted_kph)
+    if sign_kph is not None:
+      md = ConfirmedMapData(sign_kph, md)
+      map_valid = True
+      raw_posted_kph = sign_kph
+      if map_mode < _SIGN_MODE_CAP:
+        map_mode = _SIGN_MODE_FOLLOW
     # Offset from raw OSM posted (mph). Hypermile eco / Step Down apply
     # only with a known map posted — never invent a drop when maps are
     # off, unmatched, or speedLimit unknown (same as sticky MAX).
@@ -482,7 +498,7 @@ class Car:
     dec = decide_map_cruise(
       self._map_hold,
       engaged=session_engaged,
-      mode=self._map_speed_mode,
+      mode=map_mode,
       raw_kph=raw_kph,
       posted_kph=policy_posted_kph,
       engage_rising=engage_rising,
@@ -572,7 +588,7 @@ class Car:
       preap_v_cruise_kph = apply_map_speed_kph(
         dec.driver_kph,
         map_kph,
-        mode=self._map_speed_mode,
+        mode=map_mode,
         offset_kph=map_offset_kph,
         engaged=session_engaged,
         op_long_software_cruise=True,
@@ -950,6 +966,10 @@ class Car:
     self._map_step_down_on = read_hypermile_step_down(self.params)
     self._map_speed_lookahead = lookahead
     self._map_speed_accel = accel
+    try:
+      self._sign_confirmed = parse_confirmed(self.params.get(SIGN_CONFIRMED_PARAM))
+    except Exception:
+      self._sign_confirmed = None
 
   def _live_map_offset_kph(self, raw_posted_kph: float | None,
                            maps_posted: bool | None = None) -> float:

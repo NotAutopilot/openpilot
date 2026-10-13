@@ -127,12 +127,31 @@ def on_confirm_accuracy(mph: int, yes: bool) -> None:
 
   Keeps the peak-size crop JPEG speedsignd saved for the plate (pending.jpg)
   and, on Yes, also appends confirmed.jsonl (future OSM confirmed readings;
-  nothing is uploaded to osm.org). No cruise / HUD MAX / map-speed change.
+  nothing is uploaded to osm.org). The row and crop are mirrored into the
+  current realdata segment for athena harvest.
+
+  Yes only: also sets NAPSpeedSignConfirmed so card.py treats this limit as
+  the posted limit (MAX = limit + Map Speed offset, existing map slew/ease)
+  until OSM changes zone or a newer Yes. No is log-only; nothing is ever
+  applied without a Yes tap (see speedsignd/confirmed_limit.py).
   """
+  import time
   from openpilot.selfdrive.speedsignd.two_stage import record_answer
   rec = record_answer(int(mph), bool(yes))
-  cloudlog.info("speed_sign_hud feedback mph=%s yes=%s saved=%s jpg=%s",
-                int(mph), bool(yes), rec is not None, (rec or {}).get("jpg"))
+  applied = False
+  if yes:
+    try:
+      from openpilot.common.params import Params
+      from openpilot.selfdrive.speedsignd.confirmed_limit import PARAM, confirmed_payload, parse_confirmed
+      payload = confirmed_payload(int(mph), time.monotonic())
+      if parse_confirmed(payload) is not None:
+        Params().put(PARAM, payload)
+        applied = True
+    except Exception:
+      applied = False
+  cloudlog.info("speed_sign_hud feedback mph=%s yes=%s saved=%s jpg=%s lat=%s lon=%s realdata=%s applied=%s",
+                int(mph), bool(yes), rec is not None, (rec or {}).get("jpg"),
+                (rec or {}).get("lat"), (rec or {}).get("lon"), (rec or {}).get("realdata"), applied)
 
 
 def draw_speed_sign_plate(
