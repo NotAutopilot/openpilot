@@ -266,3 +266,67 @@ def test_vectorized_patch_stats_match_the_list_path():
 def test_selfdrived_still_ignores_path_obstacle_by_name():
   root = Path(__file__).resolve().parents[2]
   assert "'pathObstacleNAP'" in (root / "selfdrived/selfdrived.py").read_text()
+
+
+# ---- Oct 13 2026 camera-confirm fixes (still log only) ----
+
+def _score(x0, x1, hit):
+  return cc.CropScore(x0, x1, hit, 0.9 if hit else 0.1, 50 if hit else 0, 10, 2 if hit else 0, (0, 0, 1, 1))
+
+
+def _all6(hits):
+  return [_score(a, b, (a, b) in hits) for a, b in cc.WINDOWS_M]
+
+
+def test_oct13_zero_hit_frame_clears_confirmed():
+  # 07:57:37 / 08:06:33 / 08:07:31: confirmed was reported on a 0-hit frame.
+  st = cc.ConeCamState()
+  assert st.update(1, _all6({cc.WINDOWS_M[1], cc.WINDOWS_M[2]}), 10.0)
+  assert not st.update(1, _all6(set()), 10.2)
+  assert not st.confirmed(10.3)
+
+
+def test_oct13_budget_split_frames_can_confirm_together():
+  st = cc.ConeCamState()
+  first = [_score(*cc.WINDOWS_M[i], i == 1) for i in range(3)]
+  second = [_score(*cc.WINDOWS_M[i], i == 4) for i in range(3, 6)]
+  assert not st.update(-1, first, 5.0)
+  assert st.update(-1, second, 5.2)
+  # Overlapping windows (one drum sliding through) never confirm across frames.
+  st2 = cc.ConeCamState()
+  assert not st2.update(-1, [_score(*cc.WINDOWS_M[1], True), _score(*cc.WINDOWS_M[2], False)], 5.0)
+  assert not st2.update(-1, [_score(*cc.WINDOWS_M[1], False), _score(*cc.WINDOWS_M[2], True)], 5.2)
+
+
+def test_oct13_lines_inside_our_footprint_are_vehicles_not_cones():
+  # 08:05 queue at a light: "line" at -0.15…-1.1 m. Never scored.
+  y = np.full((1208, 1928), 90, np.uint8)
+  u = np.full((604, 964), 128, np.uint8)
+  v = np.full((604, 964), 128, np.uint8)
+  for x0, x1 in cc.WINDOWS_M:
+    assert cc.score_window(y, u, v, G17C, x0, x1, (-0.4, -0.8, -1.1)) is None
+
+
+def test_oct13_red_tail_lights_do_not_hit_but_orange_does():
+  y = np.full((1208, 1928), 90, np.uint8)
+  base_u = np.full((604, 964), 128, np.uint8)
+  base_v = np.full((604, 964), 128, np.uint8)
+  lats = (-2.4, -2.4, -2.4)
+  probe = cc.score_window(y, base_u, base_v, G17C, 12.0, 17.0, lats)
+  assert probe is not None
+  u0, v0, u1, v1 = probe.box
+
+  def paint(uval, vval):
+    # Alternating colour / white bands, 16 full-res rows each.
+    u, v, yy = base_u.copy(), base_v.copy(), y.copy()
+    for r in range(v0, v1, 32):
+      u[r // 2:(r + 16) // 2, u0 // 2:u1 // 2] = uval
+      v[r // 2:(r + 16) // 2, u0 // 2:u1 // 2] = vval
+      yy[r + 16:r + 32, u0:u1] = 200
+    return cc.score_window(yy, u, v, G17C, 12.0, 17.0, lats)
+
+  orange = paint(80, 180)
+  red = paint(118, 200)
+  assert orange is not None and orange.hit
+  assert red is not None and not red.hit
+  assert cc.MAX_SAMPLES <= 3000

@@ -75,11 +75,11 @@ def test_oct10_1648_left_drums_stay_correct():
   assert _active_s(out) >= 18.0
   assert all(s.side == 1 for _, s in active)
   steer = [s.would_steer for _, s in active if s.would_steer != 0.0]
-  assert steer and all(0.0 < w <= 0.40 + 1e-6 for w in steer)
-  # Ramped: no single-frame jump from 0 to the cap.
+  assert steer and all(0.0 < w <= 1.0 + 1e-6 for w in steer)
+  # Ramped slowly (0.2 m/s): no single-frame jump.
   prev = 0.0
   for _, s in out:
-    assert abs(s.would_steer - prev) <= 0.8 * 0.5 + 1e-6
+    assert abs(s.would_steer - prev) <= 0.2 * 0.5 + 1e-6
     prev = s.would_steer
 
 

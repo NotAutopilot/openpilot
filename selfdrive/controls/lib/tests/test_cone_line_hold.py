@@ -45,6 +45,22 @@ def _model_k(x_la):
   return 2.0 * Y_PULL / (x_la * x_la)
 
 
+def _step_lane(hold, *, torque=0.0, seconds=DT, yielded=False, lat_active=True, cone=None,
+               lane_offset=None, lane_center_la=None, cone_shift=0.0, v=V):
+  """Straight lane-centred model path; lane offset given directly (+right)."""
+  x_la = lookahead_m(v)
+  path_x, path_y = [0.0, x_la, 2 * x_la], [0.0, 0.0, 0.0]
+  cone = _cone() if cone is None else cone
+  out = None
+  for _ in range(max(1, int(round(seconds / DT)))):
+    out = hold.update(
+      enabled=True, engaged=True, cone=cone, torque_nm=torque, measured_k=0.0, model_k=0.0,
+      path_x=path_x, path_y=path_y, v_ego=v, yielded=yielded, lat_active=lat_active, dt=DT,
+      lane_offset=lane_offset, lane_center_la=lane_center_la, cone_shift=cone_shift,
+    )
+  return out
+
+
 def _step(hold, *, torque=0.0, measured_k=0.0, model_k=None, yielded=False,
           lat_active=True, enabled=True, engaged=True, cone=None, seconds=DT,
           v=V, path=None):
@@ -126,15 +142,19 @@ def test_offset_holds_on_retake_and_releases_after_the_line_clears():
 
 
 def test_steer_back_releases_even_while_the_line_remains():
+  # Oct 13: a push back toward the cones re-captures his offset; back near
+  # the lane centre (< 0.15 m away) the hold lets go.
   hold = ConeLineHold()
   model_k = _model_k(lookahead_m(V))
-  _step(hold, torque=1.0, seconds=PUSH_ARM_S + 0.3, yielded=True, lat_active=False)
-  held = _step(hold, torque=0.0, seconds=0.2, yielded=False, lat_active=True)
-  assert held.curvature == pytest.approx(0.0, abs=1e-6)
-  _step(hold, torque=-0.8, seconds=0.4, yielded=False, lat_active=True)
-  done = _step(hold, torque=0.0, seconds=RELEASE_S + 0.2, yielded=False, lat_active=True)
+  _step_lane(hold, torque=1.0, seconds=PUSH_ARM_S + 0.3, yielded=True, lat_active=False, lane_offset=-0.9)
+  held = _step_lane(hold, seconds=0.2, lane_offset=-0.9)
+  assert held.active and held.source == "hold"
+  _step_lane(hold, torque=-0.8, seconds=0.4, lane_offset=-0.05, yielded=True, lat_active=False)
+  done = _step_lane(hold, seconds=0.2, lane_offset=-0.05)
   assert done.active is False
-  assert done.curvature == pytest.approx(model_k, abs=1e-4)
+  assert hold.busy is False
+  assert done.curvature == pytest.approx(0.0, abs=1e-6)  # the (straight) model curvature
+  assert model_k > 0.0
 
 
 def test_ridgewood_retake_blends_toward_the_driver_line():
@@ -276,3 +296,72 @@ def test_oct7_push_away_from_left_posts_arms_and_the_retake_stays_off_them():
                   lat_active=False, cone=cone, seconds=PUSH_ARM_S + 1.0, v=v, path=path)
   assert blocked.active is False
   assert toward.busy is False
+
+
+# ---- Oct 13 2026, pass E (08:06, 30 mph): drums on the right for 80 s ----
+
+def test_oct13_pass_e_holds_his_actual_offset_with_no_fade():
+  hold = ConeLineHold()
+  v = 13.4
+  # He pushes left (torque +, away from right drums) and settles ~1.0 m left of centre.
+  _step_lane(hold, torque=1.2, seconds=1.2, yielded=True, lat_active=False, lane_offset=-1.0, v=v)
+  out = _step_lane(hold, seconds=0.2, lane_offset=-1.0, v=v)
+  assert out.active and out.source == "hold"
+  assert out.offset_m == pytest.approx(-1.0, abs=1e-6)  # the full metre, not 0.2–0.3
+  # 60 s later, line still active: still the full offset, no fade.
+  later = _step_lane(hold, seconds=60.0, lane_offset=-1.0, v=v)
+  assert later.active and later.offset_m == pytest.approx(-1.0, abs=1e-6)
+  # Line clears: held for CLEAR_S (3 s) more, then released over RELEASE_S.
+  gone = _cone(active=False, side=0)
+  wait = _step_lane(hold, seconds=CLEAR_S - 0.1, cone=gone, lane_offset=-1.0, v=v)
+  assert wait.active and wait.offset_m == pytest.approx(-1.0, abs=1e-6)
+  done = _step_lane(hold, seconds=0.2 + RELEASE_S, cone=gone, lane_offset=-1.0, v=v)
+  assert done.active is False and done.offset_m == 0.0
+  assert CLEAR_S == pytest.approx(3.0)
+
+
+def test_oct13_recaptures_on_each_push_and_never_follows_the_stalk():
+  hold = ConeLineHold()
+  _step_lane(hold, torque=1.0, seconds=1.0, yielded=True, lat_active=False, lane_offset=-0.4)
+  first = _step_lane(hold, seconds=0.2, lane_offset=-0.4)
+  assert first.offset_m == pytest.approx(-0.4, abs=1e-6)
+  # Second push further left: re-captured at -1.1.
+  _step_lane(hold, torque=1.0, seconds=0.5, yielded=True, lat_active=False, lane_offset=-1.1)
+  second = _step_lane(hold, seconds=0.6, lane_offset=-1.1)
+  assert second.offset_m == pytest.approx(-1.1, abs=1e-6)
+  # A short brush under STEER_BACK_S does not re-capture.
+  _step_lane(hold, torque=1.0, seconds=0.1, lane_offset=-0.6)
+  brush = _step_lane(hold, seconds=0.5, lane_offset=-0.6)
+  assert brush.offset_m == pytest.approx(-1.1, abs=1e-6)
+  # Wheel torque only: there is no blinker / stalk input at all.
+  import inspect
+  params = inspect.signature(ConeLineHold.update).parameters
+  assert not any("blink" in n or "stalk" in n or "lane_change" in n for n in params)
+
+
+def test_oct13_cone_shift_applies_only_when_not_holding_and_never_toward_the_cones():
+  hold = ConeLineHold()
+  # Right drums (side -1): radard's shift is -0.8 (left). Applied.
+  out = _step_lane(hold, cone_shift=-0.8)
+  assert out.active and out.source == "shift" and out.offset_m == pytest.approx(-0.8)
+  assert out.curvature < 0.0  # left in the +right frame
+  # A shift toward the cones is ignored.
+  bad = _step_lane(ConeLineHold(), cone_shift=+0.5)
+  assert bad.active is False
+  # Yielded (driver steering) or lateral off: nothing applied.
+  assert _step_lane(ConeLineHold(), cone_shift=-0.8, yielded=True).active is False
+  assert _step_lane(ConeLineHold(), cone_shift=-0.8, lat_active=False).active is False
+  # No active line: nothing.
+  assert _step_lane(ConeLineHold(), cone_shift=-0.8, cone=_cone(active=False, side=0)).active is False
+  # Once he holds his own line, the hold wins over the shift.
+  _step_lane(hold, torque=1.0, seconds=1.0, yielded=True, lat_active=False, lane_offset=-1.0, cone_shift=-0.8)
+  mine = _step_lane(hold, seconds=0.2, lane_offset=-1.0, cone_shift=-0.8)
+  assert mine.source == "hold" and mine.offset_m == pytest.approx(-1.0)
+
+
+def test_oct13_hold_uses_lane_centre_ahead_when_known():
+  hold = ConeLineHold()
+  _step_lane(hold, torque=1.0, seconds=1.0, yielded=True, lat_active=False, lane_offset=-0.9)
+  # Lane centre ahead sits 0.3 m right of the (straight) model path: hold centre + offset.
+  out = _step_lane(hold, seconds=0.2, lane_offset=-0.9, lane_center_la=0.3)
+  assert out.offset_m == pytest.approx(-0.6, abs=1e-6)

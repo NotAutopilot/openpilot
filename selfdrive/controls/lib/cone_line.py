@@ -1,4 +1,4 @@
-"""Radar stationary-object cone line. Log only — this module never steers.
+"""Radar stationary-object cone line. Publishes the Oct 13 cone shift (wouldSteer).
 
 A line is stationary returns (ground speed near zero after adding vEgo)
 sitting beside the model path, spread along the road. Posts are tracked
@@ -24,8 +24,9 @@ Frames (this is the bug the Oct 7 posts exposed):
   steeringTorque      +left. The hold compares torque to side, and path
                       y / curvature to lat. Those are different frames.
   wouldLimit          path shift, +right, that would open ~1 m of clearance
-  wouldSteer          same shift, capped at 0.4 m. Logged only. Nothing
-                      in controlsd applies it.
+  wouldSteer          Oct 13 in-lane cone shift, +right, cap 1.0 m, ramped
+                      0.2 m/s. controlsd applies it (NAPConeLineHold) when
+                      the driver is not holding his own line.
 
 Thresholds:
   stationary ground speed     |vRel + vEgo| < 1.2 m/s
@@ -47,7 +48,9 @@ Thresholds:
                               post is remembered 1.2 s (2.5 s at >= 20 m/s).
                               An active line holds ~2 s after the hits stop,
                               and 1–3 posts on the fit are enough to refresh it.
-  wouldSteer cap              0.4 m, rate-limited 0.8 m/s (log only)
+  wouldSteer                  line 1.2–2.6 m from path centre, >= 20 mph, no lead
+                              in the span, no overhead structure: aim the line at
+                              3.2 m, cap 1.0 m, inside the lane, ramp 0.2 m/s
   guardrail                   span >= 12 m, >= 8 posts, median gap < 1.25 m
   parked car                  short cluster (< 8 m) that is wide (>= 1.0 m)
 """
@@ -79,8 +82,21 @@ CONFIRM_S = 1.0
 DROP_S = 2.0
 CONFIRM_GAP_S = 0.25
 CLEARANCE_M = 1.0
-WOULD_STEER_CAP_M = 0.40
-WOULD_STEER_RATE_MPS = 0.80  # log-only ramp: 0 -> cap takes ~0.5 s
+# Oct 13 cone shift (steers through controlsd, NAPConeLineHold toggle).
+# Pass E: Justin held ~1.0 m away with the drums ~2.2 m from path centre.
+SHIFT_TRIGGER_M = 2.6     # line within this of the path centre
+SHIFT_INSIDE_M = 1.2      # closer than this is our own footprint (overpass, queue)
+SHIFT_TARGET_LAT_M = 3.2  # aim for the line this far from the path centre
+SHIFT_MIN_MPS = 8.94      # 20 mph
+WOULD_STEER_CAP_M = 1.0
+WOULD_STEER_RATE_MPS = 0.20  # slow ramp: 0 -> 1 m takes ~5 s
+CAR_HALF_M = 0.95
+LANE_MARGIN_M = 0.10
+# Overhead structure: stationary returns on both sides at one range.
+OVERHEAD_DEPTH_M = 3.0
+OVERHEAD_MIN_COUNT = 4
+OVERHEAD_SIDE_M = 1.0
+OVERHEAD_HOLD_S = 2.0
 LOOKAHEADS_M = (15.0, 30.0, 45.0)
 BARRIER_MIN_COUNT = 8
 BARRIER_MIN_SPAN_M = 12.0
@@ -114,7 +130,7 @@ class ConeLineSample:
   lat_mid: float = 0.0
   lat_far: float = 0.0
   would_limit: float = 0.0  # path shift, +right, to keep ~1 m clearance
-  would_steer: float = 0.0  # same shift, |v| <= 0.4 m. Not an actuator command.
+  would_steer: float = 0.0  # Oct 13 cone shift, +right, |v| <= 1.0 m, ramped. controlsd applies it.
   barrier: bool = False
   parked: bool = False
   span_m: float = 0.0
@@ -344,6 +360,85 @@ def _would_shift(side: int, clearance: float) -> float:
   return float(side) * need
 
 
+def cone_shift_target(sample: ConeLineSample, *, v_ego: float, clearance: float,
+                      lead_in_span: bool, overhead: bool, lane_room: float | None) -> float:
+  """Signed in-lane path shift, +right, away from an active cone line. 0 = none.
+
+  Never for a line inside SHIFT_INSIDE_M (our own footprint: overpass deck,
+  a queue), below 20 mph, with a lead in the cone span, or under an overpass.
+  lane_room is how far the car can move away before its edge reaches the
+  far lane line; None means unknown and caps the shift at the full 1.0 m.
+  """
+  if not sample.active or sample.side not in (-1, 1):
+    return 0.0
+  if not math.isfinite(clearance) or clearance < SHIFT_INSIDE_M or clearance > SHIFT_TRIGGER_M:
+    return 0.0
+  if not math.isfinite(v_ego) or v_ego < SHIFT_MIN_MPS or lead_in_span or overhead:
+    return 0.0
+  mag = min(WOULD_STEER_CAP_M, SHIFT_TARGET_LAT_M - clearance)
+  if lane_room is not None and math.isfinite(lane_room):
+    mag = min(mag, max(0.0, lane_room))
+  if mag <= 0.0:
+    return 0.0
+  # Left line (side +1): move right, +y.
+  return float(sample.side) * mag
+
+
+def lane_room_m(model, side: int, x: float = 15.0) -> float | None:
+  """Room to move away from a cone line on `side` before the car edge meets the far lane line.
+
+  side +1 (left line) moves right, toward the right lane line. Device y is +right.
+  """
+  try:
+    lines = list(model.laneLines)
+    probs = list(model.laneLineProbs)
+  except (TypeError, AttributeError):
+    return None
+  if len(lines) < 3 or len(probs) < 3:
+    return None
+  idx = 2 if side == 1 else 1
+  if float(probs[idx]) < 0.3:
+    return None
+  try:
+    ly = path_y_at_x([float(v) for v in lines[idx].x], [float(v) for v in lines[idx].y], x)
+  except (TypeError, ValueError, AttributeError):
+    return None
+  if ly is None or not math.isfinite(ly):
+    return None
+  room = abs(ly) - CAR_HALF_M - LANE_MARGIN_M
+  return max(0.0, room)
+
+
+def overhead_ranges(points, v_ego: float, path_x, path_y) -> list[float]:
+  """Ranges (camera x) where stationary returns sit on both sides of the path.
+
+  An overpass deck or a sign gantry spans the road at one range.
+  """
+  rows = []
+  try:
+    iterator = list(points) if points is not None else []
+  except TypeError:
+    return []
+  for raw in iterator[:MAX_POINTS * 2]:
+    fields = _read_point(raw)
+    if fields is None:
+      continue
+    d_rel, y_rel, v_rel = fields
+    if abs(v_rel + v_ego) >= STATIONARY_MPS:
+      continue
+    x = d_rel + RADAR_TO_CAMERA_M
+    if x < X_MIN_M or x > X_MAX_M + 30.0:
+      continue
+    rows.append((x, _path_lat(device_y_right(y_rel), x, path_x, path_y)))
+  rows.sort()
+  out = []
+  for i, (x0, _l) in enumerate(rows):
+    band = [lat for x, lat in rows[i:] if x - x0 <= OVERHEAD_DEPTH_M]
+    if len(band) >= OVERHEAD_MIN_COUNT and min(band) < -OVERHEAD_SIDE_M and max(band) > OVERHEAD_SIDE_M:
+      out.append(x0)
+  return out
+
+
 def _cap_steer(shift: float) -> float:
   if not math.isfinite(shift) or shift == 0.0:
     return 0.0
@@ -534,7 +629,7 @@ def _sample_from_group(group: _Group | None, *, active: bool, confidence: float,
     lat_mid=lats[1],
     lat_far=lats[2],
     would_limit=shift,
-    would_steer=_cap_steer(shift) if group.kind == "cones" else 0.0,
+    would_steer=0.0,
     barrier=barrier or group.kind == "barrier",
     parked=parked,
     span_m=group.span,
@@ -563,6 +658,7 @@ class ConeLineDetector:
   def __init__(self) -> None:
     self._last_out = ConeLineSample()
     self._ws = 0.0
+    self._overhead_s = 0.0
     self.reset()
 
   def reset(self) -> None:
@@ -575,11 +671,16 @@ class ConeLineDetector:
     self._last_group: _Group | None = None
 
   def update(self, points, v_ego: float, path_x, path_y, road_edges, dt: float,
-             yaw_rate: float = 0.0) -> ConeLineSample:
-    """yaw_rate is device-frame rad/s, positive to the right. Optional."""
+             yaw_rate: float = 0.0, *, lead_xs=(), lane_room=None) -> ConeLineSample:
+    """yaw_rate is device-frame rad/s, positive to the right. Optional.
+
+    lead_xs: ranges (camera x) of leads in our lane. lane_room: see lane_room_m.
+    """
     t0 = time.monotonic()
     try:
       sample = self._step(points, v_ego, path_x, path_y, road_edges, dt, yaw_rate, t0)
+      if sample is not self._last_out:
+        sample = self._with_shift(sample, points, v_ego, path_x, path_y, dt, lead_xs, lane_room)
       sample = self._ramp(sample, dt)
     except Exception:
       self.reset()
@@ -588,8 +689,40 @@ class ConeLineDetector:
     self._last_out = sample
     return sample
 
+  def _with_shift(self, sample, points, v_ego, path_x, path_y, dt, lead_xs, lane_room):
+    try:
+      v = float(v_ego)
+    except (TypeError, ValueError):
+      v = 0.0
+    try:
+      d = max(0.0, min(0.5, float(dt)))
+    except (TypeError, ValueError):
+      d = 0.0
+    group = self._last_group
+    if not sample.active or group is None or group.kind != "cones":
+      return sample
+    xs = [p.x for p in group.posts]
+    x_lo, x_hi = min(xs), max(xs)
+    over = overhead_ranges(points, v, path_x, path_y)
+    if any(x_lo - OVERHEAD_DEPTH_M <= x <= x_hi + OVERHEAD_DEPTH_M for x in over):
+      self._overhead_s = OVERHEAD_HOLD_S
+    else:
+      self._overhead_s = max(0.0, self._overhead_s - d)
+    leads = []
+    for lx in lead_xs or ():
+      try:
+        leads.append(float(lx))
+      except (TypeError, ValueError):
+        continue
+    lead_in_span = any(x_lo - 5.0 <= lx <= x_hi + 5.0 for lx in leads)
+    point_lats = [_path_lat(p.y, p.x, path_x, path_y) for p in group.posts]
+    clearance = min(abs(v_) for v_ in point_lats) if point_lats else float("nan")
+    target = cone_shift_target(sample, v_ego=v, clearance=clearance, lead_in_span=lead_in_span,
+                               overhead=self._overhead_s > 0.0, lane_room=lane_room)
+    return replace(sample, would_steer=target)
+
   def _ramp(self, sample: ConeLineSample, dt) -> ConeLineSample:
-    """Rate-limit the logged wouldSteer so it ramps in and out (log only)."""
+    """Rate-limit wouldSteer so the shift ramps in and out slowly (0.2 m/s)."""
     if sample is self._last_out:
       return sample
     try:

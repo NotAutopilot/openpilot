@@ -835,8 +835,8 @@ struct ControlsState @0x97ff69c53601abf1 {
   latAuthority @67 :Float32;  # 0-1 NAP lateral actuator authority (Pre-AP driver wheel handoff)
   latHandoffPaused @68 :Bool;  # HUD: yielded or blending below 70% authority
   lowVisibility @69 :Bool;  # NAP: model/camera blind, lateral eased toward the driver
-  coneLineHold @70 :Bool;   # NAP: re-take is holding the driver's offset near cones
-  coneLineOffset @71 :Float32;  # m, +left, path shift applied (0 when not holding)
+  coneLineHold @70 :Bool;   # NAP: holding the driver's offset or applying the cone shift near cones
+  coneLineOffset @71 :Float32;  # m, +right, path shift applied (0 when not holding/shifting)
 
   lateralControlState :union {
     pidState @53 :LateralPIDState;

@@ -21,6 +21,7 @@ from openpilot.selfdrive.controls.lib.path_obstacle import (
 from openpilot.selfdrive.controls.lib.cone_line import (
   ConeLineDetector,
   ConeLineSample,
+  lane_room_m,
   model_yaw_rate_right,
   publish_cone_line,
   road_edges_xy,
@@ -29,6 +30,7 @@ from openpilot.selfdrive.controls.lib.crossing_vehicle import GroundLateral
 from openpilot.selfdrive.controls.lib.cone_line_hold import PARAM_CONE_LINE_LOG
 from openpilot.selfdrive.controls.lib.radar_path_gate import (
   PATH_INCUMBENT_HALF_WIDTH_M,
+  RADAR_TO_CAMERA_M,
   collapse_blocks_new_lead,
   model_path_xy,
   path_lateral_m,
@@ -646,9 +648,12 @@ class RadarD:
       return
     try:
       path_x, path_y = model_path_xy(sm['modelV2'])
+      prev_side = self._cone_sample.side if self._cone_sample is not None else 0
       self._cone_sample = self._cone.update(
         points, self.v_ego, path_x, path_y, road_edges_xy(sm['modelV2']), dt,
-        model_yaw_rate_right(sm['modelV2']))
+        model_yaw_rate_right(sm['modelV2']),
+        lead_xs=_cone_lead_xs(sm['modelV2'], self.radar_state),
+        lane_room=lane_room_m(sm['modelV2'], prev_side) if prev_side else None)
       self._cone_dirty = True
     except Exception:
       cloudlog.exception("cone line detector failed")
@@ -744,6 +749,25 @@ class RadarD:
         publish_cone_line(pm, self._cone_sample)
       except Exception:
         cloudlog.exception("coneLineNAP publish failed")
+
+
+def _cone_lead_xs(model, radar_state) -> list[float]:
+  """Camera-x ranges of leads in our lane, for the cone-shift lead-in-span gate."""
+  out: list[float] = []
+  try:
+    for lead in list(model.leadsV3)[:2]:
+      if float(lead.prob) >= 0.5 and len(lead.x):
+        out.append(float(lead.x[0]))
+  except Exception:
+    pass
+  for name in ("leadOne", "leadTwo"):
+    try:
+      lead = getattr(radar_state, name)
+      if bool(lead.status) and abs(float(lead.yRel)) < 1.8:
+        out.append(float(lead.dRel) + RADAR_TO_CAMERA_M)
+    except Exception:
+      continue
+  return out
 
 
 # fuses camera and radar data for best lead detection

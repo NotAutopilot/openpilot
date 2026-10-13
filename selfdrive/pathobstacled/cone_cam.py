@@ -55,7 +55,18 @@ CONFIRM_WINDOW_S = 1.0
 LOG_HZ = 2.0
 BUDGET_S = 0.008
 # Chroma samples per box. Near windows are large; they are strided, not dropped.
-MAX_SAMPLES = 12000
+# Oct 13: 12000 let only 1-3 of 6 windows fit the budget at speed. A quarter
+# of that still resolves a drum stripe and scores all six in one frame.
+MAX_SAMPLES = 3000
+# Red tail lights / brake lights: high V with U near neutral (orange has a
+# much lower U). A window whose red area rivals its orange area is not a cone.
+RED_MIN_V = 165.0
+RED_MIN_U = 112.0
+RED_REJECT_FRAC = 0.60
+# A "line" inside our own footprint is a vehicle or queue, not cones.
+VEHICLE_LAT_M = 1.20
+# Two consecutive frames can cover the six windows between them.
+PAIR_S = 0.6
 
 
 @dataclass(frozen=True)
@@ -166,6 +177,9 @@ def score_window(y: np.ndarray, u: np.ndarray, v: np.ndarray, geom: CamGeom,
                  x0: float, x1: float, lats: tuple[float, float, float]) -> CropScore | None:
   """Score one ground window. None when it does not land in the frame."""
   la, lb = _lat_at(lats, x0), _lat_at(lats, x1)
+  if min(abs(la), abs(lb)) < VEHICLE_LAT_M:
+    # Inside our own footprint: a lead or a queue, never a cone line we drive past.
+    return None
   box = ground_box(geom, x0, x1, la, lb, HALF_WIDTH_M, 0.0, TOP_M)
   if box is None:
     return None
@@ -201,7 +215,8 @@ def score_window(y: np.ndarray, u: np.ndarray, v: np.ndarray, geom: CamGeom,
   ys = yb[: 2 * ch : 2 * step, : 2 * cw : 2 * step].astype(np.int16)
   ch, cw = min(ub.shape[0], ys.shape[0]), min(ub.shape[1], ys.shape[1])
   ub, vb, ys = ub[:ch, :cw], vb[:ch, :cw], ys[:ch, :cw]
-  orange = (vb >= v_r + ORANGE_DV) & (ub <= u_r - ORANGE_DU) & (vb >= ORANGE_MIN_V)
+  red = (vb >= RED_MIN_V) & (ub >= RED_MIN_U) & (vb >= v_r + ORANGE_DV)
+  orange = (vb >= v_r + ORANGE_DV) & (ub <= u_r - ORANGE_DU) & (vb >= ORANGE_MIN_V) & ~red
   white = (ys >= y_r + WHITE_DY) & (np.abs(ub - 128) <= WHITE_CHROMA) & (np.abs(vb - 128) <= WHITE_CHROMA)
   o_rows = orange.sum(axis=1)
   w_rows = white.sum(axis=1)
@@ -214,7 +229,9 @@ def score_window(y: np.ndarray, u: np.ndarray, v: np.ndarray, geom: CamGeom,
   drum = _object_px(geom, xm, DRUM_WH)
   post_like = orange_px >= max(MIN_ORANGE_PX * 4, HIT_POST_FRAC * post) and bands >= MIN_BANDS
   drum_like = orange_px >= HIT_DRUM_FRAC * drum and white_px > 0 and bands >= 1
-  hit = bool(post_like or drum_like)
+  red_px = int(red.sum()) * scale
+  tail_light = red_px > 0 and red_px >= RED_REJECT_FRAC * max(1, orange_px)
+  hit = bool((post_like or drum_like) and not tail_light)
   conf = min(1.0, orange_px / max(1.0, HIT_DRUM_FRAC * drum))
   if bands >= MIN_BANDS:
     conf = min(1.0, conf + 0.25)
@@ -243,25 +260,50 @@ def score_line(y, u, v, geom: CamGeom, lats: tuple[float, float, float],
 class ConeCamState:
   """Last 1 s of per-frame window hits for one side, and the 2 Hz log gate.
 
-  Posts "agree" when two or more different windows hit in the same frame.
-  A single window cannot confirm across frames: one orange object slides
-  through neighbouring windows as the car moves.
+  Posts "agree" when two or more different windows hit in the same frame,
+  or across two consecutive frames that scored disjoint windows (a budget
+  split). A frame with zero hits clears it (Oct 13 stale confirm). A
+  single window cannot confirm across overlapping frames: one orange
+  object slides through neighbouring windows as the car moves.
   """
   side: int = 0
-  frames: list = field(default_factory=list)  # (t, hit window count)
+  frames: list = field(default_factory=list)  # (t, hit windows, scored windows)
   last_log: float = -1e9
 
   def update(self, side: int, scores: list[CropScore], now: float) -> bool:
     if side != self.side:
       self.side = side
       self.frames = []
-    hit_windows = {(s.x0, s.x1) for s in scores if s.hit}
-    self.frames.append((now, len(hit_windows)))
+    hit_windows = frozenset((s.x0, s.x1) for s in scores if s.hit)
+    scored = frozenset((s.x0, s.x1) for s in scores)
+    if scored and not hit_windows:
+      # Oct 13 stale-confirm bug: a frame with 0 hits clears confirmed.
+      self.frames = [(now, hit_windows, scored)]
+      return False
+    if not scored:
+      # No frame or nothing in view: not evidence either way.
+      self.frames = [f for f in self.frames if now - f[0] <= CONFIRM_WINDOW_S]
+      return self.confirmed(now)
+    self.frames.append((now, hit_windows, scored))
     self.frames = [f for f in self.frames if now - f[0] <= CONFIRM_WINDOW_S]
     return self.confirmed(now)
 
   def confirmed(self, now: float) -> bool:
-    return self.side != 0 and any(now - t <= CONFIRM_WINDOW_S and n >= CONFIRM_HITS for t, n in self.frames)
+    if self.side == 0 or not self.frames:
+      return False
+    t_last, hits_last, _scored_last = self.frames[-1]
+    if now - t_last > CONFIRM_WINDOW_S or not hits_last:
+      return False
+    if len(hits_last) >= CONFIRM_HITS:
+      return True
+    # One window here plus a different window in the previous frame, when the
+    # two frames scored different windows (a budget split, not one object
+    # sliding through neighbours).
+    if len(self.frames) >= 2:
+      t_prev, hits_prev, scored_prev = self.frames[-2]
+      if t_last - t_prev <= PAIR_S and hits_prev and not (scored_prev & self.frames[-1][2]):
+        return len(hits_last | hits_prev) >= CONFIRM_HITS
+    return False
 
   def should_log(self, now: float) -> bool:
     if now - self.last_log >= 1.0 / LOG_HZ:
