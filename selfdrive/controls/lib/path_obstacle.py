@@ -67,9 +67,20 @@ Thresholds (device frame, y +right, path-relative lateral):
                                 and crossing objects are unchanged. On any
                                 error this rule is skipped and the chime
                                 follows the rules above.
-  lively                        0 still, 1 has moved in the last 2 s.
-                                Ground speed, lateral speed, or
-                                position wander past radar noise.
+  lively                        0 still, >=0.5 has moved in the last 2 s.
+                                Ground |along| or |vLat| above 0.4 m/s
+                                held for 0.5 s. Range wander no longer
+                                counts (ego approach made it 1.0, Oct 13).
+  Oct 13 chime policy           only animal/human chime; obstacle and
+                                unknown are log only. Hard 20 ft cap from
+                                path centre. Human needs a camera score
+                                and <= 3 ft from the path edge. Still
+                                animal needs camera >= 0.75. Dark scene +
+                                single point: no animal chime. A still
+                                single in-path point at 40-60 m needs a
+                                2nd member or a solid camera hit. A
+                                vehicle-sized crosser belongs to crossing-
+                                vehicle handling. See chime_policy_block.
                                 Dead-still cuts animal/person class
                                 confidence to 0.45, not to zero.
 
@@ -150,6 +161,28 @@ WR_POOR = 0.78
 CHIME_COOLDOWN_S = 9.0
 CHIME_HOLD_S = 0.35
 LIVELY_WINDOW_S = 2.0
+# Lively needs real ground motion above this, held this long.
+LIVELY_MOVE_MPS = 0.40
+LIVELY_SUSTAIN_S = 0.50
+# Oct 13 chime policy (9 events, all false or a duplicate).
+# Only animal and human chime. Obstacle/unknown are logged only.
+CHIME_CLASSES = frozenset({"animal", "human"})
+# Hard cap measured from the path centre, every class: 20 ft.
+CHIME_MAX_LAT_M = 6.1
+# Human: within ~3 ft of the path edge, and the camera must score it.
+HUMAN_MAX_LAT_M = PATH_HALF_M + HUMAN_BEYOND_M
+HUMAN_VISION_MIN = 0.40
+# A still animal chimes only on a strong camera call.
+ANIMAL_STILL_VISION_MIN = 0.75
+# Dark scene: a single radar point is never an animal chime.
+DARK_LIGHTING_MAX = 0.50
+# Still, single in-path point at this range is usually road surface.
+SURFACE_X_MIN_M = 40.0
+SURFACE_X_MAX_M = 60.0
+SURFACE_SOLID_MIN = 0.60
+# Crossing-vehicle handling owns a vehicle-sized return sweeping across.
+CROSS_OWN_VLAT_MPS = 0.89
+CROSS_OWN_ALONG_MPS = 3.0
 # Below this, a Bosch return is noise. Above the full value, the cue is 1.
 SPEED_NOISE_MPS = 0.40
 SPEED_FULL_MPS = 1.40
@@ -853,6 +886,46 @@ def _highway_still_unconfirmed(sample: ObstacleSample, v_ego: float) -> bool:
   return sample.object_class not in ("human", "animal", "obstacle")
 
 
+def chime_policy_block(sample: ObstacleSample, hit: _Hit, vision: VisionScore | None) -> str | None:
+  """Oct 13 chime policy. A reason string blocks the chime (log only).
+
+  vision is the raw camera score when it was trusted this cycle, else None.
+  """
+  cls = sample.object_class
+  if cls not in CHIME_CLASSES:
+    return "log_only_class"
+  lat = abs(float(sample.lateral))
+  if not math.isfinite(lat) or lat > CHIME_MAX_LAT_M:
+    return "beyond_20ft"
+  along = abs(float(hit.along)) if math.isfinite(float(hit.along)) else 0.0
+  v_lat = abs(float(hit.v_lat)) if math.isfinite(float(hit.v_lat)) else 0.0
+  vehicle_sized = hit.cluster_count >= 2 or hit.span_m >= 1.0 or hit.model_lead or hit.radar_class == "obstacle"
+  if v_lat >= CROSS_OWN_VLAT_MPS and along < CROSS_OWN_ALONG_MPS and vehicle_sized:
+    return "crossing_vehicle"
+  evaluated = vision is not None and bool(vision.evaluated)
+  if cls == "human":
+    if not evaluated or not math.isfinite(vision.human) or vision.human < HUMAN_VISION_MIN:
+      return "human_no_camera"
+    if lat > HUMAN_MAX_LAT_M:
+      return "human_off_3ft"
+  single = hit.cluster_count < 2
+  if cls == "animal":
+    strong = evaluated and math.isfinite(vision.animal) and vision.animal >= ANIMAL_STILL_VISION_MIN
+    lively = float(sample.lively_score) if math.isfinite(float(sample.lively_score)) else 0.0
+    if lively < LIVELY_CHIME and not strong:
+      return "still_animal"
+    light = float(sample.lighting_score)
+    if single and math.isfinite(light) and light < DARK_LIGHTING_MAX:
+      return "dark_single_point"
+  if sample.zone == "inPath" and single and along < LIVELY_MOVE_MPS and \
+     SURFACE_X_MIN_M <= float(hit.x) <= SURFACE_X_MAX_M:
+    solid = evaluated and math.isfinite(vision.conf) and vision.conf >= SURFACE_SOLID_MIN \
+      and not bool(getattr(vision, "light_dominated", False))
+    if not solid:
+      return "road_surface_single"
+  return None
+
+
 def future_brake_intent(sample: ObstacleSample) -> BrakeIntent | None:
   """Any agreed object in or entering the path. Roadside never.
 
@@ -1120,10 +1193,12 @@ def _ramp(value: float, noise: float, full: float) -> float:
 
 
 def lively_from_history(hist) -> float:
-  """Max living-motion evidence in the last ~2 s. 0 is dead still.
+  """Real ground motion in the last ~2 s. 0 is still.
 
-  Ground speed, lateral speed, and position wander each count. One real
-  cue in the window is enough. Jitter inside radar noise stays at 0.
+  Oct 13: every still sign, post and hydrant read 1.0 because the old
+  version also counted range wander, and range changes by ego speed as
+  we drive at a parked object. Only ground-frame speed counts now
+  (|along| or |vLat|), above ~0.4 m/s, sustained for at least 0.5 s.
   """
   if not hist:
     return 0.0
@@ -1132,19 +1207,19 @@ def lively_from_history(hist) -> float:
   if not window:
     window = [hist[-1]]
   best = 0.0
-  xs: list[float] = []
-  ys: list[float] = []
-  for _age, x, y, along, v_lat in window:
-    xs.append(float(x))
-    ys.append(float(y))
-    speed = math.hypot(float(along), float(v_lat))
-    best = max(best, _ramp(speed, SPEED_NOISE_MPS, SPEED_FULL_MPS), _ramp(v_lat, VLAT_NOISE_MPS, VLAT_FULL_MPS))
-  span_t = float(window[-1][0]) - float(window[0][0])
-  if span_t >= 1.0 and len(window) >= 4:
-    mx = sum(xs) / len(xs)
-    my = sum(ys) / len(ys)
-    wander = max(math.hypot(x - mx, y - my) for x, y in zip(xs, ys))
-    best = max(best, _ramp(wander, WANDER_NOISE_M, WANDER_FULL_M))
+  run_start = None
+  run_peak = 0.0
+  for age, _x, _y, along, v_lat in window:
+    speed = max(abs(float(along)), abs(float(v_lat)))
+    if speed > LIVELY_MOVE_MPS:
+      if run_start is None:
+        run_start = float(age)
+        run_peak = 0.0
+      run_peak = max(run_peak, speed)
+      if float(age) - run_start + 1e-9 >= LIVELY_SUSTAIN_S:
+        best = max(best, max(0.5, _ramp(run_peak, SPEED_NOISE_MPS, SPEED_FULL_MPS)))
+    else:
+      run_start = None
   return best
 
 
@@ -1736,6 +1811,9 @@ class PathObstacleDetector:
         )
       if sample.agree and not self._vision_confirmed(sample.track_id, sample.object_class):
         return sample.with_chime(False, "no_agree")
+      policy = chime_policy_block(sample, hit, vision if trust_vision else None)
+      if policy is not None:
+        return sample.with_chime(False, policy)
     chimed, reason = self._chime.consider(sample, chime_enabled, now)
     return sample.with_chime(chimed, reason)
 

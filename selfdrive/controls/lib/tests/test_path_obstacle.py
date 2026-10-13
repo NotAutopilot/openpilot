@@ -10,6 +10,8 @@ from types import SimpleNamespace
 import numpy as np
 
 from openpilot.selfdrive.controls.lib.path_obstacle import (
+  _Hit,
+  chime_policy_block,
   LIVING_CLASSES,
   PARAM_OBSTACLE_CHIME,
   PARAM_OBSTACLE_LOG,
@@ -138,7 +140,7 @@ def test_stationary_in_path_deer_chimes_only_when_vision_says_animal():
 
   debris = _run(PathObstacleDetector(), deer, vision=DEBRIS)
   assert debris.object_class == "obstacle"
-  assert debris.chimed and debris.chime_reason == "chimed"
+  assert not debris.chimed and debris.chime_reason == "log_only_class"
   assert debris.brake_gate is True
 
 
@@ -195,7 +197,8 @@ def test_excludes_traffic_motorcycles_and_parked_cars():
   # Stopped in the path, and the model has not tagged it: still an object.
   stopped = [_pt(30.0, 0.0, -V_EGO, 4)]
   bare = _run(PathObstacleDetector(), stopped, vision=DEBRIS)
-  assert bare.zone == "inPath" and bare.chimed and bare.reject_reason == "none"
+  assert bare.zone == "inPath" and bare.reject_reason == "none"
+  assert not bare.chimed and bare.chime_reason == "log_only_class"
   # lead0 is a far car. lead1 is this one. Both count, not only the current lead.
   tagged = _run(
     PathObstacleDetector(), stopped, vision=DEBRIS,
@@ -205,22 +208,22 @@ def test_excludes_traffic_motorcycles_and_parked_cars():
   # The lead does not take the slot from a different return.
   both = [_pt(30.0, 0.0, -V_EGO, 4), _pt(55.0, 0.2, -V_EGO, 5)]
   mixed = _run(PathObstacleDetector(), both, vision=DEBRIS, model_leads=[(30.0, 0.0, 0.80)])
-  assert mixed.track_id == 5 and mixed.chimed and mixed.reject_reason == "none"
+  assert mixed.track_id == 5 and mixed.reject_reason == "none" and mixed.chime_reason == "log_only_class"
   far_only = _run(
     PathObstacleDetector(), stopped, vision=DEBRIS,
     model_leads=[(90.0, 0.0, 0.95)],
   )
-  assert far_only.chimed and far_only.reject_reason == "none"
+  assert far_only.reject_reason == "none" and far_only.chime_reason == "log_only_class"
   # The second radard lead, not only leadOne.
   other = _run(PathObstacleDetector(), stopped, vision=DEBRIS, lead_ids=(11, 4))
   assert other.reject_reason == "exclVehicle" and other.chimed is False
-  assert _run(PathObstacleDetector(), stopped, vision=DEBRIS, lead_ids=(11,)).chimed
+  assert _run(PathObstacleDetector(), stopped, vision=DEBRIS, lead_ids=(11,)).chime_reason == "log_only_class"
   # A weak model probability does not count as a tracked vehicle.
   weak_lead = _run(
     PathObstacleDetector(), stopped, vision=DEBRIS,
     model_leads=[(30.0, 0.0, 0.20)],
   )
-  assert weak_lead.chimed
+  assert weak_lead.reject_reason == "none" and weak_lead.chime_reason == "log_only_class"
 
 
 def test_vehicle_points_cover_both_model_leads_and_both_radar_leads():
@@ -252,7 +255,7 @@ def test_vehicle_points_cover_both_model_leads_and_both_radar_leads():
   assert hit.reject_reason == "exclVehicle"
   other_side = [_pt(22.0, 1.5, -V_EGO, 81)]
   kept = _run(PathObstacleDetector(), other_side, vision=DEBRIS, model_leads=pts)
-  assert kept.reject_reason != "exclVehicle" and kept.chimed
+  assert kept.reject_reason != "exclVehicle" and kept.chime_reason == "log_only_class"
 
 
 def test_rejects_clutter_and_a_lane_spanning_tree():
@@ -285,7 +288,7 @@ def test_rejects_clutter_and_a_lane_spanning_tree():
   fallen = _run(PathObstacleDetector(), tree, vision=span_view)
   assert fallen.object_class == "obstacle"
   assert fallen.cluster_count == 3 and fallen.span_m >= 1.8
-  assert fallen.agree and fallen.chimed and fallen.chime_reason == "chimed"
+  assert fallen.agree and not fallen.chimed and fallen.chime_reason == "log_only_class"
   assert fallen.brake_gate is True
   assert future_brake_intent(fallen) is not None
 
@@ -343,10 +346,15 @@ def test_wander_and_patch_change_raise_lively_without_zeroing_a_freeze():
   assert abs(moving.animal - ANIMAL.animal) < 1e-9
 
   assert lively_from_history([(0.0, 20.0, 0.0, 0.0, 0.0), (1.5, 20.1, 0.05, 0.0, 0.0)]) < 0.05
-  assert lively_from_history([(0.0, 20.0, 0.0, 1.6, 0.0)]) > 0.8
-  assert lively_from_history([(0.0, 20.0, 0.0, 0.0, 1.2)]) > 0.8
+  # One fast frame is not sustained motion. 0.5 s of it is.
+  assert lively_from_history([(0.0, 20.0, 0.0, 1.6, 0.0)]) == 0.0
+  assert lively_from_history([(i * 0.1, 20.0, 0.0, 1.6, 0.0) for i in range(6)]) > 0.8
+  assert lively_from_history([(i * 0.1, 20.0, 0.0, 0.0, 1.2) for i in range(6)]) >= 0.75
+  # Position wander alone (ego approach, radar jitter) no longer counts.
   wandered = [(i * 0.1, 24.0, 4.0 + 0.12 * i, 0.0, 0.0) for i in range(16)]
-  assert lively_from_history(wandered) > 0.4
+  assert lively_from_history(wandered) == 0.0
+  approach = [(i * 0.1, 47.0 - 2.7 * i, 4.3, 0.1, 0.05) for i in range(20)]
+  assert lively_from_history(approach) == 0.0
 
   det = PathObstacleDetector()
   sample = None
@@ -416,8 +424,8 @@ def test_stationary_human_guess_outside_the_band_is_dropped():
   # toward ~0.5 m/s makes the radar class "human", but the return has not moved.
   post = [_pt(24.0, -4.0, -V_EGO, 51, yv_rel=0.5)]
   got = _run(PathObstacleDetector(), post, n=8, vision=HUMAN)
-  assert got.reject_reason == "off_zone"
-  assert got.active is False and got.chimed is False
+  assert got.chimed is False
+  assert "off_zone" in (got.reject_reason, got.chime_reason) or got.chime_reason == "human_off_3ft"
 
   far_animal = _run(PathObstacleDetector(), [_pt(30.0, -9.0, -V_EGO, 52)], vision=ANIMAL)
   assert far_animal.reject_reason == "off_path" and far_animal.chimed is False
@@ -460,7 +468,8 @@ def test_highway_stationary_in_path_needs_a_real_approach_and_a_vision_class():
     x = 50.0 - i * 2.5
     sample = det.update([_pt(x, 0.0, -25.0, 64)], 25.0, PATH_X, PATH_Y, 0.1, vision=DEBRIS, now=50.0 + i * 0.1)
     chimed = chimed or bool(sample.chimed)
-  assert chimed is True
+  # Oct 13: obstacle class is log only.
+  assert chimed is False and sample.chime_reason == "log_only_class"
 
 
 def test_speed_gate_skips_the_scan_below_15_mph():
@@ -767,8 +776,9 @@ def test_oct7_single_look_does_not_chime_and_a_real_obstacle_does():
       chimed_at = i
   assert last is not None
   assert last.zone == "inPath" and last.object_class == "obstacle"
-  assert last.chimed and last.chime_reason == "chimed"
-  assert chimed_at == 5
+  # Agreed after the second look, but obstacle class is log only (Oct 13).
+  assert not last.chimed and last.chime_reason == "log_only_class"
+  assert chimed_at is None
 
 
 def _solid_patch(lo, hi, size=28):
@@ -860,14 +870,14 @@ def test_night_drive_over_suppresses_lights_and_keeps_real_obstacles():
     [_pt(32.0, 0.0, -12.0, 501)], head_score,
     model_leads=[(32.0, 0.0, 0.80)],
   )
-  assert stalled_chimed and stalled.chimed
-  assert stalled.chime_reason == "chimed"
+  assert not stalled_chimed
+  assert stalled.chime_reason == "log_only_class"
   assert stalled.object_class == "obstacle"
   assert stalled.drive_over_reason == ""
 
   # (4) Fallen tree: solid, not a light, inside 60 m.
   fallen, fallen_chimed = _night_run([_pt(28.0, 0.0, -12.0, 880)], tree_score)
-  assert fallen_chimed and fallen.chimed and fallen.chime_reason == "chimed"
+  assert not fallen_chimed and fallen.chime_reason == "log_only_class"
   assert fallen.drive_over_reason == ""
   far_tree, far_chimed = _night_run([_pt(75.0, 0.0, -12.0, 881)], tree_score)
   assert far_chimed is False
@@ -877,15 +887,20 @@ def test_night_drive_over_suppresses_lights_and_keeps_real_obstacles():
   day, day_chimed = _night_run(
     [_pt(45.0, 0.0, -18.0, 1742)], head_score, lighting=1.0, v_ego=18.0,
   )
-  assert day_chimed and day.chimed and day.chime_reason == "chimed"
+  assert not day_chimed and day.chime_reason == "log_only_class"
   assert day.drive_over_reason == ""
 
   # Living things and anything crossing the lane are outside the rule.
+  # Oct 13: a single radar point in the dark is never an animal chime.
   deer, deer_chimed = _night_run([_pt(30.0, 0.0, -12.0, 77)], ANIMAL)
-  assert deer_chimed and deer.object_class == "animal" and deer.chime_reason == "chimed"
+  assert not deer_chimed and deer.object_class == "animal" and deer.chime_reason == "dark_single_point"
+  # Two members (a real body) still chimes at night.
+  pair = [_pt(30.0, 0.0, -12.0, 77), _pt(30.4, 0.5, -12.0, 177)]
+  deer2, deer2_chimed = _night_run(pair, ANIMAL)
+  assert deer2_chimed and deer2.object_class == "animal" and deer2.chime_reason == "chimed"
   lit_deer = replace_light(ANIMAL)
   still_deer, still_chimed = _night_run([_pt(30.0, 0.0, -12.0, 78)], lit_deer)
-  assert still_chimed and still_deer.object_class == "animal"
+  assert not still_chimed and still_deer.object_class == "animal"
   walker, walker_chimed = _night_run(
     [_pt(25.0, -2.3, -12.0, 79, yv_rel=1.2)], replace_light(HUMAN),
   )
@@ -897,3 +912,78 @@ def replace_light(score: VisionScore) -> VisionScore:
     conf=score.conf, human=score.human, animal=score.animal, obstacle=score.obstacle,
     light_dominated=True, light_frac=0.40, red_frac=0.10,
   )
+
+
+# ---- Oct 13 2026: the nine chime events (8 false, 1 duplicate crossing SUV) ----
+
+def _oct13(cls, zone, x, lat, *, light, members=1, span=0.0, along=0.0, v_lat=0.0,
+           lively=0.0, vision=None, radar_class=None, model_lead=False):
+  hit = _Hit(
+    active=True, track_id=1, member_ids=tuple(range(1, members + 1)), x=x, y=lat, lateral=lat,
+    v_rel=-10.0, v_lat=v_lat, along=along, radar_conf=0.9, radar_class=radar_class or cls,
+    zone=zone, time_to_reach=3.0, time_to_enter=0.0, cluster_count=members, span_m=span,
+    reject_reason="none", lighting=light, lively=lively, v_ego=15.0, model_lead=model_lead,
+  )
+  sample = ObstacleSample(
+    active=True, track_id=1, range_m=x, lateral=lat, v_lat=v_lat, object_class=cls, zone=zone,
+    agree=True, lighting_score=light, lively_score=lively, cluster_count=members, span_m=span,
+    member_ids=hit.member_ids, vision_evaluated=vision is not None, reject_reason="none",
+  )
+  return chime_policy_block(sample, hit, vision)
+
+
+def _vs(conf=0.6, human=0.0, animal=0.0, obstacle=0.0):
+  return VisionScore(conf=conf, human=human, animal=animal, obstacle=obstacle)
+
+
+def test_oct13_morning_animal_chimes_are_blocked():
+  # 07:01:43 60 mph, sign post +4.3 m, single still point, dark, vision animal 0.52.
+  assert _oct13("animal", "roadside", 47.0, 4.3, light=0.40, vision=_vs(animal=0.52)) == "still_animal"
+  # 07:09:22 34 mph, tree line/sign +3.8 m, dark.
+  assert _oct13("animal", "roadside", 30.0, 3.8, light=0.36, vision=_vs(animal=0.58)) == "still_animal"
+  # 07:35:49 62 mph, +6.5 m: past the 20 ft cap from path centre.
+  assert _oct13("animal", "roadside", 40.0, 6.5, light=0.46, vision=_vs(animal=0.80)) == "beyond_20ft"
+  # 08:00:09 19 mph, parked box truck +4.5 m, along -0.6 m/s jitter but not sustained (lively 0).
+  assert _oct13("animal", "roadside", 25.0, 4.5, light=0.44, along=-0.6, vision=_vs(animal=0.66)) == "still_animal"
+  # Even with the old broken lively=1.0, a dark single point never chimes as an animal.
+  assert _oct13("animal", "roadside", 47.0, 4.3, light=0.40, lively=1.0, vision=_vs(animal=0.52)) == "dark_single_point"
+
+
+def test_oct13_human_and_obstacle_chimes_are_blocked():
+  # 07:46:54 19 mph, pole -2.7…-3.2 m, radar class human, vision NaN.
+  assert _oct13("human", "inPath", 20.0, -3.19, light=0.9, members=2, span=1.5) == "human_no_camera"
+  # Same pole even if the camera had scored it: outside 3 ft of the path.
+  assert _oct13("human", "inPath", 20.0, -3.19, light=0.9, members=2, span=1.5, vision=_vs(human=0.7)) == "human_off_3ft"
+  # 11:12:31 29 mph, hydrant -2.7 m, "human roadside", vision never evaluated.
+  assert _oct13("human", "roadside", 22.0, -2.7, light=1.0) == "human_no_camera"
+  # 11:14:07 23 mph, crosswalk paint, in path at 42 m, radar human, no camera.
+  assert _oct13("human", "inPath", 42.0, 0.1, light=1.0) == "human_no_camera"
+  # 12:03:33 40 mph, pavement markings, obstacle 0.99: obstacle class is log only.
+  assert _oct13("obstacle", "inPath", 61.0, 1.6, light=1.0, vision=_vs(conf=0.99, obstacle=0.99)) == "log_only_class"
+  assert _oct13("unknown", "inPath", 43.0, 0.5, light=1.0) == "log_only_class"
+
+
+def test_oct13_crossing_suv_belongs_to_crossing_vehicle_handling():
+  # 11:13:08 16 mph, SUV pulling out across the lane, +0.5 m at 43 m.
+  assert _oct13("human", "inPath", 43.0, 0.5, light=1.0, members=2, span=1.4, v_lat=1.5, along=0.8,
+                vision=_vs(human=0.6)) == "crossing_vehicle"
+  # A walker crossing (single point) is not a crossing vehicle and still chimes.
+  assert _oct13("human", "inPath", 20.0, 0.5, light=1.0, v_lat=1.2, along=0.2, lively=1.0,
+                vision=_vs(human=0.6)) is None
+
+
+def test_oct13_road_surface_and_real_animals():
+  # Still, single in-path point at 40–60 m with only a weak camera look: road surface.
+  assert _oct13("animal", "inPath", 50.0, 0.2, light=1.0, vision=_vs(conf=0.3, animal=0.8)) == "road_surface_single"
+  # A second member, or a solid camera hit, lets it through.
+  assert _oct13("animal", "inPath", 50.0, 0.2, light=1.0, members=2, span=0.6, vision=_vs(conf=0.3, animal=0.8)) is None
+  assert _oct13("animal", "inPath", 50.0, 0.2, light=1.0, vision=_vs(conf=0.8, animal=0.8)) is None
+  # Real moving deer on the shoulder in daylight chimes; a strong still deer chimes.
+  assert _oct13("animal", "roadside", 30.0, 4.0, light=0.9, lively=1.0, vision=_vs(animal=0.5)) is None
+  assert _oct13("animal", "roadside", 30.0, 4.0, light=0.9, vision=_vs(animal=0.76)) is None
+  # Person within 3 ft of the path edge, camera scored: chimes.
+  assert _oct13("human", "roadside", 15.0, 2.4, light=1.0, vision=_vs(human=0.6)) is None
+
+
+def test_oct13_speed_gate_unchanged():
+  assert abs(SPEED_ENABLE_MPS - 6.7) < 1e-6
