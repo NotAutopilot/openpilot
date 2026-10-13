@@ -31,6 +31,7 @@ import sys
 
 from openpilot.selfdrive.speedsignd.install import (
   fetch_and_install,
+  fetch_and_install_proposer,
   fetch_and_install_runtime,
   install_weights,
   runtime_status_summary,
@@ -70,6 +71,13 @@ def main(argv: list[str] | None = None) -> int:
   print(f"installed {os.path.getsize(dest)} bytes -> {dest}")
   print(f"sha256 {digest}")
   print(f"nap data dir: {nap_data_dir()}")
+  if not args.onnx:
+    # Two-stage strip proposer. Not fatal: speedsignd falls back to fixed tiles.
+    try:
+      prop = fetch_and_install_proposer()
+      print(f"proposer -> {prop}")
+    except Exception as e:
+      print("proposer install failed (fixed tiles stay in use): " + str(e), file=sys.stderr)
   if not args.skip_runtime:
     try:
       pylib = fetch_and_install_runtime(sha256=ORT_SHA256)

@@ -167,6 +167,18 @@ def fetch_and_install(
   return dest
 
 
+def fetch_and_install_proposer(dest: str | None = None, url: str | None = None,
+                               sha256: str | None = None) -> str:
+  """Download the two-stage strip proposer ONNX (checksum) next to speed_sign.onnx."""
+  from openpilot.selfdrive.speedsignd.paths import default_proposer_path
+  from openpilot.selfdrive.speedsignd.weights_manifest import PROPOSER_SHA256, proposer_asset_url
+  return fetch_and_install(
+    dest=dest or default_proposer_path(),
+    url=url or os.environ.get("NAP_SPEED_SIGN_PROPOSER_URL") or proposer_asset_url(),
+    sha256=PROPOSER_SHA256 if sha256 is None else (sha256 or None),
+  )
+
+
 RUNTIME_STAMP = "onnxruntime.stamp"
 _AARCH64 = ("aarch64", "arm64")
 _status_cache: dict[str, float | str] = {"t": 0.0, "s": ""}

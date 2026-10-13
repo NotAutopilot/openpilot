@@ -79,7 +79,8 @@ from openpilot.selfdrive.speedsignd.detect import (
   parse_infer_threads,
 )
 from openpilot.selfdrive.speedsignd.nv12 import copy_nv12_detect_crop, copy_nv12_rect
-from openpilot.selfdrive.speedsignd.paths import PARAM_KEY, default_log_path, default_onnx_path
+from openpilot.selfdrive.speedsignd.paths import PARAM_KEY, default_log_path, default_onnx_path, default_proposer_path
+from openpilot.selfdrive.speedsignd import two_stage
 from openpilot.selfdrive.speedsignd.detect_types import SpeedSign
 from openpilot.selfdrive.speedsignd.yolo import REFINE_OVERRIDE_CONF, SIGN_LIKE_CONF
 
@@ -1331,6 +1332,13 @@ def main():
   logger = JsonlLogger(log_path)
   hold = LiveSignHold()
   debounce = SignDebounce()
+  # Two-stage reader: strip proposer + tracker + one sharp read per sign.
+  # Missing proposer file -> legacy fixed tiles (unchanged behaviour).
+  proposer = two_stage.Proposer(default_proposer_path())
+  tracker = two_stage.SignTracker()
+  two_period_s = 1.0 / two_stage.PROPOSER_HZ
+  last_proposer_try = time.monotonic()
+  last_stopped_log = 0.0
   backend = detector.backend_name()
   weights_sha = detector.weights_sha_short()
   if detector.onnx is not None and detector.onnx.session is not None:
@@ -1368,6 +1376,11 @@ def main():
       onnx_path,
     )
 
+  cloudlog.info(
+    "speedsignd two-stage proposer=%s path=%s err=%s hz=%.1f conf=%.2f strip=%s",
+    int(proposer.ok), proposer.path, proposer.error, two_stage.PROPOSER_HZ,
+    two_stage.PROPOSER_CONF, two_stage.STRIP_RECT,
+  )
   sm = messaging.SubMaster(
     ["gpsLocationExternal", "gpsLocation", "selfdriveState", "modelV2"],
     frequency=SM_HZ,
@@ -1542,18 +1555,37 @@ def main():
           )
         raw = list(getattr(debounce, "last_raw", []))
         diag = outcome.diag if outcome.diag is not None else detector.diag_dict()
+        two = isinstance(diag, dict) and bool(diag.get("two_stage"))
+        if two:
+          t_frame = float(diag.get("t_frame", now_mono))
+          tracker.update(diag.get("props") or [], t_frame)
+          read_tid = diag.get("read_tid")
+          if read_tid is not None:
+            for tr in tracker.tracks:
+              if tr.tid == read_tid:
+                tracker.mark_read(tr, got_mph=bool(signs), neg=two_stage.neg_read(diag.get("read_diag")))
+            if signs and diag.get("read_jpg_meta") is not None:
+              top = max(signs, key=lambda s: float(s.conf))
+              meta = dict(diag["read_jpg_meta"])
+              meta.update(
+                mph=int(top.mph), conf=round(float(top.conf), 3),
+                refine_mph=None if getattr(top, "refine_mph", None) is None else int(top.refine_mph),
+                refine_conf=round(float(getattr(top, "refine_conf", 0.0) or 0.0), 3),
+                **{"class": (diag.get("read_diag") or {}).get("peak_name")},
+              )
+              two_stage.write_pending(meta, diag.get("read_jpg"))
         (
           next_mono, burst_left, burst_window, window_i, burst_cluster_s, bursting_next,
         ) = schedule_after_read(
           now=now_mono,
           infer_s=outcome.infer_s,
-          period_s=period_s,
+          period_s=two_period_s if two else period_s,
           budget_s=budget_s,
           cap_s=cap_s,
           backoff_s=extra_s,
-          sign_like=sign_burst_trigger(diag, raw),
+          sign_like=False if two else sign_burst_trigger(diag, raw),
           window_used=pending_window,
-          window_count=2,
+          window_count=1 if two else 2,
           burst_left=burst_left,
           burst_window=burst_window,
           burst_cluster_s=burst_cluster_s,
@@ -1568,7 +1600,12 @@ def main():
         if outcome.error and not diag.get("error"):
           diag = dict(diag)
           diag["error"] = outcome.error
-        cloudlog.info(
+        if two:
+          err = err + (
+            f" two=props:{len(diag.get('props') or [])}/{float(diag.get('prop_ms') or 0.0):.0f}ms"
+            + f" read={diag.get('read_tid')} tracks={len(tracker.tracks)}"
+          )
+        (cloudlog.debug if (two and diag.get("read_tid") is None) else cloudlog.info)(
           "speedsignd infer %.0fms %s raw=%s hud=%s jsonl=%s%s",
           outcome.infer_s * 1000.0,
           format_infer_diag(diag, allow_detect=sample.allow_detect),
@@ -1582,7 +1619,7 @@ def main():
         last_skip_reason = "ok"
         # A burst re-reads the same tile with YOLO. The OCR second look would
         # spend those frames and push the confirm past the sign.
-        if bursting_next:
+        if bursting_next or two:
           second_look = None
         else:
           box = sign_like_bbox(outcome.signs, diag)
@@ -1660,8 +1697,47 @@ def main():
         slot.pause()
       else:
         which = window_i
-        nv12 = copy_nv12_detect_crop(buf, which) if buf is not None else None
-        if buf is None:
+        speed_ms = two_stage.speed_from_sm(sm)
+        if (
+          proposer.ok is False and not sample.controlling
+          and now_mono - last_proposer_try >= ONNX_RETRY_S
+        ):
+          last_proposer_try = now_mono
+          if proposer.load():
+            cloudlog.info("speedsignd two-stage proposer loaded after retry")
+        use_two = proposer.ok and detector.onnx is not None and buf is not None
+        stopped_skip = False
+        if use_two and not two_stage.proposals_allowed(speed_ms):
+          # Stopped: no proposer, no read. Holds / plate unchanged.
+          next_detect = now_mono + two_period_s
+          last_skip_reason = "stopped"
+          if now_mono - last_stopped_log >= INFER_LOG_PERIOD_S:
+            cloudlog.info("speedsignd two-stage skip stopped v=%.1f", float(speed_ms or 0.0))
+            last_stopped_log = now_mono
+          stopped_skip = True
+          use_two = False
+          nv12 = None
+          two_job = None
+        elif use_two:
+          strip = copy_nv12_rect(buf, two_stage.STRIP_RECT)
+          t_frame = time.monotonic()
+          cand = tracker.capture_candidate(t_frame)
+          cap = None
+          cap_rect = None
+          if cand is not None:
+            cap_rect = two_stage.capture_rect(
+              cand.predicted(t_frame), int(getattr(buf, "width", 1928) or 1928),
+              int(getattr(buf, "height", 1208) or 1208),
+            )
+            cap = copy_nv12_rect(buf, cap_rect)
+          nv12 = cap if cap is not None else strip
+          two_job = (strip, cap, None if cand is None else cand.tid, cap_rect, t_frame)
+        else:
+          nv12 = copy_nv12_detect_crop(buf, which) if buf is not None else None
+          two_job = None
+        if stopped_skip:
+          pass
+        elif buf is None:
           last_skip_reason = detect_skip_reason(
             connected=True, onnx=detector.onnx is not None, busy=False, holdoff=False,
             buf_empty=True,
@@ -1700,6 +1776,40 @@ def main():
           )
           detector.allow_compile(permitted)
 
+          def _run2(job=two_job, lat=lat, lon=lon, bearing=bearing, gps_ok=gps_ok,
+                    engaged_now=engaged_now, stalled=stalled):
+            if not detector.compile_allowed_now():
+              raise RuntimeError("compile-blocked while driving")
+            strip_c, cap_c, tid, rect, t_fr = job
+            t0 = time.monotonic()
+            props = proposer.propose(strip_c)
+            prop_ms = (time.monotonic() - t0) * 1000.0
+            signs_r: list = []
+            written_r: list = []
+            read_diag = None
+            jpg = None
+            if cap_c is not None:
+              signs_r, written_r = detect_if_allowed(
+                cap_c.y, lat, lon, bearing, gps_ok, detector, logger, time.monotonic(),
+                controlling=engaged_now, rgb=None, debounce=debounce, nv12=cap_c,
+                disk_stalled=stalled,
+              )
+              read_diag = detector.diag_dict()
+              if signs_r and not (engaged_now and stalled):
+                jpg = two_stage.crop_jpeg_bytes(cap_c)
+            d = dict(read_diag or {})
+            d.update(
+              two_stage=1, t_frame=t_fr, props=props, prop_ms=round(prop_ms, 1),
+              read_tid=tid, read_diag=read_diag, read_jpg=jpg,
+              read_jpg_meta=None if cap_c is None else dict(
+                t=round(time.time(), 3),  # noqa: TID251
+                track_id=tid, crop=list(rect) if rect else None,
+                lat=lat if gps_ok else None, lon=lon if gps_ok else None,
+                bearing=bearing if gps_ok else None, gps_ok=bool(gps_ok),
+              ),
+            )
+            return signs_r, written_r, d
+
           def _run(nv12=nv12, lat=lat, lon=lon, bearing=bearing, gps_ok=gps_ok,
                    engaged_now=engaged_now, stalled=stalled):
             # Live flag, not the value captured when this read was scheduled.
@@ -1724,7 +1834,7 @@ def main():
                 ),
               )
               last_gate_log = now_mono
-          elif slot.start(_run):
+          elif slot.start(_run2 if two_job is not None else _run):
             pending_window = which
             now_start = time.monotonic()
             pending_interval_ms = 0.0 if last_read_start <= 0.0 else (now_start - last_read_start) * 1000.0
@@ -1733,7 +1843,7 @@ def main():
             last_read_start = now_start
             # Floor at one period. The outcome handler then applies the
             # 3× idle duty cycle, which is longer whenever the infer is.
-            next_detect = now_start + period_s
+            next_detect = now_start + (two_period_s if two_job is not None else period_s)
             last_skip_reason = "ok"
           else:
             last_skip_reason = detect_skip_reason(

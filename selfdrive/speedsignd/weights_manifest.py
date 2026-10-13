@@ -88,6 +88,19 @@ DEBOUNCE_HITS = 2
 DEBOUNCE_WINDOW_S = 12.0
 
 
+# Two-stage strip proposer: 1-class "sign" YOLOv8 (width 0.125), input
+# [1,3,128,352] = lower-right strip x 964-1928, y 525-875, output [1,5,924].
+# Trained on Justin's drives + teacher pseudo-labels + night augmentation.
+PROPOSER_RELEASE_TAG = "speed-sign-proposer-v1"
+PROPOSER_ASSET_NAME = "sign_proposer.onnx"
+PROPOSER_SHA256 = "1ef4b7d4131678399e2a2b2049276637759f7e2e3829d1441e98a1e43be94422"
+PROPOSER_BYTES = 3732311
+
+
+def proposer_asset_url(repo: str = GITHUB_REPO) -> str:
+  return f"https://github.com/{repo}/releases/download/{PROPOSER_RELEASE_TAG}/{PROPOSER_ASSET_NAME}"
+
+
 def release_asset_url(repo: str = GITHUB_REPO, tag: str = RELEASE_TAG, asset: str = ASSET_NAME) -> str:
   return f"https://github.com/{repo}/releases/download/{tag}/{asset}"
 

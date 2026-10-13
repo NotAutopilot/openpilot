@@ -13,7 +13,7 @@ lines matching speedsignd. Manual driving (moving OK) still runs detect.
 
 Yes/No ("is this accurate?") appears only with a live mph — not for NO WT
 or NO RT.
-Those buttons are stubs: they do not change cruise, HUD MAX, or map speed.
+Taps are logged to speedsign_feedback/ (JSONL + crop JPEG); they do not change cruise, HUD MAX, or map speed.
 """
 from __future__ import annotations
 
@@ -123,12 +123,16 @@ def mici_confirm_rects(sign: rl.Rectangle) -> tuple[tuple[float, float, float, f
 
 
 def on_confirm_accuracy(mph: int, yes: bool) -> None:
-  """Stub: future work may JSONL-confirm this mph and optionally push to OSM.
+  """Yes/No feedback: append to /data/media/0/nap/speedsign_feedback/feedback.jsonl.
 
-  Display-only for now — no params, no JSONL, no sqlite, no cruise / HUD MAX /
-  map-speed change, and no osm.org write.
+  Keeps the peak-size crop JPEG speedsignd saved for the plate (pending.jpg)
+  and, on Yes, also appends confirmed.jsonl (future OSM confirmed readings;
+  nothing is uploaded to osm.org). No cruise / HUD MAX / map-speed change.
   """
-  cloudlog.debug("speed_sign_hud on_confirm_accuracy mph=%s yes=%s (stub)", int(mph), bool(yes))
+  from openpilot.selfdrive.speedsignd.two_stage import record_answer
+  rec = record_answer(int(mph), bool(yes))
+  cloudlog.info("speed_sign_hud feedback mph=%s yes=%s saved=%s jpg=%s",
+                int(mph), bool(yes), rec is not None, (rec or {}).get("jpg"))
 
 
 def draw_speed_sign_plate(
@@ -263,6 +267,13 @@ class SpeedSignHud(Widget):
     hit = hit_accuracy_button(mouse_pos.x, mouse_pos.y, self._yes, self._no)
     if hit is None:
       return
+    # One answer per plate: ignore repeat taps on the same mph for 3 s.
+    import time as _time
+    now = _time.monotonic()
+    last = getattr(self, "_last_answer", (None, 0.0))
+    if last[0] == int(self._view.mph) and now - last[1] < 3.0:
+      return
+    self._last_answer = (int(self._view.mph), now)
     on_confirm_accuracy(self._view.mph, hit)
 
   def _render(self, rect: rl.Rectangle) -> None:
