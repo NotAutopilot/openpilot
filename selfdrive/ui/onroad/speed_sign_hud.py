@@ -143,18 +143,8 @@ def on_confirm_accuracy(mph: int, yes: bool) -> None:
   rec = record_answer(int(mph), bool(yes))
   applied = False
   if yes:
-    try:
-      from openpilot.common.params import Params
-      from openpilot.selfdrive.mapd.speed_overrides import PARAM, parse_confirmed
-      payload = {"mph": int(mph), "seq": time.monotonic()}
-      for k in ("lat", "lon", "bearing"):
-        if (rec or {}).get(k) is not None:
-          payload[k] = (rec or {})[k]
-      if parse_confirmed(payload) is not None:
-        Params().put(PARAM, payload)
-        applied = True
-    except Exception:
-      applied = False
+    from openpilot.selfdrive.mapd.speed_overrides import request_override
+    applied = request_override(int(mph), rec, time.monotonic())
   cloudlog.info("speed_sign_hud feedback mph=%s yes=%s saved=%s jpg=%s lat=%s lon=%s realdata=%s applied=%s",
                 int(mph), bool(yes), rec is not None, (rec or {}).get("jpg"),
                 (rec or {}).get("lat"), (rec or {}).get("lon"), (rec or {}).get("realdata"), applied)

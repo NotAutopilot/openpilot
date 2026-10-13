@@ -35,3 +35,17 @@ def test_pending_until_match_then_expires(tmp_path):
   assert o.consume({"mph": 30, "seq": 2.0}, None, 10.0, 10.0) is None
   assert o.consume(None, m(6), 10.0, 10.0 + PENDING_MAX_S + 1) is None
   assert o.find(6, 10.0) is None
+
+
+def test_request_override_writes_param():
+  from openpilot.selfdrive.mapd.speed_overrides import PARAM, request_override
+
+  class P:
+    d: dict = {}
+
+    def put(self, k, v):
+      self.d[k] = v
+  p = P()
+  assert request_override(35, {"lat": 1.0, "bearing": 90.0}, 3.0, params=p)
+  assert p.d[PARAM] == {"mph": 35, "seq": 3.0, "lat": 1.0, "bearing": 90.0}
+  assert not request_override(33, None, 4.0, params=P())

@@ -135,3 +135,21 @@ class SpeedOverrides:
     e = self.add(int(match.way_id), float(hdg), self.pending, road=str(getattr(match, "road_name", "") or ""))
     self.pending = None
     return e
+
+
+def request_override(mph: int, rec: dict | None, seq: float, params=None) -> bool:
+  """HUD YES: hand the confirmed mph (+ where it was read) to mapd."""
+  payload: dict = {"mph": int(mph), "seq": float(seq)}
+  for k in ("lat", "lon", "bearing"):
+    if (rec or {}).get(k) is not None:
+      payload[k] = (rec or {})[k]
+  if parse_confirmed(payload) is None:
+    return False
+  try:
+    if params is None:
+      from openpilot.common.params import Params
+      params = Params()
+    params.put(PARAM, payload)
+    return True
+  except Exception:
+    return False
