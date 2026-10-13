@@ -310,7 +310,16 @@ class SpeedSignHud(Widget):
     y = min(yy, ny)
     return rl.Rectangle(x, y, max(yx + yw, nx + nw) - x, max(yy + yh, ny + nh) - y)
 
+  def _handle_mouse_press(self, mouse_pos: MousePos) -> None:
+    # Answer on press, not release: the press is inside a drawn button right
+    # now, so a later layout shift (sidebar, plate expiring) can't drop it,
+    # and is_pressed is already set when onroad checks user_interacting().
+    self._answer_at(mouse_pos)
+
   def _handle_mouse_release(self, mouse_pos: MousePos) -> None:
+    pass
+
+  def _answer_at(self, mouse_pos: MousePos) -> None:
     if not hud_confirm_visible(self._view):
       return
     hit = hit_accuracy_button(mouse_pos.x, mouse_pos.y, self._yes, self._no)

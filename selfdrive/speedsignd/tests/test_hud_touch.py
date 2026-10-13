@@ -30,3 +30,11 @@ def test_onroad_press_checks_hud_buttons_and_hud_is_guarded():
   hud = (ROOT / "selfdrive/ui/onroad/speed_sign_hud.py").read_text()
   assert "def render(self" in hud and "except Exception" in hud
   assert "threading.Thread(target=_safe_confirm" in hud
+
+
+def test_hud_answers_on_press():
+  hud = (ROOT / "selfdrive/ui/onroad/speed_sign_hud.py").read_text()
+  press = hud.split("def _handle_mouse_press", 1)[1].split("def ", 1)[0]
+  assert "self._answer_at(mouse_pos)" in press
+  release = hud.split("def _handle_mouse_release", 1)[1].split("def ", 1)[0]
+  assert "_answer_at" not in release and "on_confirm_accuracy" not in release
