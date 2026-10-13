@@ -13,9 +13,9 @@ lines matching speedsignd. Manual driving (moving OK) still runs detect.
 
 Yes/No ("is this accurate?") appears only with a live mph — not for NO WT
 or NO RT.
-Taps are logged to speedsign_feedback/ (JSONL + crop JPEG). Yes also applies the
-confirmed limit (speedsignd/confirmed_limit.py); No is log-only. A tap hides the
-question at once (AnswerGate).
+Taps are logged to speedsign_feedback/ (JSONL + crop JPEG). Yes also becomes a local
+map override (mapd/speed_overrides.py) shown on the regular speed-limit sign;
+No is log-only. Either tap hides this popup at once (AnswerGate).
 """
 from __future__ import annotations
 
@@ -133,10 +133,10 @@ def on_confirm_accuracy(mph: int, yes: bool) -> None:
   nothing is uploaded to osm.org). The row and crop are mirrored into the
   current realdata segment for athena harvest.
 
-  Yes only: also sets NAPSpeedSignConfirmed so card.py treats this limit as
-  the posted limit (MAX = limit + Map Speed offset, existing map slew/ease)
-  until OSM changes zone or a newer Yes. No is log-only; nothing is ever
-  applied without a Yes tap (see speedsignd/confirmed_limit.py).
+  Yes only: also sets NAPSpeedSignConfirmed; mapd stores it as a local
+  override for the matched OSM way + heading, so the regular speed-limit sign
+  and Map Speed Limit (MAX = limit + offset) use it now and on future drives
+  (selfdrive/mapd/speed_overrides.py). No is log-only.
   """
   import time
   from openpilot.selfdrive.speedsignd.two_stage import record_answer
@@ -145,8 +145,11 @@ def on_confirm_accuracy(mph: int, yes: bool) -> None:
   if yes:
     try:
       from openpilot.common.params import Params
-      from openpilot.selfdrive.speedsignd.confirmed_limit import PARAM, confirmed_payload, parse_confirmed
-      payload = confirmed_payload(int(mph), time.monotonic())
+      from openpilot.selfdrive.mapd.speed_overrides import PARAM, parse_confirmed
+      payload = {"mph": int(mph), "seq": time.monotonic()}
+      for k in ("lat", "lon", "bearing"):
+        if (rec or {}).get(k) is not None:
+          payload[k] = (rec or {})[k]
       if parse_confirmed(payload) is not None:
         Params().put(PARAM, payload)
         applied = True
@@ -305,7 +308,7 @@ class SpeedSignHud(Widget):
       return
     self._last_answer = (int(self._view.mph), now)
     mph = int(self._view.mph)
-    # Hide the question (and prompt) this frame; Yes keeps a plain plate.
+    # Hide the popup (question + prompt) this frame for Yes and No.
     _GATE.answer(mph, hit, now)
     self._view = _GATE.filter(self._view, now)
     on_confirm_accuracy(mph, hit)
