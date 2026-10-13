@@ -24,6 +24,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware.power_monitoring import PowerMonitoring
 from openpilot.system.hardware.fan_controller import FanController
 from openpilot.system.hardware.loop_timing import HardwareLoopTimer, slow_loop_fields
+from openpilot.system.hardware.sysfs_reader import SysReadCache, sysfs_reader_thread
 from openpilot.system.hardware.thermal_reader import ThermalCache, stale_thermal_status, thermal_reader_thread
 from openpilot.system.hardware.nap_force_offroad import (
   PARAM as NAP_FORCE_OFFROAD_PARAM,
@@ -173,7 +174,7 @@ def _report_slow_hardware_loop(timer: HardwareLoopTimer) -> None:
   cloudlog.event("hardwared slow loop", error=True, **fields)
 
 
-def hardware_thread(end_event, hw_queue, thermal_queue=None) -> None:
+def hardware_thread(end_event, hw_queue, thermal_queue=None, sys_cache=None) -> None:
   pm = messaging.PubMaster(['deviceState'])
   sm = messaging.SubMaster(["peripheralState", "gpsLocationExternal", "selfdriveState", "pandaStates"], poll="pandaStates")
 
@@ -228,6 +229,24 @@ def hardware_thread(end_event, hw_queue, thermal_queue=None) -> None:
     thermal_reader = threading.Thread(target=thermal_reader_thread, args=(end_event, thermal_config, thermal_queue), daemon=True)
     thermal_reader.start()
   thermal_cache = ThermalCache(thermal_queue)
+
+  # All other system-file reads are off the publish loop too; see sysfs_reader.py.
+  if sys_cache is None:
+    sys_cache = SysReadCache({
+      "free_space": 100.0, "memory": 0, "gpu": 0, "cpu": [], "screen_brightness": 0,
+      "booted": False, "power_draw": 0.0, "som_power_draw": 0.0,
+    })
+    sys_readers = {
+      "free_space": lambda: get_available_percent(default=100.0),
+      "memory": lambda: int(round(psutil.virtual_memory().percent)),
+      "gpu": lambda: int(round(HARDWARE.get_gpu_usage_percent())),
+      "cpu": lambda: [int(round(n)) for n in psutil.cpu_percent(percpu=True)],
+      "screen_brightness": HARDWARE.get_screen_brightness,
+      "booted": HARDWARE.booted,
+      "power_draw": HARDWARE.get_current_power_draw,
+      "som_power_draw": HARDWARE.get_som_power_draw,
+    }
+    threading.Thread(target=sysfs_reader_thread, args=(end_event, sys_readers, sys_cache), daemon=True).start()
   if thermal_reader is not None:
     # Startup only: wait briefly for the first real reading so the first
     # deviceState isn't published with empty temperatures.
@@ -313,14 +332,14 @@ def hardware_thread(end_event, hw_queue, thermal_queue=None) -> None:
       pass
     timer.mark("hw_queue")
 
-    msg.deviceState.freeSpacePercent = get_available_percent(default=100.0)
+    msg.deviceState.freeSpacePercent = sys_cache.get("free_space", 100.0)
     timer.mark("statvfs")
-    msg.deviceState.memoryUsagePercent = int(round(psutil.virtual_memory().percent))
+    msg.deviceState.memoryUsagePercent = sys_cache.get("memory", 0)
     timer.mark("memory")
-    msg.deviceState.gpuUsagePercent = int(round(HARDWARE.get_gpu_usage_percent()))
+    msg.deviceState.gpuUsagePercent = sys_cache.get("gpu", 0)
     timer.mark("gpu")
-    online_cpu_usage = [int(round(n)) for n in psutil.cpu_percent(percpu=True)]
-    offline_cpu_usage = [0., ] * (len(msg.deviceState.cpuTempC) - len(online_cpu_usage))
+    online_cpu_usage = list(sys_cache.get("cpu", []))
+    offline_cpu_usage = [0, ] * (len(msg.deviceState.cpuTempC) - len(online_cpu_usage))
     msg.deviceState.cpuUsagePercent = online_cpu_usage + offline_cpu_usage
     timer.mark("cpu")
 
@@ -334,7 +353,7 @@ def hardware_thread(end_event, hw_queue, thermal_queue=None) -> None:
     msg.deviceState.modemTempC = last_hw_state.modem_temps
     timer.mark("network")
 
-    msg.deviceState.screenBrightnessPercent = HARDWARE.get_screen_brightness()
+    msg.deviceState.screenBrightnessPercent = sys_cache.get("screen_brightness", 0)
     timer.mark("screen_brightness")
 
     # this subset is only used for offroad
@@ -390,7 +409,7 @@ def hardware_thread(end_event, hw_queue, thermal_queue=None) -> None:
     startup_conditions["device_temp_engageable"] = thermal_status < ThermalStatus.overheated
 
     # ensure device is fully booted
-    startup_conditions["device_booted"] = startup_conditions.get("device_booted", False) or HARDWARE.booted()
+    startup_conditions["device_booted"] = startup_conditions.get("device_booted", False) or bool(sys_cache.get("booted", False))
     timer.mark("startup_params")
 
     # if the temperature enters the danger zone, go offroad to cool down
@@ -463,12 +482,12 @@ def hardware_thread(end_event, hw_queue, thermal_queue=None) -> None:
     msg.deviceState.offroadPowerUsageUwh = power_monitor.get_power_used()
     msg.deviceState.carBatteryCapacityUwh = max(0, power_monitor.get_car_battery_capacity())
     timer.mark("power_monitor")
-    current_power_draw = HARDWARE.get_current_power_draw()
+    current_power_draw = sys_cache.get("power_draw", 0.0)
     statlog.sample("power_draw", current_power_draw)
     msg.deviceState.powerDrawW = current_power_draw
     timer.mark("power_draw")
 
-    som_power_draw = HARDWARE.get_som_power_draw()
+    som_power_draw = sys_cache.get("som_power_draw", 0.0)
     statlog.sample("som_power_draw", som_power_draw)
     msg.deviceState.somPowerDrawW = som_power_draw
     timer.mark("som_power_draw")
