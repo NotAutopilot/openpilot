@@ -180,7 +180,7 @@ FORCE_OFFROAD_DESCRIPTION = (
 )
 SPEED_SIGN_LOG_DESCRIPTION = (
   "Log-only MUTCD speed-sign detector on the ROAD camera + GPS. Default Off. "
-  "When On, speedsignd shows a display-only SIGN plate and may append a short "
+  "When On, speedsignd shows a SIGN plate with Yes/No (only Yes sets a local map speed limit) and may append a short "
   "JSONL line under /data/media/0/nap/speed_signs.jsonl (t, lat, lon, bearing, mph, conf). "
   "Detect keeps running while openpilot is engaged, at 1 Hz or slower so one "
   "little core stays near 25 percent (idle at least 3× the inference). "

@@ -1,4 +1,4 @@
-"""On-road camera speed-sign HUD (display-only).
+"""On-road camera speed-sign HUD (Yes saves a local map limit; No is log-only).
 
 Large opaque MUTCD-style plate on the driver / left side of the onroad UI.
 TICI: below MAX. Mici: top-left.
