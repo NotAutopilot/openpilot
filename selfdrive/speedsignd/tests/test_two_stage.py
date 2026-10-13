@@ -1,6 +1,11 @@
 import json
 import os
 
+
+def _lines(path):
+  with open(path) as f:
+    return f.read().splitlines()
+
 import numpy as np
 
 from openpilot.selfdrive.speedsignd import two_stage as ts
@@ -71,9 +76,9 @@ def test_feedback_yes_no(tmp_path):
   rec = ts.record_answer(45, True, d, now=1000.0)
   assert rec["answer"] == "yes" and rec["track_id"] == 3 and rec["jpg"].endswith("_yes_45.jpg")
   assert os.path.isfile(os.path.join(d, rec["jpg"]))
-  assert len(open(os.path.join(d, ts.CONFIRMED_JSONL)).read().splitlines()) == 1
+  assert len(_lines(os.path.join(d, ts.CONFIRMED_JSONL))) == 1
   rec2 = ts.record_answer(30, False, d, now=1001.0)  # plate mph != pending -> stale, no jpg
   assert rec2["stale_pending"] and "jpg" not in rec2
-  lines = [json.loads(x) for x in open(os.path.join(d, ts.FEEDBACK_JSONL))]
+  lines = [json.loads(x) for x in _lines(os.path.join(d, ts.FEEDBACK_JSONL))]
   assert [x["answer"] for x in lines] == ["yes", "no"]
-  assert len(open(os.path.join(d, ts.CONFIRMED_JSONL)).read().splitlines()) == 1
+  assert len(_lines(os.path.join(d, ts.CONFIRMED_JSONL))) == 1
