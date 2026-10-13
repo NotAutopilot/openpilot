@@ -18,7 +18,7 @@ from openpilot.selfdrive.controls.lib.driver_lateral_handoff import (
   handoff_new_desired_curvature, lat_active_after_handoff,
   pin_desired_curvature_to_measured)
 from opendbc.car.tesla.preap.lat_yield import UNDERTRACK_CURVATURE, roundabout_yield_context
-from openpilot.selfdrive.controls.lib.cone_line_hold import PARAM_CONE_LINE_HOLD, ConeLineHold
+from openpilot.selfdrive.controls.lib.cone_line_hold import PARAM_CONE_LINE_HOLD, ConeLineHold, lane_offset_from_model, lookahead_m
 from openpilot.selfdrive.controls.lib.lat_low_visibility import (
   PARAM_LOW_VIS_BACKOFF, LowVisibility, fade_curvature, sun_ahead_from_fix)
 from openpilot.selfdrive.controls.lib.radar_path_gate import model_path_xy
@@ -229,8 +229,18 @@ class Controls:
       cone = self.sm["coneLineNAP"]
     cone_active = bool(getattr(cone, "active", False)) if cone is not None else False
     path_x = path_y = None
+    lane_offset = lane_centre = None
+    cone_shift = 0.0
     if cone_active or self.cone_hold.busy:
       path_x, path_y = model_path_xy(self.sm["modelV2"])
+      try:
+        lane_offset, lane_centre = lane_offset_from_model(self.sm["modelV2"], lookahead_m(float(CS.vEgo)))
+      except Exception:
+        lane_offset = lane_centre = None
+      try:
+        cone_shift = float(getattr(cone, "wouldSteer", 0.0)) if cone is not None else 0.0
+      except (TypeError, ValueError):
+        cone_shift = 0.0
     self._cone_out = self.cone_hold.update(
       enabled=enabled,
       engaged=bool(self.sm["selfdriveState"].enabled),
@@ -244,6 +254,9 @@ class Controls:
       yielded=bool(self._lat_handoff.yielded),
       lat_active=bool(self._lat_active_prev),
       dt=DT_CTRL,
+      lane_offset=lane_offset,
+      lane_center_la=lane_centre,
+      cone_shift=cone_shift,
     )
     return float(self._cone_out.curvature)
 

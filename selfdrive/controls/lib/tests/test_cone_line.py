@@ -6,12 +6,15 @@ from types import SimpleNamespace
 import pytest
 
 from openpilot.selfdrive.controls.lib.cone_line import (
+  cone_shift_target,
+  overhead_ranges,
   CLEARANCE_M,
   CONFIRM_S,
   DROP_S,
   LAT_MIN_M,
   WOULD_STEER_CAP_M,
   ConeLineDetector,
+  ConeLineSample,
   device_y_right,
 )
 
@@ -58,10 +61,11 @@ def test_left_side_cone_line_confirms_with_hysteresis():
   assert sample.barrier is False
   assert sample.parked is False
   # yRel +1.6 is 1.6 m left. Path lat is +right, so the line is at -1.6.
-  # Already past the 1 m clearance, so no shift.
+  # Past the old 1 m clearance (would_limit 0), but inside the Oct 13 2.6 m
+  # trigger: the cone shift ramps in slowly, away from the left line (+right).
   assert sample.lat_mid == pytest.approx(-1.6, abs=0.02)
   assert sample.would_limit == 0.0
-  assert sample.would_steer == 0.0
+  assert 0.0 < sample.would_steer <= WOULD_STEER_CAP_M
   assert device_y_right(1.6) == pytest.approx(-1.6)
   # A short dropout does not clear the line.
   held = _run(det, [], DROP_S * 0.5)
@@ -78,7 +82,8 @@ def test_close_line_reports_the_would_limit_shift():
   assert sample.side == 1
   assert sample.lat_near < 0.0
   assert sample.would_limit == pytest.approx(CLEARANCE_M - 0.7, abs=0.02)
-  assert sample.would_steer == pytest.approx(CLEARANCE_M - 0.7, abs=0.02)
+  # Oct 13: a line inside 1.2 m is our own footprint (overpass, queue): no shift.
+  assert sample.would_steer == 0.0
 
 
 def test_single_mailbox_never_becomes_a_line():
@@ -189,13 +194,16 @@ def test_posts_closer_than_half_a_meter_still_count():
 
 
 def test_would_steer_is_capped_and_points_away_from_left_posts():
-  # 0.55 m left. Opening 1.0 m wants 0.45 m; the log caps the proposal at 0.4.
+  # 0.55 m left: inside the 1.2 m footprint, so the Oct 13 shift stays 0.
   sample = _run(ConeLineDetector(), _cones(0.55), CONFIRM_S + 1.0)
   assert sample.active is True
   assert sample.side == 1
   assert sample.would_limit == pytest.approx(CLEARANCE_M - 0.55, abs=0.03)
-  assert sample.would_steer == pytest.approx(WOULD_STEER_CAP_M, abs=0.02)
-  assert sample.would_steer > 0.0  # +right, away from the left posts
+  assert sample.would_steer == 0.0
+  # 2.0 m left at speed: shifts right (away), ramping toward min(1.0, 3.2 - 2.0).
+  wide = _run(ConeLineDetector(), _cones(2.0), CONFIRM_S + 8.0)
+  assert wide.active and wide.would_steer == pytest.approx(1.0, abs=0.03)
+  assert WOULD_STEER_CAP_M == pytest.approx(1.0)
 
 
 def test_curved_ground_line_confirms_when_a_straight_lat_std_would_not():
@@ -380,3 +388,58 @@ def _pts_yx(xs, y_rels, v=V):
     SimpleNamespace(dRel=x - 1.52, yRel=y_rel, vRel=-v, measured=True)
     for x, y_rel in zip(xs, y_rels)
   ]
+
+
+# ---- Oct 13 2026: passes A–G against the cone-shift rule ----
+
+def _shift(side, clearance, mph, *, lead=False, overhead=False, room=None):
+  sample = ConeLineSample(active=True, side=side)
+  return cone_shift_target(sample, v_ego=mph * 0.44704, clearance=clearance,
+                           lead_in_span=lead, overhead=overhead, lane_room=room)
+
+
+def test_oct13_passes_a_to_g():
+  # A 07:43, 63 mph, right drums nearest +2.4 m: shift left 0.8 (line to 3.2 m).
+  assert _shift(-1, 2.4, 63) == pytest.approx(-0.8)
+  # B 07:48, 36 mph, right cones +1.9 m: left, capped at 1.0.
+  assert _shift(-1, 1.9, 36) == pytest.approx(-1.0)
+  # C 07:57, overpass "left line" at -0.5 m: inside the 1.2 m footprint, and overhead.
+  assert _shift(1, 0.5, 55) == 0.0
+  assert _shift(1, 1.5, 55, overhead=True) == 0.0
+  # D 08:05, 3 mph queue at a light, line -0.15…-1.1 m, lead in span.
+  assert _shift(1, 0.15, 3, lead=True) == 0.0
+  assert _shift(1, 1.5, 3) == 0.0          # below 20 mph alone blocks
+  assert _shift(1, 1.5, 30, lead=True) == 0.0  # lead in the span alone blocks
+  # E 08:06, 30 mph, right drums +2.0…+2.6 m: left 1.0 m, what he chose.
+  assert _shift(-1, 2.0, 30) == pytest.approx(-1.0)
+  # ...but never past the far lane line.
+  assert _shift(-1, 2.0, 30, room=0.6) == pytest.approx(-0.6)
+  # F 11:29, 58 mph, left drums -2.2 m: right 1.0.
+  assert _shift(1, 2.2, 58) == pytest.approx(1.0)
+  # G 12:05 / 12:21, right posts +3.5 m: beyond the 2.6 m trigger.
+  assert _shift(-1, 3.5, 60) == 0.0
+  # Inactive line: nothing.
+  assert cone_shift_target(ConeLineSample(active=False, side=-1), v_ego=20.0, clearance=2.0,
+                           lead_in_span=False, overhead=False, lane_room=None) == 0.0
+
+
+def test_oct13_overpass_spans_both_sides_at_one_range():
+  deck = _pts([40.0, 40.5, 41.0, 41.5], 0.0)
+  for p, y in zip(deck, (3.0, 1.5, -1.5, -3.0)):
+    p.yRel = y
+  assert overhead_ranges(deck, V, STRAIGHT_X, STRAIGHT_Y)
+  # One-sided cones are not overhead.
+  assert not overhead_ranges(_cones(2.0), V, STRAIGHT_X, STRAIGHT_Y)
+
+
+def test_oct13_overpass_blocks_the_shift_in_the_detector():
+  det = ConeLineDetector()
+  pts = _cones(2.0)
+  _run(det, pts, CONFIRM_S + 1.0)
+  deck = _pts([30.0, 30.5, 31.0, 31.5], 0.0)
+  for p, y in zip(deck, (4.0, 2.5, -2.5, -4.0)):
+    p.yRel = y
+  s = None
+  for _ in range(20):
+    s = det.update(pts + deck, V, STRAIGHT_X, STRAIGHT_Y, None, DT)
+  assert s.active and s.would_steer < 0.5  # ramping back toward 0 under the deck
