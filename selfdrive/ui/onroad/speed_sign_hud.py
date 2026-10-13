@@ -1,4 +1,4 @@
-"""On-road camera speed-sign HUD (display-only).
+"""On-road camera speed-sign HUD (Yes saves a local map limit; No is log-only).
 
 Large opaque MUTCD-style plate on the driver / left side of the onroad UI.
 TICI: below MAX. Mici: top-left.
@@ -13,13 +13,16 @@ lines matching speedsignd. Manual driving (moving OK) still runs detect.
 
 Yes/No ("is this accurate?") appears only with a live mph — not for NO WT
 or NO RT.
-Taps are logged to speedsign_feedback/ (JSONL + crop JPEG); they do not change cruise, HUD MAX, or map speed.
+Taps are logged to speedsign_feedback/ (JSONL + crop JPEG). Yes also becomes a local
+map override (mapd/speed_overrides.py) shown on the regular speed-limit sign;
+No is log-only. Either tap hides this popup at once (AnswerGate).
 """
 from __future__ import annotations
 
 import pyray as rl
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.speedsignd.hud import (
+  AnswerGate,
   HUD_CONFIRM_NO,
   HUD_CONFIRM_PROMPT,
   HUD_CONFIRM_YES,
@@ -127,12 +130,24 @@ def on_confirm_accuracy(mph: int, yes: bool) -> None:
 
   Keeps the peak-size crop JPEG speedsignd saved for the plate (pending.jpg)
   and, on Yes, also appends confirmed.jsonl (future OSM confirmed readings;
-  nothing is uploaded to osm.org). No cruise / HUD MAX / map-speed change.
+  nothing is uploaded to osm.org). The row and crop are mirrored into the
+  current realdata segment for athena harvest.
+
+  Yes only: also sets NAPSpeedSignConfirmed; mapd stores it as a local
+  override for the matched OSM way + heading, so the regular speed-limit sign
+  and Map Speed Limit (MAX = limit + offset) use it now and on future drives
+  (selfdrive/mapd/speed_overrides.py). No is log-only.
   """
+  import time
   from openpilot.selfdrive.speedsignd.two_stage import record_answer
   rec = record_answer(int(mph), bool(yes))
-  cloudlog.info("speed_sign_hud feedback mph=%s yes=%s saved=%s jpg=%s",
-                int(mph), bool(yes), rec is not None, (rec or {}).get("jpg"))
+  applied = False
+  if yes:
+    from openpilot.selfdrive.mapd.speed_overrides import request_override
+    applied = request_override(int(mph), rec, time.monotonic())
+  cloudlog.info("speed_sign_hud feedback mph=%s yes=%s saved=%s jpg=%s lat=%s lon=%s realdata=%s applied=%s",
+                int(mph), bool(yes), rec is not None, (rec or {}).get("jpg"),
+                (rec or {}).get("lat"), (rec or {}).get("lon"), (rec or {}).get("realdata"), applied)
 
 
 def draw_speed_sign_plate(
@@ -204,8 +219,16 @@ def draw_accuracy_overlay(
   _draw_confirm_button(no, HUD_CONFIRM_NO, font, font_size, _NO_BG, pressed_no, _NO_BG_PRESSED)
 
 
+_GATE = AnswerGate()
+
+
+def _now() -> float:
+  import time
+  return time.monotonic()
+
+
 def _draw_live_sign(rect_fn, rect: rl.Rectangle, font_bold, font_label, digit_size: int, label_size: int) -> LiveSignView:
-  view = live_sign_from_sm(ui_state.sm, logger_enabled())
+  view = _GATE.filter(live_sign_from_sm(ui_state.sm, logger_enabled()), _now())
   if not view.show:
     return view
   if view.show_missing_weights or view.show_runtime_missing:
@@ -241,7 +264,7 @@ class SpeedSignHud(Widget):
     self._font_label: rl.Font = gui_app.font(FontWeight.SEMI_BOLD)
 
   def _update_state(self) -> None:
-    self._view = live_sign_from_sm(ui_state.sm, logger_enabled())
+    self._view = _GATE.filter(live_sign_from_sm(ui_state.sm, logger_enabled()), _now())
 
   def _layout(self) -> None:
     sign = tici_sign_rect(self._rect) if self._tici else mici_sign_rect(self._rect)
@@ -274,7 +297,11 @@ class SpeedSignHud(Widget):
     if last[0] == int(self._view.mph) and now - last[1] < 3.0:
       return
     self._last_answer = (int(self._view.mph), now)
-    on_confirm_accuracy(self._view.mph, hit)
+    mph = int(self._view.mph)
+    # Hide the popup (question + prompt) this frame for Yes and No.
+    _GATE.answer(mph, hit, now)
+    self._view = _GATE.filter(self._view, now)
+    on_confirm_accuracy(mph, hit)
 
   def _render(self, rect: rl.Rectangle) -> None:
     if not self._view.show:

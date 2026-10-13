@@ -19,6 +19,7 @@ from openpilot.selfdrive.mapd.gps_fix import (
   persist_last_gps_position,
 )
 from openpilot.selfdrive.mapd.osm_db import OsmSpeedLimitDB
+from openpilot.selfdrive.mapd.speed_overrides import PARAM as SIGN_CONFIRMED_PARAM, SpeedOverrides
 from openpilot.selfdrive.mapd.roundabout_map import PARAM_RING, RingCache, roundabout_comfort_speed_ms
 from openpilot.selfdrive.mapd.roundabout_status import RingDataWatch, map_msg_valid
 
@@ -69,6 +70,7 @@ def main():
   last_gps_write = 0.0
   last_path = db.path
 
+  overrides = SpeedOverrides()
   ring_cache = RingCache()
   ring_watch = RingDataWatch()
 
@@ -92,6 +94,7 @@ def main():
         db.path = path
         last_path = path
       db.open()
+      overrides.load()
       last_reload = now
       if db.loaded:
         note = ring_watch.check(db.path)
@@ -104,6 +107,21 @@ def main():
       last_gps_write = now
     v_ego_ms = _v_ego_ms(sm) if gps_ok else 0.0
     match = db.lookup(lat, lon, bearing, v_ego_ms=v_ego_ms) if gps_ok and db.loaded else None
+    # Driver-confirmed sign (HUD YES): key it to this way + heading, once.
+    try:
+      raw_conf = params.get(SIGN_CONFIRMED_PARAM)
+    except Exception:
+      raw_conf = None
+    if raw_conf is not None or overrides.pending is not None:
+      try:
+        added = overrides.consume(raw_conf, match, bearing, now)
+        if raw_conf is not None:
+          params.remove(SIGN_CONFIRMED_PARAM)
+        if added is not None:
+          cloudlog.info("mapd: sign override way=%s heading=%s mph=%s", added["way_id"], added["heading"], added["mph"])
+      except Exception:
+        cloudlog.exception("mapd: sign override failed")
+    sign_ms = overrides.limit_ms(int(match.way_id), bearing) if match is not None else None
 
     msg = messaging.new_message("liveMapDataNAP")
     msg.valid = map_msg_valid(gps_ok=gps_ok, db_loaded=db.loaded, matched=match is not None, ring_hint=False)
@@ -114,8 +132,10 @@ def main():
     d.dbLoaded = bool(db.loaded)
     d.source = "osm"
     if match is not None:
-      d.speedLimit = float(match.speed_limit_ms)
+      d.speedLimit = float(sign_ms if sign_ms is not None else match.speed_limit_ms)
       d.speedLimitValid = True
+      if sign_ms is not None:
+        d.source = "sign"
       d.nextSpeedLimit = float(match.next_speed_limit_ms)
       d.nextSpeedLimitDistance = float(match.next_distance_m)
       d.roadName = match.road_name

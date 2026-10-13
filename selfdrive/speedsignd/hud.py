@@ -507,3 +507,32 @@ class LiveSignHold:
     if not live:
       return False, 0, 0.0
     return True, self.mph, self.conf
+
+
+# After a Yes/No tap: hide the popup at once and do not re-ask the same mph
+# shortly after (no track id on the wire; the same mph within the window, or
+# while that mph stays live, is treated as the same sign). A Yes value moves
+# to the regular speed-limit sign via mapd, not this popup.
+REASK_SUPPRESS_S = 60.0
+
+
+class AnswerGate:
+  def __init__(self) -> None:
+    self.mph: int = 0
+    self.t: float = -1e9
+
+  def answer(self, mph: int, yes: bool, now: float) -> None:
+    self.mph, self.t = int(mph), float(now)
+
+  def filter(self, view: LiveSignView, now: float) -> LiveSignView:
+    if view.show_missing_weights or view.show_runtime_missing or view.show_detect_paused:
+      return view
+    if self.mph <= 0:
+      return view
+    live = int(view.mph) if view.show_mph else 0
+    if live and live != self.mph:
+      return view
+    if live == self.mph or now - self.t <= REASK_SUPPRESS_S:
+      return LiveSignView()
+    self.mph = 0
+    return view

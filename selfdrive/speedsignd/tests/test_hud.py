@@ -677,8 +677,10 @@ def test_ui_and_cereal_wire_live_sign():
   assert "on_confirm_accuracy" in onroad
   assert "draw_tici_speed_sign" in onroad
   assert "draw_mici_speed_sign" in onroad
-  # Stub only: Yes/No must not write params / JSONL / sqlite / OSM in this PR.
+  # Yes goes through mapd.speed_overrides.request_override; the HUD itself
+  # never writes params / JSONL / sqlite / OSM directly.
   assert "Params(" not in onroad
+  assert "request_override" in onroad
   assert "append_jsonl" not in onroad
   assert "osm.org" in onroad  # mentioned as future work in the stub comment
 

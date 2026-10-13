@@ -248,6 +248,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // On-drive MUTCD speed-sign JSONL logger. Default off. Log-only: no sqlite,
     // no vCruise / HUD MAX, no osm.org. Process: speedsignd.
     {"NAPSpeedSignLog", {PERSISTENT, BOOL, "0"}},
+    {"NAPSpeedSignConfirmed", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, JSON}},
     // Soft wheel lateral handoff. Default ON. Yield on driver intent
     // (sustained torsion + aligned rate + hands on). Stay yielded while
     // handsOnLevel >= 1; blend after ~80 ms hands-off. Hard brake during
