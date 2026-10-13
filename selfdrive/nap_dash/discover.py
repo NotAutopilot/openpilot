@@ -658,6 +658,12 @@ class _Builder:
       if isinstance(title, str):
         self.section = title
       return
+    if name == "_build_speed_sign_items":
+      # Tici Speed Sign Reader submenu: keep its rows on the phone dash NAP panel.
+      fn = self.methods.get("_build_speed_sign_items")
+      if fn is not None:
+        self.build(fn)
+      return
     if name == "_build_radar_items":
       fn = self.methods.get("_build_radar_items")
       if fn is not None:

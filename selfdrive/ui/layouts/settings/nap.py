@@ -131,43 +131,27 @@ class NAPLayout(Widget):
     self._radar_scroller = Scroller(self._radar_items, line_separator=True, spacing=0)
     self._radar_back_btn = Button("Back", click_callback=self._close_radar)
     self._radar_back_btn.set_rect(rl.Rectangle(0, 0, 220, 90))
+    self._speed_sign_scroller = Scroller(self._speed_sign_items, line_separator=True, spacing=0)
+    self._speed_sign_back_btn = Button("Back", click_callback=self._close_speed_sign)
+    self._speed_sign_back_btn.set_rect(rl.Rectangle(0, 0, 220, 90))
 
   def _build_items(self):
     """Build all list items organized into sections."""
     self._main_items = []
     self._radar_items = []
+    self._speed_sign_items = []
     self._toggle_map = {}  # param_key -> ListItem (for refresh)
 
-    # ── Section 0: Speed Sign (top — flip Logger while testing) ──
+    # ── Section 0: Speed Sign (submenu; top — flip Logger while testing) ──
     self._main_items.append(section_header_item("Speed Sign"))
-
-    self._add_toggle(
-      NAP_SPEED_SIGN_LOG,
-      "Speed Sign Logger",
-      SPEED_SIGN_LOG_DESCRIPTION,
+    self._speed_sign_btn = button_item(
+      "Speed Sign Reader",
+      "Open",
+      description="Speed Sign Logger, Speed Sign Weights, and Install weights.",
+      callback=self._open_speed_sign,
     )
-
-    self._weights_status = text_item(
-      "Speed Sign Weights",
-      install_status_summary,
-      description=(
-        "YOLO ONNX at /data/media/0/nap/speed_sign.onnx. "
-        + "Missing → onroad SIGN shows NO WT and will not read roadside signs. "
-        + "runtime missing — tap Install weights means the plate shows NO RT. "
-        + "Install weights unpacks onnxruntime into /data/media/0/nap/pylib. "
-        + "Installed → blank plate until a confirmed mph."
-      ),
-    )
-    self._main_items.append(self._weights_status)
-
-    self._install_weights_btn = button_item(
-      "Install weights",
-      "Start",
-      description=INSTALL_SPEED_SIGN_WEIGHTS_INSTRUCTIONS.split("\n", 1)[0],
-      callback=self._on_install_speed_sign_weights,
-    )
-    self._install_weights_btn.action_item.set_enabled(ui_state.is_offroad)
-    self._main_items.append(self._install_weights_btn)
+    self._main_items.append(self._speed_sign_btn)
+    self._build_speed_sign_items()
 
     # ── Section 1: Longitudinal Control ──
     # Force Offroad / Simulate Look / False Alert Ignore live in the NAP triple-tap popup.
@@ -374,6 +358,38 @@ class NAPLayout(Widget):
     self._main_items.append(section_header_item("Acknowledgments"))
     self._main_items.append(CreditsBlock(acknowledgments_html()))
 
+  def _build_speed_sign_items(self):
+    self._speed_sign_items.append(section_header_item("Speed Sign Reader"))
+
+    self._add_toggle(
+      NAP_SPEED_SIGN_LOG,
+      "Speed Sign Logger",
+      SPEED_SIGN_LOG_DESCRIPTION,
+      dest=self._speed_sign_items,
+    )
+
+    self._weights_status = text_item(
+      "Speed Sign Weights",
+      install_status_summary,
+      description=(
+        "YOLO ONNX at /data/media/0/nap/speed_sign.onnx. "
+        + "Missing → onroad SIGN shows NO WT and will not read roadside signs. "
+        + "runtime missing — tap Install weights means the plate shows NO RT. "
+        + "Install weights unpacks onnxruntime into /data/media/0/nap/pylib. "
+        + "Installed → blank plate until a confirmed mph."
+      ),
+    )
+    self._speed_sign_items.append(self._weights_status)
+
+    self._install_weights_btn = button_item(
+      "Install weights",
+      "Start",
+      description=INSTALL_SPEED_SIGN_WEIGHTS_INSTRUCTIONS.split("\n", 1)[0],
+      callback=self._on_install_speed_sign_weights,
+    )
+    self._install_weights_btn.action_item.set_enabled(ui_state.is_offroad)
+    self._speed_sign_items.append(self._install_weights_btn)
+
   def _build_radar_items(self):
     self._radar_items.append(section_header_item("Radar"))
 
@@ -558,6 +574,14 @@ class NAPLayout(Widget):
     if status:
       return status[:18]
     return "Read"
+
+  def _open_speed_sign(self):
+    self._page = "speed_sign"
+    self._speed_sign_scroller.show_event()
+
+  def _close_speed_sign(self):
+    self._page = "main"
+    self._scroller.show_event()
 
   def _open_radar(self):
     self._page = "radar"
@@ -813,6 +837,14 @@ class NAPLayout(Widget):
       self._map_speed_page.render(rect)
     elif self._page == "driving_mannerisms":
       self._driving_mannerisms_page.render(rect)
+    elif self._page == "speed_sign":
+      self._speed_sign_back_btn.set_position(rect.x, rect.y + 10)
+      self._speed_sign_back_btn.render()
+      content = rl.Rectangle(
+        rect.x, rect.y + self._speed_sign_back_btn.rect.height + 20,
+        rect.width, rect.height - self._speed_sign_back_btn.rect.height - 20,
+      )
+      self._speed_sign_scroller.render(content)
     elif self._page == "radar":
       self._radar_back_btn.set_position(rect.x, rect.y + 10)
       self._radar_back_btn.render()
