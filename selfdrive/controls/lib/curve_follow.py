@@ -66,7 +66,8 @@ MIN_V_MS = PREVIEW_MIN_V_MS
 # the tightest point. Justin's own median is about 2.4 s; raise this single
 # constant to move there. The speed AT the tightest point is the table speed
 # either way (cornering stays conservative).
-RELEASE_BEFORE_TIGHTEST_S = 1.0
+# Oct 13: 1.5 s, the actuator lag, so the car itself is done slowing by the apex.
+RELEASE_BEFORE_TIGHTEST_S = 1.5
 ROOM_SOFT_M = 2.0
 
 # Curvature filter per path index (|k|): tighten fast (faster when strong),

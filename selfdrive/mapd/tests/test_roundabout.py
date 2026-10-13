@@ -4,6 +4,7 @@ import math
 import os
 
 import pytest
+from openpilot.selfdrive.mapd.roundabout import RB_ONSET_MARGIN_M, RingExitGate, RB_A_MAX_DECEL_MS2, RB_EXIT_RESTORE_MS2
 
 from openpilot.common.constants import CV
 from openpilot.selfdrive.mapd.constants import LOOKAHEAD_NORMAL
@@ -11,7 +12,6 @@ from openpilot.selfdrive.mapd.osm_db import EARTH_R, OsmSpeedLimitDB, _unpack_co
 from openpilot.selfdrive.mapd.overpass import ways_from_overpass
 from openpilot.selfdrive.mapd.roundabout import (
   RB_A_FLOOR_MS2,
-  RB_A_MAX_DECEL_MS2,
   RB_DECEL_JERK_MS3,
   RB_ONSET_MAX_M,
   RB_ONSET_MIN_M,
@@ -467,8 +467,9 @@ def test_onset_formula_and_clamp():
   assert rb_decel_onset_m(None) == RB_ONSET_MIN_M
   assert rb_decel_onset_m(25 * MPH) == RB_ONSET_MIN_M
   d55 = rb_decel_onset_m(55 * MPH)
-  assert d55 == pytest.approx(((55 * MPH) ** 2 - RB_V_MIN_MS ** 2) / 1.4 + 30.0)
-  assert 400.0 <= d55 <= 420.0  # formula as approved; ~340 m was the 0.8 m/s² figure
+  # Oct 13: final slowdown starts ~40 m earlier (margin 30 -> 70 m), clamped at the max.
+  assert d55 == pytest.approx(min(((55 * MPH) ** 2 - RB_V_MIN_MS ** 2) / 1.4 + RB_ONSET_MARGIN_M, RB_ONSET_MAX_M))
+  assert 440.0 <= d55 <= 460.0
   assert rb_decel_onset_m(80 * MPH) == RB_ONSET_MAX_M
 
 
@@ -503,7 +504,7 @@ def _simulate(v0_mph, start_m, ring_limit_ms=0.0, dt=0.05, a_now=0.0):
 def test_55mph_highway_approach():
   """Starts at the onset (~415 m from 55 mph at 0.7 m/s²), reaches ring speed by entry, never above ~1.5 m/s²."""
   v_entry, peak, first = _simulate(55.0, 600.0)
-  assert first is not None and 390.0 <= first <= 425.0, first
+  assert first is not None and 430.0 <= first <= 460.0, first
   target = roundabout_target_ms(0.0)
   assert v_entry <= target + 1.0 * MPH, v_entry / MPH
   assert peak <= 1.5 + 1e-6
@@ -549,3 +550,38 @@ def test_replay_watertown_ring_oct11():
     assert a >= -1.5
   assert roundabout_target_ms(first["rb"]) / MPH == pytest.approx(18.0)
   assert math.isfinite(new_max)
+
+
+# --- Oct 13: exit restore on right blinker + unwinding, capped braking -----------------------------------------
+def _ring_hint():
+  return RoundaboutHint(on_roundabout=True, way_id=1)
+
+
+def test_rb_brake_cap_near_one():
+  assert -1.05 <= RB_A_MAX_DECEL_MS2 <= -0.95
+  assert 1.5 * MPH <= RB_EXIT_RESTORE_MS2 <= 2.0 * MPH
+
+
+def test_blinker_alone_does_not_restore():
+  g = RingExitGate()
+  h = _ring_hint()
+  for _ in range(40):  # tight ring, curvature steady, blinker on
+    assert not g.update(h, True, 0.05, 0.1)
+
+
+def test_unwind_without_blinker_does_not_restore():
+  g = RingExitGate()
+  h = _ring_hint()
+  for k in [0.05] * 20 + [0.01] * 20:
+    assert not g.update(h, False, k, 0.1)
+
+
+def test_blinker_plus_unwind_restores_and_latches():
+  g = RingExitGate()
+  h = _ring_hint()
+  for _ in range(20):
+    g.update(h, False, 0.05, 0.1)
+  rel = [g.update(h, True, 0.015, 0.1) for _ in range(20)]
+  assert any(rel)
+  assert g.update(h, False, 0.015, 0.1)  # latched after the blinker drops
+  assert not g.update(None, False, 0.0, 0.1)  # off the ring: reset

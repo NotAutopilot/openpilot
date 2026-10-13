@@ -843,3 +843,44 @@ def test_valid_to_invalid_posted_leaves_max_unchanged():
   assert dec.seed_kph is None
   assert abs(hold.held_max_kph - posted) < 1e-6
   assert abs(_follow_hud(dec, None) - posted) < 1e-6
+
+
+# --- Oct 13: untagged state defaults --------------------------------------------------------------------------
+from openpilot.selfdrive.mapd.map_speed_policy import (
+  DEFAULT_DROP_A_MS2, RURAL_KEEP_MS, default_drop_cap_ms, keep_rural_default_ms, map_source_for,
+)
+
+_MPH = 0.44704
+
+
+def test_source_tagged_vs_default():
+  assert map_source_for(False) == "osm"
+  assert map_source_for(True) == "osm_default"
+  assert map_source_for(True, sign=True) == "sign"
+
+
+def test_ridgewood_untagged_tertiary_keeps_55():
+  prev = ("Ridgewood Road", "tertiary", 55 * _MPH)
+  assert keep_rural_default_ms(30 * _MPH, estimated=True, highway="tertiary",
+                               road_name="Ridgewood Road", prev=prev) == RURAL_KEEP_MS
+
+
+def test_tagged_or_other_road_not_kept():
+  prev = ("Ridgewood Road", "tertiary", 55 * _MPH)
+  assert keep_rural_default_ms(30 * _MPH, estimated=False, highway="tertiary",
+                               road_name="Ridgewood Road", prev=prev) == 30 * _MPH
+  assert keep_rural_default_ms(30 * _MPH, estimated=True, highway="tertiary",
+                               road_name="Main St", prev=prev) == 30 * _MPH
+  assert keep_rural_default_ms(30 * _MPH, estimated=True, highway="residential",
+                               road_name="Ridgewood Road", prev=prev) == 30 * _MPH
+
+
+def test_default_drop_no_harder_than_half():
+  cap = None
+  v = 45 * _MPH
+  for _ in range(100):
+    new = default_drop_cap_ms(30 * _MPH, cap, v, 0.05)
+    if cap is not None:
+      assert (cap - new) / 0.05 <= DEFAULT_DROP_A_MS2 + 1e-9
+    cap = new
+  assert cap > 30 * _MPH

@@ -18,6 +18,7 @@ from openpilot.selfdrive.mapd.gps_fix import (
   gps_sample_from_sm,
   persist_last_gps_position,
 )
+from openpilot.selfdrive.mapd.map_speed_policy import keep_rural_default_ms, map_source_for
 from openpilot.selfdrive.mapd.osm_db import OsmSpeedLimitDB
 from openpilot.selfdrive.mapd.speed_overrides import PARAM as SIGN_CONFIRMED_PARAM, SpeedOverrides
 from openpilot.selfdrive.mapd.roundabout_map import PARAM_RING, RingCache, roundabout_comfort_speed_ms
@@ -68,6 +69,8 @@ def main():
   db = OsmSpeedLimitDB(_db_path(params))
   last_reload = 0.0
   last_gps_write = 0.0
+  rural_prev = None
+  last_limit_log = None
   last_path = db.path
 
   overrides = SpeedOverrides()
@@ -132,10 +135,26 @@ def main():
     d.dbLoaded = bool(db.loaded)
     d.source = "osm"
     if match is not None:
-      d.speedLimit = float(sign_ms if sign_ms is not None else match.speed_limit_ms)
+      est = bool(getattr(match, "estimated", False))
+      lim_ms = float(match.speed_limit_ms)
+      if sign_ms is None:
+        # Oct 13: untagged rural tertiary/secondary stays 55 along the same road.
+        lim_ms = keep_rural_default_ms(lim_ms, estimated=est, highway=match.highway,
+                                       road_name=match.road_name, prev=rural_prev)
+      rural_prev = (match.road_name, match.highway, lim_ms)
+      d.speedLimit = float(sign_ms if sign_ms is not None else lim_ms)
       d.speedLimitValid = True
-      if sign_ms is not None:
-        d.source = "sign"
+      d.source = map_source_for(est, sign=sign_ms is not None)
+      key = (int(match.way_id), d.source, round(float(d.speedLimit), 1))
+      if key != last_limit_log:
+        last_limit_log = key
+        src = ("default" if est else "tagged") + (" sign" if sign_ms is not None else "")
+        msg_txt = " ".join((
+          f"mapd_limit way={int(match.way_id)}", f"name={match.road_name!r}", f"hw={match.highway}",
+          f"mph={float(d.speedLimit) * 2.23694:.0f}", f"raw_mph={float(match.speed_limit_ms) * 2.23694:.0f}",
+          f"src={src}",
+        ))
+        cloudlog.error(msg_txt)
       d.nextSpeedLimit = float(match.next_speed_limit_ms)
       d.nextSpeedLimitDistance = float(match.next_distance_m)
       d.roadName = match.road_name

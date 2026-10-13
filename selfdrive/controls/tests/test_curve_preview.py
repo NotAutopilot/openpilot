@@ -15,6 +15,7 @@ from openpilot.selfdrive.controls.lib.curve_max_hold import (
 )
 from openpilot.selfdrive.controls.lib.curve_preview import (
   PREVIEW_FREE_A_MS2,
+  PREVIEW_LAG_S,
   CurvePreview,
   curve_preview_accel,
   path_curvature,
@@ -124,8 +125,45 @@ def test_town_bend_preview_slows_early_and_gently(kappa, entry_ratio):
 def test_highway_bend_preview_is_a_lift():
   trace = _drive_bend(30.0, (400.0, 200.0, 1.0 / 400.0), 20.0)
   accels = [a for _, _, _, a in trace]
-  assert min(accels) >= -0.36
+  # Oct 13: cap about -0.8 at every speed (was -0.35 on the highway).
+  assert min(accels) >= -0.81
   assert min(accels) <= -0.1
+  # The raw ceiling itself is clamped: a tight bend close ahead never asks past the cap.
+  raw = curve_preview_accel(30.0, [1.0, 2.0, 3.0], [30.0, 60.0, 90.0], [1.0 / 30.0] * 3)
+  assert -0.81 <= raw <= -0.7
+
+
+def _drive_lagged(v0, bend, seconds, lag_s=1.5):
+  """Car follows the ceiling with the ~1.5 s pedal/regen lag seen on Oct 13."""
+  prev = CurvePreview()
+  v, s, out, cmds = v0, 0.0, [], []
+  for k in range(int(seconds / DT)):
+    ts, xs, ks = _path(v, s, bend)
+    cmd = min(0.0, prev.update(v, curve_preview_accel(v, ts, xs, ks), DT))
+    cmds.append(cmd)
+    a = cmds[max(0, len(cmds) - 1 - int(lag_s / DT))]
+    out.append((k * DT, s, v, cmd, a))
+    v = max(0.0, v + a * DT)
+    s += v * DT
+  return out
+
+
+@pytest.mark.parametrize("v0, radius", [(22.0, 200.0), (24.0, 250.0), (15.0, 60.0), (30.0, 400.0)])
+def test_oct13_slowing_starts_before_turn_in_and_is_done_by_the_apex(v0, radius):
+  """Oct 13 18f bends: slowing began 0.6–6 s AFTER turn-in at -0.35…-0.43.
+
+  Now the car itself (after 1.5 s lag) is slowing 2–3.5 s before turn-in,
+  never harder than about -0.8, and reaches the comfort speed by the apex.
+  """
+  kappa, start, ramp = 1.0 / radius, 600.0, 40.0
+  trace = _drive_lagged(v0, (start, 150.0, kappa, ramp), 60.0)
+  t_turn_in = next(t for t, s, *_ in trace if s >= start - ramp)
+  t_car = next(t for t, _, _, _, a in trace if a < -0.3)
+  assert 2.0 <= t_turn_in - t_car <= 3.6
+  assert min(r[3] for r in trace) >= -0.81
+  v_apex = next(v for _, s, v, *_ in trace if s >= start)
+  assert v_apex <= curve_speed_for_curvature(kappa) * 1.02
+  assert PREVIEW_LAG_S == pytest.approx(1.5)
 
 
 def test_straight_path_preview_is_free():

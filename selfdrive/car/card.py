@@ -23,10 +23,18 @@ from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import V_CRUISE_UNSET, VCruiseHelper
 from openpilot.selfdrive.mapd.constants import MANUAL_SET_EPS_KPH, map_accel_a_ms2
 from openpilot.selfdrive.mapd.map_speed_policy import (
+  DEFAULT_DROP_A_MS2,
+  MAP_SOURCE_DEFAULT,
   MapCruiseHold, apply_map_speed_kph, decide_map_cruise, effective_map_limit_ms,
   map_slew_a_ms2, read_map_speed_params, should_write_preap_pedal, slew_map_speed_ms,
 )
-from openpilot.selfdrive.mapd.roundabout import live_map_roundabout_hint, roundabout_ease_v_ms, roundabout_target_ms
+from openpilot.selfdrive.mapd.roundabout import (
+  RB_EXIT_RESTORE_MS2,
+  RingExitGate,
+  live_map_roundabout_hint,
+  roundabout_ease_v_ms,
+  roundabout_target_ms,
+)
 from openpilot.selfdrive.controls.lib.curve_follow import MODE_ACTIVE, MODE_SHADOW, read_curve_follow_mode
 from openpilot.selfdrive.controls.lib.curve_max_hold import CurveMaxHold
 from openpilot.selfdrive.controls.lib.radar_status_log import RadarStatusLogger
@@ -517,6 +525,12 @@ class Car:
     rb_lim = None
     rb_md = self.sm['liveMapDataNAP'] if self.sm.valid.get('liveMapDataNAP', False) else None
     rb_hint = live_map_roundabout_hint(rb_md)
+    # Oct 13: right blinker on the ring + actually leaving it releases the
+    # ring cap early; otherwise it holds until the car is off the ring.
+    if not hasattr(self, "_rb_exit_gate"):
+      self._rb_exit_gate = RingExitGate()
+    if self._rb_exit_gate.update(rb_hint, bool(getattr(CS, "rightBlinker", False)), curve_kappa, DT_CTRL):
+      rb_hint = None
     if rb_hint is not None:
       posted_ms = float(md.speedLimit) if md is not None and md.speedLimit > 0 else float(CS.vEgo)
       rb_lim = roundabout_ease_v_ms(rb_hint, float(CS.vEgo), posted_ms, self._map_speed_lookahead)
@@ -556,6 +570,15 @@ class Car:
         a = map_slew_a_ms2(
           self._map_slew_ms, lim, self._map_speed_lookahead, self._map_speed_accel,
         )
+        if lim < self._map_slew_ms and str(getattr(md, "source", "") or "") == MAP_SOURCE_DEFAULT:
+          # Oct 13: an untagged state default never brakes harder than -0.5.
+          a = min(float(a), DEFAULT_DROP_A_MS2)
+        if getattr(self, "_rb_restoring", False):
+          if lim > self._map_slew_ms + 0.05:
+            # Oct 13: ring exit restores at 1.5–2 mph/s (was ~0.8, he pressed gas).
+            a = max(float(a), RB_EXIT_RESTORE_MS2)
+          else:
+            self._rb_restoring = False
         self._map_slew_ms = slew_map_speed_ms(self._map_slew_ms, lim, DT_CTRL, a)
         map_kph = self._map_slew_ms * CV.MS_TO_KPH
     elif map_valid and md is not None:
@@ -622,6 +645,7 @@ class Car:
       preap_v_cruise_kph, self._map_slew_ms = _apply_ring_exit_max(
         target_ms, floor_ms, self._map_speed_lookahead, self._map_speed_accel,
       )
+      self._rb_restoring = True
     # Write engage/posted/stalk seed, or when HUD MAX rose. Never write
     # the same sticky MAX every frame. Pause still writes a rebase /
     # resume seed onto pedal_speed so one SET keeps the held MAX.
