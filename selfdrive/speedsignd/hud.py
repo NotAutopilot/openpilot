@@ -536,3 +536,19 @@ class AnswerGate:
       return LiveSignView()
     self.mph = 0
     return view
+
+
+def point_in_confirm_buttons(x: float, y: float, view: LiveSignView | None,
+                             yes: tuple[float, float, float, float],
+                             no: tuple[float, float, float, float]) -> bool:
+  """True only while the Yes/No popup is shown and (x, y) is inside a button.
+
+  The onroad view uses this to skip its sidebar toggle for that press; any
+  other touch (or any touch while the popup is hidden) is left to onroad.
+  """
+  if view is None or not hud_confirm_visible(view):
+    return False
+  for bx, by, bw, bh in (yes, no):
+    if bw > 0 and bh > 0 and bx <= x <= bx + bw and by <= y <= by + bh:
+      return True
+  return False

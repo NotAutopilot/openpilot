@@ -142,6 +142,9 @@ class HudRenderer(Widget):
     button_y = rect.y + UI_CONFIG.border_size
     self._exp_button.render(rl.Rectangle(button_x, button_y, UI_CONFIG.button_size, UI_CONFIG.button_size))
 
+  def touch_on_hud_button(self, x: float, y: float) -> bool:
+    return self._speed_sign_hud.owns_touch(x, y)
+
   def user_interacting(self) -> bool:
     return self._exp_button.is_pressed or self._speed_sign_hud.is_pressed
 
