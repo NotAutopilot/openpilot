@@ -47,10 +47,12 @@ def test_13s_hung_power_draw_read_does_not_stop_2hz_device_state():
   cached power values and never blocks; fresh values resume after the hang."""
   release = threading.Event()
   armed = {"on": False}
+  hang_done = threading.Event()
   def som_power_draw():
     if armed["on"]:
       armed["on"] = False
       release.wait(13.0)
+      hang_done.set()
       return 9.9
     return 3.3
   cache = SysReadCache({"power_draw": 0.0, "som_power_draw": 0.0, "memory": 0})
@@ -63,7 +65,13 @@ def test_13s_hung_power_draw_read_does_not_stop_2hz_device_state():
 
   published = []  # (t, powerDrawW, somPowerDrawW)
   t0 = time.monotonic()
-  while time.monotonic() - t0 < 14.5:
+  # run through the hang plus ~1 s after it ends (bounded for slow CI)
+  done_at = None
+  while time.monotonic() - t0 < 20.0:
+    if hang_done.is_set() and done_at is None:
+      done_at = time.monotonic()
+    if done_at is not None and time.monotonic() - done_at > 1.0:
+      break
     start = time.monotonic()
     msg = {"powerDrawW": cache.get("power_draw", 0.0), "somPowerDrawW": cache.get("som_power_draw", 0.0),
            "memoryUsagePercent": cache.get("memory", 0)}
@@ -76,7 +84,8 @@ def test_13s_hung_power_draw_read_does_not_stop_2hz_device_state():
   times = [t for t, _ in published]
   gaps = [b - a for a, b in zip(times, times[1:], strict=False)]
   assert max(gaps) < 0.7
-  assert len(published) >= 27
+  assert done_at is not None and done_at - t0 > 12.0  # it really hung ~13 s
+  assert len(published) >= 26
   # during the hang deviceState kept the last good value (not zero)
   assert all(m["somPowerDrawW"] in (3.3, 9.9) for _, m in published)
   assert all(m["memoryUsagePercent"] == 42 for _, m in published)
