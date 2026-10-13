@@ -23,6 +23,7 @@ import pyray as rl
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.speedsignd.hud import (
   AnswerGate,
+  point_in_confirm_buttons,
   HUD_CONFIRM_NO,
   HUD_CONFIRM_PROMPT,
   HUD_CONFIRM_YES,
@@ -251,6 +252,13 @@ def draw_mici_speed_sign(rect: rl.Rectangle, font_bold, font_label) -> LiveSignV
   return _draw_live_sign(mici_sign_rect, rect, font_bold, font_label, MICI_DIGIT, MICI_LABEL)
 
 
+def _safe_confirm(mph: int, yes: bool) -> None:
+  try:
+    on_confirm_accuracy(mph, yes)
+  except Exception:
+    cloudlog.exception("speed_sign_hud: feedback failed")
+
+
 class SpeedSignHud(Widget):
   """SIGN / NO WT plate plus stub Yes/No accuracy overlay."""
 
@@ -262,6 +270,24 @@ class SpeedSignHud(Widget):
     self._no = (0.0, 0.0, 0.0, 0.0)
     self._font_bold: rl.Font = gui_app.font(FontWeight.BOLD)
     self._font_label: rl.Font = gui_app.font(FontWeight.SEMI_BOLD)
+
+  def render(self, rect: rl.Rectangle | None = None):
+    # A HUD error must never break the onroad frame or its touch handling.
+    try:
+      return super().render(rect)
+    except Exception:
+      if not getattr(self, "_logged_err", False):
+        cloudlog.exception("speed_sign_hud: render failed; HUD hidden this frame")
+        self._logged_err = True
+      self._view = LiveSignView()
+      return None
+
+  def owns_touch(self, x: float, y: float) -> bool:
+    """Press is on a visible Yes/No button (onroad then skips the sidebar toggle)."""
+    try:
+      return point_in_confirm_buttons(x, y, self._view, self._yes, self._no)
+    except Exception:
+      return False
 
   def _update_state(self) -> None:
     self._view = _GATE.filter(live_sign_from_sm(ui_state.sm, logger_enabled()), _now())
@@ -301,7 +327,9 @@ class SpeedSignHud(Widget):
     # Hide the popup (question + prompt) this frame for Yes and No.
     _GATE.answer(mph, hit, now)
     self._view = _GATE.filter(self._view, now)
-    on_confirm_accuracy(mph, hit)
+    # Disk / params work off the UI thread so a slow write can never stall frames.
+    import threading
+    threading.Thread(target=_safe_confirm, args=(mph, hit), daemon=True, name="speedsign-tap").start()
 
   def _render(self, rect: rl.Rectangle) -> None:
     if not self._view.show:
