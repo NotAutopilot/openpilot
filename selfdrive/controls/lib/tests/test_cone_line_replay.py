@@ -89,3 +89,18 @@ def test_oct10_town_and_parked_cars_never_become_a_line(name):
   assert not any(s.active for _, s in out)
   assert all(s.would_steer == 0.0 for _, s in out)
   assert any(s.parked for _, s in out), "the logged parked-car rejection must still fire"
+
+
+@pytest.mark.parametrize("name", ["oct10_17b_parked_1647", "oct10_17b_parked_1650", "oct10_17b_town_parked"])
+def test_oct14_corridor_detector_keeps_the_parked_rejections(name, monkeypatch):
+  from openpilot.selfdrive.controls.lib.cone_line import ConeCorridorDetector
+  frames = json.loads(gzip.decompress(base64.b64decode((FIX / f"{name}.json.gz.b64").read_bytes())))
+  det = ConeCorridorDetector()
+  prev = None
+  for f in frames:
+    dt = 0.05 if prev is None else f["t"] - prev
+    prev = f["t"]
+    pts = [{"dRel": p[0], "yRel": p[1], "vRel": p[2], "measured": bool(p[3])} for p in f["pts"]]
+    s = det.update(pts, f["v"], f["px"], f["py"], [(e[0], e[1]) for e in f["edges"]], dt,
+                   f["yaw"] if abs(f["yaw"]) < 1.5 else 0.0)
+    assert not s.active and s.would_steer == 0.0

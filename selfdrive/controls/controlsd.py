@@ -108,6 +108,7 @@ class Controls:
     self._rb_yield_prev = False
     # Cone-line offset hold. Default On. Identity until a real push.
     self.cone_hold = ConeLineHold()
+    self._cone_zone = False
     self._cone_out = self.cone_hold.update(
       enabled=False, engaged=False, cone=None, torque_nm=0.0, measured_k=0.0,
       model_k=0.0, path_x=None, path_y=None, v_ego=0.0, yielded=False,
@@ -228,10 +229,13 @@ class Controls:
     if self.sm.seen.get("coneLineNAP", False) and self.sm.alive.get("coneLineNAP", False):
       cone = self.sm["coneLineNAP"]
     cone_active = bool(getattr(cone, "active", False)) if cone is not None else False
+    cone_releasing = bool(getattr(cone, "releasing", False)) if cone is not None else False
+    # Inside a cone corridor the low-visibility fade must not undo the cone shift.
+    self._cone_zone = cone_active or cone_releasing or self.cone_hold.busy
     path_x = path_y = None
     lane_offset = lane_centre = None
     cone_shift = 0.0
-    if cone_active or self.cone_hold.busy:
+    if self._cone_zone:
       path_x, path_y = model_path_xy(self.sm["modelV2"])
       try:
         lane_offset, lane_centre = lane_offset_from_model(self.sm["modelV2"], lookahead_m(float(CS.vEgo)))
@@ -486,8 +490,10 @@ class Controls:
     model_or_plan_curvature = self._cone_curvature(float(model_or_plan_curvature), CS)
     # Low visibility eases the lateral target toward the wheel. Longitudinal
     # accel above is unchanged, and latActive / enabled are unchanged.
+    # Not inside a cone corridor (Oct 14 seg 25: the alert was on while the cones closed in).
+    low_vis_auth = 1.0 if self._cone_zone else float(self._low_vis.authority)
     model_or_plan_curvature = fade_curvature(
-      model_or_plan_curvature, self.curvature, self._low_vis.authority)
+      model_or_plan_curvature, self.curvature, low_vis_auth)
     new_desired_curvature = handoff_new_desired_curvature(
       yielded=bool(self._lat_handoff.yielded),
       lat_active=bool(CC.latActive),
@@ -520,8 +526,8 @@ class Controls:
     else:
       actuators.torque = float(steer)
       actuators.steeringAngleDeg = float(steeringAngleDeg)
-    if self._low_vis.authority < 1.0:
-      actuators.torque = float(actuators.torque) * float(self._low_vis.authority)
+    if low_vis_auth < 1.0:
+      actuators.torque = float(actuators.torque) * low_vis_auth
     # Latch what this cycle will tell panda (0x561) for the next hands edge.
     self._cmd_angle_prev = float(actuators.steeringAngleDeg)
     self._under_prev = abs(float(actuators.curvature) - float(self.curvature)) > UNDERTRACK_CURVATURE

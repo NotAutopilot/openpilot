@@ -19,7 +19,7 @@ from openpilot.selfdrive.controls.lib.path_obstacle import (
   vehicle_exclusion_points,
 )
 from openpilot.selfdrive.controls.lib.cone_line import (
-  ConeLineDetector,
+  ConeCorridorDetector,
   ConeLineSample,
   lane_room_m,
   model_yaw_rate_right,
@@ -469,7 +469,7 @@ class RadarD:
     self._sensor_dirty_ignore_override: bool | None = None
     self._live_measured = False
     # Cone line is log-only. It does not select a lead or touch longitudinal.
-    self._cone = ConeLineDetector()
+    self._cone = ConeCorridorDetector()
     self._cone_sample = None
     self._cone_dirty = False
     self._cone_log_on = True
@@ -648,12 +648,12 @@ class RadarD:
       return
     try:
       path_x, path_y = model_path_xy(sm['modelV2'])
-      prev_side = self._cone_sample.side if self._cone_sample is not None else 0
+      model = sm['modelV2']
       self._cone_sample = self._cone.update(
         points, self.v_ego, path_x, path_y, road_edges_xy(sm['modelV2']), dt,
         model_yaw_rate_right(sm['modelV2']),
         lead_xs=_cone_lead_xs(sm['modelV2'], self.radar_state),
-        lane_room=lane_room_m(sm['modelV2'], prev_side) if prev_side else None)
+        room_right=lane_room_m(model, 1), room_left=lane_room_m(model, -1))
       self._cone_dirty = True
     except Exception:
       cloudlog.exception("cone line detector failed")

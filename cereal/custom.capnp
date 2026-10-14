@@ -60,7 +60,15 @@ struct ConeLineNAP @0xf35cc4560bbf6ec2 {
   barrier @8 :Bool;          # continuous guardrail / barrier, not a cone line
   parked @9 :Bool;           # short wide cluster rejected as a parked car
   spanM @10 :Float32;
-  wouldSteer @11 :Float32;   # m, +right; proposed offset away from the line, |v| <= 0.4. Not applied.
+  wouldSteer @11 :Float32;   # m, +right; in-lane cone shift (corridor midpoint / away from one line), |v| <= 1.0
+  # Oct 14 corridor: both sides tracked at once.
+  leftActive @12 :Bool;
+  leftClear @13 :Float32;    # m from path centre to the nearest left post, 0 when none
+  rightActive @14 :Bool;
+  rightClear @15 :Float32;   # m from path centre to the nearest right post, 0 when none
+  corridor @16 :Bool;        # both sides active; wouldSteer aims at the midpoint
+  marginM @17 :Float32;      # smallest clearance to a tracked line after wouldSteer
+  releasing @18 :Bool;       # corridor ended; wouldSteer easing to 0 (applied while easing)
 }
 
 # NAP in-path / roadside obstacle sample. Log only, plus an animal/person

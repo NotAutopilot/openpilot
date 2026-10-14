@@ -134,6 +134,14 @@ class ConeLineSample:
   barrier: bool = False
   parked: bool = False
   span_m: float = 0.0
+  # Oct 14 corridor (route 194 seg 25): both sides tracked at once.
+  left_active: bool = False
+  left_clear: float = 0.0   # m from path centre to the nearest left post (>0), 0 when none
+  right_active: bool = False
+  right_clear: float = 0.0  # m from path centre to the nearest right post (>0), 0 when none
+  corridor: bool = False    # both sides active: steer to the midpoint
+  margin: float = 0.0       # smallest clearance to a tracked line after wouldSteer, m
+  releasing: bool = False   # corridor ended; wouldSteer is easing back to 0
 
 
 @dataclass
@@ -655,7 +663,13 @@ def _read_point(raw):
 class ConeLineDetector:
   """Temporal cone line. State is the post buffer plus the confirm timer."""
 
-  def __init__(self) -> None:
+  @property
+  def group(self) -> _Group | None:
+    return self._last_group if self._active else None
+
+  def __init__(self, side_filter: int = 0) -> None:
+    # side_filter: 0 = both sides (legacy, one line), +1 left only, -1 right only.
+    self._side_filter = int(side_filter)
     self._last_out = ConeLineSample()
     self._ws = 0.0
     self._overhead_s = 0.0
@@ -890,6 +904,8 @@ class ConeLineDetector:
       lat = _path_lat(y, x, path_x, path_y)
       if abs(lat) > lat_max_m(v_ego):
         continue
+      if self._side_filter and _side_of_lat(lat) == -self._side_filter:
+        continue
       if abs(lat) < LAT_MIN_M:
         if not (self._active and self._fit is not None and self._side in (-1, 1)
                 and abs(y - _eval(self._fit, x)) <= FIT_TOL_M):
@@ -910,11 +926,203 @@ class ConeLineDetector:
         self._active and self._fit is not None and abs(lat) < LAT_MIN_M
         and abs(p.y - _eval(self._fit, p.x)) <= FIT_TOL_M
       ) else _side_of_lat(lat)
+      if self._side_filter and side != self._side_filter:
+        continue
       if side == 1:
         left.append(p)
       elif side == -1:
         right.append(p)
     return left, right
+
+
+# ---- Oct 14 cone corridor ------------------------------------------------
+# Route 194 seg 25 (Ridgewood Rd, 08:28:47-08:29:14 CT): cones on the
+# centreline AND barrels on the right. The one-line detector tracked only the
+# right barrels, shifted left (wouldSteer -0.25) and drifted into the
+# untracked left cones. Now each side has its own tracker:
+#   both sides      steer to the corridor midpoint
+#   one side        firm offset away from it (cap 1.0 m, lane room)
+#   hard rule       never shift to within CORRIDOR_MARGIN_M of a tracked line;
+#                   a line already inside it pushes the path away
+#   release         after both sides drop (detector DROP_S ~2 s), wouldSteer
+#                   eases to 0 over RELEASE_S with a smoothstep, no snap
+CORRIDOR_MARGIN_M = 1.5
+CORRIDOR_SHIFT_MIN_MPS = 6.7   # 15 mph; the Oct 14 zone ramped up from ~19 mph
+CORRIDOR_INSIDE_M = 0.6        # closer than this is our own footprint
+CORRIDOR_RATE_MPS = 0.5        # normal ramp-in
+CORRIDOR_RATE_URGENT_MPS = 1.0 # ramp when a line is already inside the margin
+CORRIDOR_RELEASE_S = 3.0
+
+
+def _group_clear(group: _Group | None, path_x, path_y) -> float | None:
+  if group is None or group.kind != "cones" or not group.posts:
+    return None
+  lats = [abs(_path_lat(p.y, p.x, path_x, path_y)) for p in group.posts]
+  c = min(lats)
+  return c if math.isfinite(c) else None
+
+
+def corridor_bounds(left_clear: float | None, right_clear: float | None) -> tuple[float, float]:
+  """Allowed path shift (+right) that keeps CORRIDOR_MARGIN_M to each tracked line."""
+  lo = -math.inf if left_clear is None else CORRIDOR_MARGIN_M - left_clear
+  hi = math.inf if right_clear is None else right_clear - CORRIDOR_MARGIN_M
+  return lo, hi
+
+
+def corridor_target(left_clear: float | None, right_clear: float | None, *, v_ego: float,
+                    lead_in_span: bool = False, overhead: bool = False,
+                    room_right: float | None = None, room_left: float | None = None) -> float:
+  """In-lane path shift, +right. left_clear / right_clear: distance from path centre (>0) or None.
+
+  room_right: room to move right (away from a left line); room_left the same to the left.
+  """
+  if left_clear is not None and (not math.isfinite(left_clear) or left_clear < CORRIDOR_INSIDE_M):
+    left_clear = None
+  if right_clear is not None and (not math.isfinite(right_clear) or right_clear < CORRIDOR_INSIDE_M):
+    right_clear = None
+  if left_clear is None and right_clear is None:
+    return 0.0
+  if not math.isfinite(v_ego) or v_ego < CORRIDOR_SHIFT_MIN_MPS or lead_in_span or overhead:
+    return 0.0
+  lo, hi = corridor_bounds(left_clear, right_clear)
+  if left_clear is not None and right_clear is not None:
+    s = 0.5 * (right_clear - left_clear)          # midpoint of the corridor
+  elif left_clear is not None:
+    s = 0.0 if left_clear > SHIFT_TRIGGER_M else min(WOULD_STEER_CAP_M, SHIFT_TARGET_LAT_M - left_clear)
+    if room_right is not None and math.isfinite(room_right):
+      s = min(s, max(0.0, room_right))
+    s = max(s, lo)                                 # margin wins over lane room
+  else:
+    s = 0.0 if right_clear > SHIFT_TRIGGER_M else -min(WOULD_STEER_CAP_M, SHIFT_TARGET_LAT_M - right_clear)
+    if room_left is not None and math.isfinite(room_left):
+      s = max(s, -max(0.0, room_left))
+    s = min(s, hi)
+  if lo <= hi:
+    s = min(hi, max(lo, s))
+  return max(-WOULD_STEER_CAP_M, min(WOULD_STEER_CAP_M, s))
+
+
+def corridor_margin(shift: float, left_clear: float | None, right_clear: float | None) -> float:
+  vals = []
+  if left_clear is not None:
+    vals.append(left_clear + shift)
+  if right_clear is not None:
+    vals.append(right_clear - shift)
+  return min(vals) if vals else 0.0
+
+
+class ConeCorridorDetector:
+  """Left and right cone lines tracked at once, fused into one wouldSteer."""
+
+  def __init__(self) -> None:
+    self.left = ConeLineDetector(side_filter=1)
+    self.right = ConeLineDetector(side_filter=-1)
+    self._ws = 0.0
+    self._release_from = 0.0
+    self._release_s = 0.0
+    self._releasing = False
+    self._side = 0
+    self._overhead_s = 0.0
+    self._last_out = ConeLineSample()
+
+  def reset(self) -> None:
+    self.left.reset()
+    self.right.reset()
+    self._ws = 0.0
+    self._releasing = False
+    self._release_s = 0.0
+    self._side = 0
+
+  def update(self, points, v_ego: float, path_x, path_y, road_edges, dt: float,
+             yaw_rate: float = 0.0, *, lead_xs=(), lane_room=None,
+             room_right: float | None = None, room_left: float | None = None) -> ConeLineSample:
+    try:
+      try:
+        pts = list(points) if points is not None else []
+      except TypeError:
+        pts = []
+      sl = self.left.update(pts, v_ego, path_x, path_y, road_edges, dt, yaw_rate)
+      sr = self.right.update(pts, v_ego, path_x, path_y, road_edges, dt, yaw_rate)
+      out = self._fuse(sl, sr, pts, v_ego, path_x, path_y, dt, lead_xs, room_right, room_left)
+    except Exception:
+      self.reset()
+      out = ConeLineSample()
+    self._last_out = out
+    return out
+
+  def _fuse(self, sl, sr, pts, v_ego, path_x, path_y, dt, lead_xs, room_right, room_left):
+    v = _speed(v_ego)
+    d = max(0.0, min(0.5, _num(dt) or 0.0))
+    gl = self.left.group if sl.active else None
+    gr = self.right.group if sr.active else None
+    lc = _group_clear(gl, path_x, path_y)
+    rc = _group_clear(gr, path_x, path_y)
+    active = lc is not None or rc is not None
+    target = 0.0
+    lo, hi = -math.inf, math.inf
+    if active:
+      xs = [p.x for g in (gl, gr) if g is not None for p in g.posts]
+      x_lo, x_hi = min(xs), max(xs)
+      over = overhead_ranges(pts, v, path_x, path_y)
+      # Both sides at one range is how an overpass looks; a corridor is long.
+      if gl is None or gr is None:
+        if any(x_lo - OVERHEAD_DEPTH_M <= x <= x_hi + OVERHEAD_DEPTH_M for x in over):
+          self._overhead_s = OVERHEAD_HOLD_S
+        else:
+          self._overhead_s = max(0.0, self._overhead_s - d)
+      else:
+        self._overhead_s = 0.0
+      leads = [_num(lx) for lx in (lead_xs or ())]
+      lead_in_span = any(lx is not None and x_lo - 5.0 <= lx <= x_hi + 5.0 for lx in leads)
+      target = corridor_target(lc, rc, v_ego=v, lead_in_span=lead_in_span, overhead=self._overhead_s > 0.0,
+                               room_right=room_right, room_left=room_left)
+      lo, hi = corridor_bounds(lc if lc and lc >= CORRIDOR_INSIDE_M else None,
+                               rc if rc and rc >= CORRIDOR_INSIDE_M else None)
+      self._releasing = False
+      self._release_s = 0.0
+      urgent = not (lo <= self._ws <= hi)
+      step = (CORRIDOR_RATE_URGENT_MPS if urgent else CORRIDOR_RATE_MPS) * d
+      self._ws += max(-step, min(step, target - self._ws))
+    else:
+      if abs(self._ws) > 1e-4 and not self._releasing:
+        self._releasing = True
+        self._release_from = self._ws
+        self._release_s = 0.0
+      if self._releasing:
+        self._release_s += d
+        t = min(1.0, self._release_s / CORRIDOR_RELEASE_S)
+        self._ws = self._release_from * (1.0 - t * t * (3.0 - 2.0 * t))
+        if t >= 1.0:
+          self._releasing = False
+          self._ws = 0.0
+    if abs(self._ws) < 1e-4:
+      self._ws = 0.0
+    # Primary line for the legacy fields: the nearer one.
+    if lc is not None and (rc is None or lc <= rc):
+      base, side = sl, 1
+    elif rc is not None:
+      base, side = sr, -1
+    else:
+      base = sl if sl.confidence >= sr.confidence else sr
+      side = 0
+    if side:
+      self._side = side
+    releasing = self._releasing and self._ws != 0.0
+    return replace(
+      base,
+      active=active,
+      side=side if active else (self._side if releasing else base.side),
+      would_steer=self._ws,
+      barrier=sl.barrier or sr.barrier,
+      parked=sl.parked or sr.parked,
+      left_active=lc is not None,
+      left_clear=lc or 0.0,
+      right_active=rc is not None,
+      right_clear=rc or 0.0,
+      corridor=lc is not None and rc is not None,
+      margin=corridor_margin(self._ws, lc, rc),
+      releasing=releasing,
+    )
 
 
 def publish_cone_line(pm, sample: ConeLineSample | None) -> None:
@@ -941,4 +1149,11 @@ def publish_cone_line(pm, sample: ConeLineSample | None) -> None:
   dest.barrier = bool(sample.barrier)
   dest.parked = bool(sample.parked)
   dest.spanM = float(sample.span_m)
+  dest.leftActive = bool(sample.left_active)
+  dest.leftClear = float(sample.left_clear)
+  dest.rightActive = bool(sample.right_active)
+  dest.rightClear = float(sample.right_clear)
+  dest.corridor = bool(sample.corridor)
+  dest.marginM = float(sample.margin)
+  dest.releasing = bool(sample.releasing)
   pm.send("coneLineNAP", msg)

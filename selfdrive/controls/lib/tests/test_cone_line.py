@@ -355,7 +355,7 @@ def test_schema_documents_the_right_positive_frame():
   assert "yRel is +left" in cone
   assert "+1 left" in cone
   assert "wouldSteer" in cone
-  assert "Not applied" in cone
+  assert "corridor" in cone
   obstacle = text.split("struct PathObstacleNAP", 1)[1]
   assert "+right" in obstacle.split("enum ObjectClass", 1)[0]
 
