@@ -257,8 +257,17 @@ function fitPane() {
   main.style.top = chrome.offsetHeight + "px";
 }
 
+// Firehose and Developer stay on the comma itself; not shown on the MCU dashboard.
+var DASH_HIDDEN_PANELS = { firehose: true, developer: true };
 function panels() {
-  return (manifest && manifest.panels) || [];
+  var all = (manifest && manifest.panels) || [];
+  var out = [];
+  var i;
+  for (i = 0; i < all.length; i++) {
+    if (DASH_HIDDEN_PANELS[all[i].id] || DASH_HIDDEN_PANELS[all[i].parent]) continue;
+    out.push(all[i]);
+  }
+  return out;
 }
 
 function controlsFor(panelId) {
@@ -327,6 +336,32 @@ function renderDrive() {
   else { el.className = "banner"; el.textContent = "STANDBY"; }
 }
 
+var bookmark = { recording: false, left: 0 };
+function renderBookmark() {
+  var el = document.getElementById("bookmark");
+  if (!el) return;
+  if (bookmark.recording) {
+    el.textContent = "REC " + bookmark.left + "s";
+    el.style.color = "#fff"; el.style.background = "#dc2626"; el.style.borderColor = "#fca5a5";
+  } else {
+    el.textContent = "Bookmark";
+    el.style.color = ""; el.style.background = ""; el.style.borderColor = "";
+  }
+}
+function bookmarkPoll() {
+  getJSON("/api/bookmark", function (err, data) {
+    if (!err && data && typeof data.recording === "boolean") { bookmark = data; renderBookmark(); }
+  });
+}
+function bookmarkTap() {
+  postJSON("/api/bookmark", {}, function (err, data) {
+    if (err) { setStatus("Bookmark failed"); return; }
+    if (data && data.ok === false) { setStatus("Bookmark works while driving"); return; }
+    setStatus(bookmark.recording ? "Voice note saved" : "Bookmarked, recording voice note");
+    setTimeout(bookmarkPoll, 400);
+  });
+}
+
 function renderNav() {
   var nav = document.getElementById("nav");
   while (nav.firstChild) nav.removeChild(nav.firstChild);
@@ -343,6 +378,12 @@ function renderNav() {
     })(list[i].id);
     nav.appendChild(btn);
   }
+  var bm = document.createElement("button");
+  bm.type = "button";
+  bm.id = "bookmark";
+  bm.onclick = bookmarkTap;
+  nav.appendChild(bm);
+  renderBookmark();
   renderDrive();
   fitPane();
 }
@@ -781,6 +822,7 @@ document.getElementById("foack-yes").onclick = function () { foAnswer("yes"); };
 document.getElementById("foack-no").onclick = function () { foAnswer("no"); };
 foPoll();
 setInterval(foPoll, 1500);
+setInterval(bookmarkPoll, 1000);
 
 window.onresize = fitPane;
 // Lets :active paint on touch screens that otherwise skip it.

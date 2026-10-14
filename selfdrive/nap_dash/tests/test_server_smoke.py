@@ -281,3 +281,33 @@ def test_process_not_running_alert_omits_optional_dash():
   ms.processes = [dash]
   alert = process_not_running_alert(cp, cs, {"managerState": ms}, False, 100, log.LongitudinalPersonality.standard)
   assert "nap_dash" not in (alert.alert_text_1 + " " + alert.alert_text_2)
+
+
+def test_bookmark_endpoints_offroad_and_onroad():
+  from openpilot.selfdrive.nap_dash.server import bookmark_status, bookmark_tap
+  p = FakeParams()
+  assert bookmark_status(p) == {"recording": False, "left": 0}
+  out = bookmark_tap(p)
+  assert out["ok"] is False and out["reason"] == "offroad"
+  assert p.get("NAPBookmarkRequest") is None
+  p.bools["IsOnroad"] = True
+  assert bookmark_tap(p)["ok"] is True
+  assert p.get("NAPBookmarkRequest") is not None
+  p.put("NAPBookmarkRecording", 23)
+  assert bookmark_status(p) == {"recording": True, "left": 23}
+
+
+def test_dashboard_has_bookmark_button():
+  html = (ROOT / "selfdrive" / "nap_dash" / "dashboard.html").read_text(encoding="utf-8")
+  assert "/api/bookmark" in html and "REC " in html and '"Bookmark"' in html
+
+
+def test_dashboard_hides_firehose_and_developer():
+  html = (ROOT / "selfdrive" / "nap_dash" / "dashboard.html").read_text(encoding="utf-8")
+  assert "DASH_HIDDEN_PANELS = { firehose: true, developer: true }" in html
+
+
+def test_comma_sidebar_has_no_bookmark():
+  src = (ROOT / "selfdrive" / "ui" / "layouts" / "settings" / "settings.py").read_text(encoding="utf-8")
+  assert "Bookmark" not in src
+  assert "NAV_BTN_HEIGHT = 110" in src

@@ -15,6 +15,7 @@ import wave
 import datetime
 
 import cereal.messaging as messaging
+from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware.hw import Paths
 from openpilot.system.micd import SAMPLE_RATE, SAMPLE_BUFFER
@@ -23,6 +24,8 @@ VOICE_NOTE_MAX_DURATION = 30.0
 FEEDBACK_MAX_DURATION = VOICE_NOTE_MAX_DURATION  # used by the selfdrived audioFeedback alert
 # a second tap this soon after the first is treated as a bounce, not a stop
 MIN_STOP_DELAY = 0.5
+# CLOCK_MONOTONIC is shared across processes. Ignore a stale dashboard request (e.g. queued before this process started)
+DASH_REQUEST_MAX_AGE = 5.0
 
 
 def active_segment_dir(root: str | None = None) -> str | None:
@@ -85,12 +88,23 @@ def main():
   pm = messaging.PubMaster(['userBookmark', 'audioFeedback'])
   # No carState here: carState is at the msgq reader limit.
   sm = messaging.SubMaster(['rawAudioData', 'bookmarkButton'])
+  params = Params()
   note: VoiceNote | None = None
+  last_left = -1
+  params.remove("NAPBookmarkRecording")
 
   while True:
     sm.update()
 
-    if sm.updated['bookmarkButton']:
+    # Web dashboard tap (nap_dash server) arrives as a param, not a second
+    # bookmarkButton publisher (msgq allows one publisher per service).
+    dash_tap = False
+    req = params.get("NAPBookmarkRequest")
+    if req is not None:
+      params.remove("NAPBookmarkRequest")
+      dash_tap = abs(time.monotonic() - int(req)) < DASH_REQUEST_MAX_AGE
+
+    if sm.updated['bookmarkButton'] or dash_tap:
       if note is None:
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         cloudlog.event("bookmark_pressed", stamp=stamp)
@@ -112,6 +126,15 @@ def main():
       if note.duration() >= VOICE_NOTE_MAX_DURATION:
         note.close()
         note = None
+
+    # Recording status for the web dashboard: seconds left, absent when idle.
+    left = -1 if note is None else max(0, int(VOICE_NOTE_MAX_DURATION - note.duration()))
+    if left != last_left:
+      if left < 0:
+        params.remove("NAPBookmarkRecording")
+      else:
+        params.put("NAPBookmarkRecording", left)
+      last_left = left
 
 
 if __name__ == '__main__':
