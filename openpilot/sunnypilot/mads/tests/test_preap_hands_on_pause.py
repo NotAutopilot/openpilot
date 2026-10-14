@@ -7,7 +7,7 @@ from opendbc.car import structs
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 from openpilot.selfdrive.selfdrived.events import Events
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
-from openpilot.sunnypilot.mads.mads import HANDS_ON_RESUME_US, ModularAssistiveDrivingSystem
+from openpilot.sunnypilot.mads.mads import HANDS_ON_RESUME_US, LATERAL_MISMATCH_MAX_COUNT, ModularAssistiveDrivingSystem
 
 State = custom.ModularAssistiveDrivingSystem.ModularAssistiveDrivingSystemState
 EventName = log.OnroadEvent.EventName
@@ -88,6 +88,26 @@ def make_mads(hands_on=True, capability=True):
   mads.active = True
   mads.state_machine.state = State.enabled
   return mads, sd
+
+def _disengage(mads):
+  mads.enabled = False
+  mads.active = False
+  mads.state_machine.state = State.disabled
+
+
+def _step_mads(mads, sd, cs, *, allowed=True, inhibited=False, panda_valid=True, enable=False, override=False):
+  ps = _panda(inhibited)
+  ps.controlsAllowedLateral = allowed
+  sd.sm = FakeSM([ps], panda_valid=panda_valid)
+  sd.events.clear()
+  sd.events_sp.clear()
+  if enable:
+    sd.events_sp.add(EventNameSP.lkasEnable)
+  if override:
+    sd.events.add(EventName.steerOverride)
+  mads.update(cs)
+  sd.CS_prev = cs
+
 
 
 class TestPreAPHandsOnPause(unittest.TestCase):
@@ -327,6 +347,98 @@ class TestPreAPHandsOnPause(unittest.TestCase):
     self.assertFalse(mads._hands_on_steering_inhibited)
     self.assertFalse(sd.events_sp.has(EventNameSP.silentLkasDisable))
 
+  def test_first_pull_delayed_permission_50ms_does_not_false_disable(self):
+    mads, sd = make_mads()
+    _disengage(mads)
+    cs = FakeCS(hands_on_level=1, steering_pressed=True)
+    _step_mads(mads, sd, cs, allowed=False, enable=True, override=True)
+    self.assertNotEqual(mads.state_machine.state, State.disabled)
+    self.assertFalse(sd.events_sp.has(EventNameSP.lkasDisable))
+    for _ in range(5):
+      _step_mads(mads, sd, cs, allowed=False, override=True)
+      self.assertFalse(sd.events_sp.has(EventNameSP.lkasDisable))
+      self.assertNotEqual(mads.state_machine.state, State.disabled)
+    _step_mads(mads, sd, cs, allowed=True, override=True)
+    self.assertFalse(sd.events_sp.has(EventNameSP.lkasDisable))
+    self.assertEqual(mads.state_machine.state, State.overriding)
+
+  def test_first_pull_delayed_permission_over_100ms_does_not_false_disable(self):
+    mads, sd = make_mads()
+    _disengage(mads)
+    cs = FakeCS(hands_on_level=1, steering_pressed=True)
+    _step_mads(mads, sd, cs, allowed=False, enable=True, override=True)
+    for _ in range(15):
+      _step_mads(mads, sd, cs, allowed=False, override=True)
+      self.assertFalse(sd.events_sp.has(EventNameSP.lkasDisable))
+      self.assertNotEqual(mads.state_machine.state, State.disabled)
+    _step_mads(mads, sd, cs, allowed=True, override=True)
+    self.assertFalse(sd.events_sp.has(EventNameSP.lkasDisable))
+    self.assertEqual(mads.state_machine.state, State.overriding)
+
+  def test_never_granted_permission_hits_mismatch_bound(self):
+    mads, sd = make_mads()
+    _disengage(mads)
+    cs = FakeCS(hands_on_level=1, steering_pressed=True)
+    _step_mads(mads, sd, cs, allowed=False, enable=True, override=True)
+    self.assertFalse(sd.events_sp.has(EventNameSP.lkasDisable))
+    for _ in range(LATERAL_MISMATCH_MAX_COUNT - 2):
+      _step_mads(mads, sd, cs, allowed=False, override=True)
+      self.assertFalse(sd.events_sp.has(EventNameSP.lkasDisable))
+      self.assertNotEqual(mads.state_machine.state, State.disabled)
+    _step_mads(mads, sd, cs, allowed=False, override=True)
+    self.assertTrue(sd.events_sp.has(EventNameSP.lkasDisable))
+    self.assertEqual(mads.state_machine.state, State.disabled)
+
+  def test_acquired_permission_then_lost_hard_disables(self):
+    mads, sd = make_mads()
+    _disengage(mads)
+    cs = FakeCS(hands_on_level=1, steering_pressed=True)
+    _step_mads(mads, sd, cs, allowed=True, enable=True, override=True)
+    _step_mads(mads, sd, cs, allowed=True, override=True)
+    self.assertFalse(sd.events_sp.has(EventNameSP.lkasDisable))
+    self.assertEqual(mads.state_machine.state, State.overriding)
+    _step_mads(mads, sd, cs, allowed=False, override=True)
+    self.assertTrue(sd.events_sp.has(EventNameSP.lkasDisable))
+    self.assertEqual(mads.state_machine.state, State.disabled)
+
+  def test_pause_cannot_evade_acquisition_deadline(self):
+    mads, sd = make_mads()
+    _disengage(mads)
+    cs = FakeCS(hands_on_level=1, steering_pressed=True)
+    _step_mads(mads, sd, cs, allowed=False, enable=True, override=True)
+    for _ in range(49):
+      _step_mads(mads, sd, cs, allowed=False, override=True)
+    self.assertNotEqual(mads.state_machine.state, State.disabled)
+    cs_pause = FakeCS(hands_on_level=2)
+    remaining = LATERAL_MISMATCH_MAX_COUNT - 50
+    for _ in range(remaining - 1):
+      _step_mads(mads, sd, cs_pause, allowed=False, inhibited=True)
+      self.assertNotEqual(mads.state_machine.state, State.disabled)
+    _step_mads(mads, sd, cs_pause, allowed=False, inhibited=True)
+    self.assertTrue(sd.events_sp.has(EventNameSP.lkasDisable))
+    self.assertEqual(mads.state_machine.state, State.disabled)
+
+  def test_stale_positive_grant_during_pending_hard_disables(self):
+    mads, sd = make_mads()
+    _disengage(mads)
+    cs = FakeCS(hands_on_level=1, steering_pressed=True)
+    _step_mads(mads, sd, cs, allowed=False, enable=True, override=True)
+    for _ in range(10):
+      _step_mads(mads, sd, cs, allowed=False, override=True)
+    _step_mads(mads, sd, cs, allowed=True, override=True, panda_valid=False)
+    self.assertTrue(sd.events_sp.has(EventNameSP.lkasDisable))
+    self.assertEqual(mads.state_machine.state, State.disabled)
+
+  def test_door_during_pending_acquisition_hard_disables(self):
+    mads, sd = make_mads()
+    _disengage(mads)
+    cs = FakeCS(hands_on_level=1, steering_pressed=True)
+    _step_mads(mads, sd, cs, allowed=False, enable=True, override=True)
+    self.assertFalse(sd.events_sp.has(EventNameSP.lkasDisable))
+    _step_mads(mads, sd, FakeCS(hands_on_level=1, steering_pressed=True, door_open=True),
+               allowed=False, override=True)
+    self.assertTrue(sd.events_sp.has(EventNameSP.lkasDisable))
+    self.assertEqual(mads.state_machine.state, State.disabled)
 
 if __name__ == "__main__":
   unittest.main()

@@ -128,6 +128,7 @@ class DiagnosticTransport:
       if self._mode in (SAFETY_ELM327, SAFETY_ALLOUTPUT) or self._mode != SAFETY_TESLA_PREAP:
         raise TransportError("pedal frames require teslaPreap calibration safety")
     try:
+      self.panda.send_heartbeat(False, False)
       self.panda.can_send(addr, dat, bus)
     except Exception as exc:
       raise TransportError(f"can_send failed: {exc}") from exc

@@ -237,9 +237,9 @@ class PedalCalibrator:
     return True
 
   def _advance_on_pedal_message(self) -> None:
-    if self.pedal_interceptor_state != 0:
-      return
     self.pedal_error_count = 0
+    if self.status == 2 and self.pedal_interceptor_state != 0:
+      return
 
     if self.status == 2:
       self.pedal_zero_sum += self.pedal_interceptor_value

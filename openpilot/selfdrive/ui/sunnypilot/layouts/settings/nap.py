@@ -224,6 +224,19 @@ class NAPLayout(Widget):
                      tr("Let's you engage when Bosch raises HWFail even though tracks are still live."),
                      dest=self._radar_items)
 
+    def on_upside_down(state):
+      from opendbc.car.tesla.preap.nap_conf import nap_conf
+      nap_conf.radar_upside_down = state
+      self._show_reboot_modal()
+
+    from opendbc.car.tesla.preap.nap_conf import nap_conf
+    self._radar_items.append(toggle_item_sp(
+      tr("Invert Radar Orientation (Upside Down)"),
+      tr("Flip the radar's left/right axis. Use this if your radar is mounted upside down. Requires reboot."),
+      initial_state=nap_conf.radar_upside_down,
+      callback=on_upside_down,
+    ))
+
     def on_radar_hud(state):
       self._params.put_bool(NAPParamKeys.RADAR_HUD, state)
       ui_state.radar_hud = state

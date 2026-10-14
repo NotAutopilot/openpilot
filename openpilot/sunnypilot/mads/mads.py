@@ -19,7 +19,7 @@ from openpilot.sunnypilot.mads.helpers import (
   MadsSteeringModeOnBrake, persist_required_mads, read_steering_mode_param, resolve_mads_capabilities,
   unified_engagement_locked_off,
 )
-from openpilot.sunnypilot.mads.state import StateMachine, GEARS_ALLOW_PAUSED_SILENT
+from openpilot.sunnypilot.mads.state import StateMachine, GEARS_ALLOW_PAUSED_SILENT, ENABLED_STATES
 
 State = custom.ModularAssistiveDrivingSystem.ModularAssistiveDrivingSystemState
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -32,6 +32,9 @@ SET_SPEED_BUTTONS = (ButtonType.accelCruise, ButtonType.resumeCruise, ButtonType
 IGNORED_SAFETY_MODES = (SafetyModel.silent, SafetyModel.noOutput)
 HANDS_ON_PAUSE_LEVEL = 2
 HANDS_ON_RESUME_US = 1_000_000
+# Same 200-sample bound already used for controlsMismatchLateral. Pending first
+# grant uses it; a drop after grant is loss and disables immediately.
+LATERAL_MISMATCH_MAX_COUNT = 200
 UINT32_MASK = 0xFFFFFFFF
 
 
@@ -80,6 +83,8 @@ class ModularAssistiveDrivingSystem:
     self._hands_on_steering_inhibited = False
     self._hands_on_clear_timing = False
     self._hands_on_clear_ts = 0
+    self._lateral_permission_acquired = False
+    self._lateral_permission_acquire_counter = 0
 
     # Required-MADS platforms consume only the frozen typed snapshot.
     if persist_required_mads(self.params, self.CP_SP):
@@ -171,6 +176,8 @@ class ModularAssistiveDrivingSystem:
   def _hard_disable_from_pause(self) -> None:
     self._hands_on_steering_inhibited = False
     self._reset_hands_on_clear_timer()
+    self._lateral_permission_acquired = False
+    self._lateral_permission_acquire_counter = 0
     if self.events_sp.has(EventNameSP.silentLkasDisable):
       self.events_sp.remove(EventNameSP.silentLkasDisable)
     if self.events_sp.has(EventNameSP.silentLkasEnable):
@@ -205,6 +212,13 @@ class ModularAssistiveDrivingSystem:
     dm_lock = bool(
       self.events.has(EventName.driverUnresponsive3) or self.events.has(EventName.driverDistracted3)
     )
+    mads_enable = self.events_sp.has(EventNameSP.lkasEnable) or self.events_sp.has(EventNameSP.silentLkasEnable)
+    lat_requested = bool(self.enabled or self.state_machine.state in ENABLED_STATES or mads_enable)
+    if not lat_requested:
+      self._lateral_permission_acquired = False
+      self._lateral_permission_acquire_counter = 0
+
+    established_lat_lost = panda_lat_lost and self._lateral_permission_acquired
     hard_event = bool(
       epas_fault
       or self.events_sp.has(EventNameSP.lkasDisable)
@@ -212,12 +226,20 @@ class ModularAssistiveDrivingSystem:
       or (not cs_fresh)
       or (not pandas)
       or (not panda_fresh)
-      or panda_lat_lost
+      or established_lat_lost
       or dm_lock
       or self.events_sp.has(EventNameSP.controlsMismatchLateral)
       or self.events.contains(ET.IMMEDIATE_DISABLE)
       or self.events_sp.contains(ET.IMMEDIATE_DISABLE)
     )
+    if lat_requested and not hard_event:
+      if panda_lat_lost:
+        self._lateral_permission_acquire_counter += 1
+        if self._lateral_permission_acquire_counter >= LATERAL_MISMATCH_MAX_COUNT:
+          hard_event = True
+      else:
+        self._lateral_permission_acquired = True
+        self._lateral_permission_acquire_counter = 0
     if hard_event:
       self._hard_disable_from_pause()
       return
@@ -269,7 +291,7 @@ class ModularAssistiveDrivingSystem:
     # When the safety and selfdrived do not agree on controls_allowed_lateral
     # we want to disengage sunnypilot. However the status from the panda goes through
     # another socket other than the CAN messages and one can arrive earlier than the other.
-    # Therefore we allow a mismatch for two samples, then we trigger the disengagement.
+    # Allow LATERAL_MISMATCH_MAX_COUNT control frames for that transport mismatch.
     if not self.active or self.selfdrive.enabled:
       self.lateral_mismatch_counter = 0
     elif any(not ps.controlsAllowedLateral for ps in self.selfdrive.sm['pandaStates']
@@ -393,7 +415,7 @@ class ModularAssistiveDrivingSystem:
       if self.state_machine.state == State.paused:
         self.events_sp.add(EventNameSP.silentLkasEnable)
 
-    if self.lateral_mismatch_counter >= 200:
+    if self.lateral_mismatch_counter >= LATERAL_MISMATCH_MAX_COUNT:
       self.events_sp.add(EventNameSP.controlsMismatchLateral)
 
     self.events.remove(EventName.pcmDisable)
