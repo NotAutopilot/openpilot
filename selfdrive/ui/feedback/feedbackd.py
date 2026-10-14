@@ -20,6 +20,7 @@ from openpilot.system.hardware.hw import Paths
 from openpilot.system.micd import SAMPLE_RATE, SAMPLE_BUFFER
 
 VOICE_NOTE_MAX_DURATION = 30.0
+FEEDBACK_MAX_DURATION = VOICE_NOTE_MAX_DURATION  # used by the selfdrived audioFeedback alert
 # a second tap this soon after the first is treated as a bounce, not a stop
 MIN_STOP_DELAY = 0.5
 
