@@ -132,6 +132,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"Version", {PERSISTENT, STRING}},
 
     // NAP (NotAutopilot) Pre-AP Tesla params
+    {"NAPBookmarkRequest", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, INT}},
+    {"NAPBookmarkRecording", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, INT}},
     {"NAPBrakeFactor", {PERSISTENT, FLOAT, "1.0"}},
     // Stock Follow Distance 1–7. Stalk behind a radar lead writes this
     // (Hypermile On or Off). Driving Mannerisms slider stays visible.

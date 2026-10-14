@@ -82,6 +82,32 @@ def locked_write(name, value, confirm=False):
     return write_setting(_params(), name, value, confirm=confirm)
 
 
+def bookmark_status(params):
+  """{"recording": bool, "left": seconds}. feedbackd owns NAPBookmarkRecording."""
+  try:
+    left = params.get("NAPBookmarkRecording")
+  except Exception:
+    left = None
+  if left is None:
+    return {"recording": False, "left": 0}
+  return {"recording": True, "left": int(left)}
+
+
+def bookmark_tap(params):
+  """Same as the comma sidebar Bookmark tap: feedbackd bookmarks + starts/stops the voice note.
+  Only onroad (feedbackd/micd/loggerd do not run parked)."""
+  if not params.get_bool("IsOnroad"):
+    # Nothing records parked; a queued request would fire at the next drive start.
+    out = bookmark_status(params)
+    out["ok"] = False
+    out["reason"] = "offroad"
+    return out
+  params.put("NAPBookmarkRequest", int(time.monotonic()))
+  out = bookmark_status(params)
+  out["ok"] = True
+  return out
+
+
 def state_snapshot():
   """Minimal JSON so an old page does not 500. No live car data."""
   return {
@@ -157,6 +183,11 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_json(read_ack(_params()))
       except Exception as exc:
         return self.send_json({"error": str(exc)}, 500)
+    if path == "/api/bookmark":
+      try:
+        return self.send_json(bookmark_status(_params()))
+      except Exception as exc:
+        return self.send_json({"error": str(exc)}, 500)
     if path == "/api/software":
       try:
         return self.send_json(read_software(_params()))
@@ -175,6 +206,8 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_json(handle_software(payload, _params()))
       if path == "/api/force_offroad":
         return self.send_json(handle_ack(payload, _params()))
+      if path == "/api/bookmark":
+        return self.send_json(bookmark_tap(_params()))
       if path != "/api/set":
         return self.send_json({"error": "not found"}, 404)
       action = str(payload.get("action") or "").strip().lower()
