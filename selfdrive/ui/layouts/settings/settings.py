@@ -1,6 +1,5 @@
 import time
 import pyray as rl
-import cereal.messaging as messaging
 from dataclasses import dataclass
 from enum import IntEnum
 from collections.abc import Callable
@@ -23,9 +22,7 @@ from openpilot.system.ui.widgets.network import NetworkUI
 SIDEBAR_WIDTH = 500
 CLOSE_BTN_SIZE = 200
 CLOSE_ICON_SIZE = 70
-# 7 panels + Bookmark must fit in 1080 px: 275 + 8*100 = 1075
-NAV_BTN_HEIGHT = 100
-NAV_TOP = 275
+NAV_BTN_HEIGHT = 110
 PANEL_MARGIN = 50
 
 # Colors
@@ -35,11 +32,6 @@ CLOSE_BTN_COLOR = rl.Color(41, 41, 41, 255)
 CLOSE_BTN_PRESSED = rl.Color(59, 59, 59, 255)
 TEXT_NORMAL = rl.Color(128, 128, 128, 255)
 TEXT_SELECTED = rl.WHITE
-TEXT_RECORDING = rl.Color(255, 70, 70, 255)
-
-# Bookmark nav item: recording is considered live while audioFeedback keeps arriving
-BOOKMARK_LIVE_TIMEOUT = 0.6
-BOOKMARK_MAX_NOTE = 30
 
 
 class PanelType(IntEnum):
@@ -89,34 +81,11 @@ class SettingsLayout(Widget):
     self._hidden_popup = HiddenTogglesPopup(on_dismiss=self._dismiss_hidden_popup)
     self._hidden_popup.set_visible(False)
 
-    # Bookmark nav item (not a panel): tap = log bookmark + voice note
-    self._bookmark_rect = rl.Rectangle(0, 0, 0, 0)
-    self._bookmark_sm = messaging.SubMaster(['audioFeedback'])
-    self._bookmark_last_audio = 0.0
-    self._bookmark_rec_start = 0.0
-
     # Callbacks
     self._close_callback: Callable | None = None
-    self._bookmark_callback: Callable | None = None
 
-  def set_callbacks(self, on_close: Callable, on_bookmark: Callable | None = None):
+  def set_callbacks(self, on_close: Callable):
     self._close_callback = on_close
-    self._bookmark_callback = on_bookmark
-
-  def _bookmark_recording(self) -> bool:
-    now = time.monotonic()
-    self._bookmark_sm.update(0)
-    if self._bookmark_sm.updated['audioFeedback']:
-      if now - self._bookmark_last_audio > BOOKMARK_LIVE_TIMEOUT:
-        self._bookmark_rec_start = now
-      self._bookmark_last_audio = now
-    return now - self._bookmark_last_audio < BOOKMARK_LIVE_TIMEOUT
-
-  def _bookmark_label(self) -> tuple[str, rl.Color]:
-    if self._bookmark_recording():
-      left = max(0, int(BOOKMARK_MAX_NOTE - (time.monotonic() - self._bookmark_rec_start)))
-      return f"REC {left}s", TEXT_RECORDING
-    return tr("Bookmark"), TEXT_NORMAL
 
   def _render(self, rect: rl.Rectangle):
     # Calculate layout
@@ -160,7 +129,7 @@ class SettingsLayout(Widget):
     self._close_btn_rect = close_btn_rect
 
     # Navigation buttons
-    y = rect.y + NAV_TOP
+    y = rect.y + 300
     for panel_type, panel_info in self._panels.items():
       button_rect = rl.Rectangle(rect.x + 50, y, rect.width - 150, NAV_BTN_HEIGHT)
 
@@ -179,14 +148,6 @@ class SettingsLayout(Widget):
       panel_info.button_rect = button_rect
 
       y += NAV_BTN_HEIGHT
-
-    # Bookmark: same font/size/alignment as the panel items, placed last
-    self._bookmark_rect = rl.Rectangle(rect.x + 50, y, rect.width - 150, NAV_BTN_HEIGHT)
-    label, color = self._bookmark_label()
-    text_size = measure_text_cached(self._font_medium, label, 65)
-    text_pos = rl.Vector2(self._bookmark_rect.x + self._bookmark_rect.width - text_size.x,
-                          self._bookmark_rect.y + (self._bookmark_rect.height - text_size.y) / 2)
-    rl.draw_text_ex(self._font_medium, label, text_pos, 65, 0, color)
 
   def _draw_current_panel(self, rect: rl.Rectangle):
     rl.draw_rectangle_rounded(
@@ -208,11 +169,6 @@ class SettingsLayout(Widget):
       self._dismiss_hidden_popup()
       if self._close_callback:
         self._close_callback()
-      return
-
-    if rl.check_collision_point_rec(mouse_pos, self._bookmark_rect):
-      if self._bookmark_callback:
-        self._bookmark_callback()
       return
 
     # Check navigation buttons

@@ -300,3 +300,14 @@ def test_bookmark_endpoints_offroad_and_onroad():
 def test_dashboard_has_bookmark_button():
   html = (ROOT / "selfdrive" / "nap_dash" / "dashboard.html").read_text(encoding="utf-8")
   assert "/api/bookmark" in html and "REC " in html and '"Bookmark"' in html
+
+
+def test_dashboard_hides_firehose_and_developer():
+  html = (ROOT / "selfdrive" / "nap_dash" / "dashboard.html").read_text(encoding="utf-8")
+  assert "DASH_HIDDEN_PANELS = { firehose: true, developer: true }" in html
+
+
+def test_comma_sidebar_has_no_bookmark():
+  src = (ROOT / "selfdrive" / "ui" / "layouts" / "settings" / "settings.py").read_text(encoding="utf-8")
+  assert "Bookmark" not in src
+  assert "NAV_BTN_HEIGHT = 110" in src

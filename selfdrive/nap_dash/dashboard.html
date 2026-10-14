@@ -257,8 +257,17 @@ function fitPane() {
   main.style.top = chrome.offsetHeight + "px";
 }
 
+// Firehose and Developer stay on the comma itself; not shown on the MCU dashboard.
+var DASH_HIDDEN_PANELS = { firehose: true, developer: true };
 function panels() {
-  return (manifest && manifest.panels) || [];
+  var all = (manifest && manifest.panels) || [];
+  var out = [];
+  var i;
+  for (i = 0; i < all.length; i++) {
+    if (DASH_HIDDEN_PANELS[all[i].id] || DASH_HIDDEN_PANELS[all[i].parent]) continue;
+    out.push(all[i]);
+  }
+  return out;
 }
 
 function controlsFor(panelId) {
