@@ -38,7 +38,7 @@ from openpilot.selfdrive.speedsignd.install import (
   sha256_file,
 )
 from openpilot.selfdrive.speedsignd.paths import nap_data_dir
-from openpilot.selfdrive.speedsignd.weights_manifest import ASSET_SHA256, ORT_SHA256, release_asset_url
+from openpilot.selfdrive.speedsignd.weights_manifest import ASSET_SHA256, ORT_SHA256
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
   if args.onnx:
     dest = install_weights(args.onnx, args.out, sha256=None)
   else:
-    dest = fetch_and_install(dest=args.out, url=args.url or release_asset_url(), sha256=sha)
+    dest = fetch_and_install(dest=args.out, url=args.url, sha256=sha)
   digest = sha256_file(dest)
   print(f"installed {os.path.getsize(dest)} bytes -> {dest}")
   print(f"sha256 {digest}")

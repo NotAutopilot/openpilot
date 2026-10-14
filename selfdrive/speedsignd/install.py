@@ -22,6 +22,9 @@ from urllib.parse import unquote, urlparse
 from openpilot.selfdrive.speedsignd.paths import default_onnx_path, default_pylib_dir
 from openpilot.selfdrive.speedsignd.weights_manifest import (
   ASSET_SHA256,
+  COMPATIBLE_SHA256,
+  FALLBACK_RELEASE_TAG,
+  FALLBACK_SHA256,
   ORT_SHA256,
   ORT_URL,
   ORT_VERSION,
@@ -52,6 +55,17 @@ def weights_sha_matches(path: str | None = None, expected: str | None = None) ->
     return False
   try:
     return sha256_file(path).lower() == expected.lower()
+  except OSError:
+    return False
+
+
+def weights_loadable(path: str | None = None) -> bool:
+  """True for any published sha with the current class map (v3, or v2 fallback)."""
+  path = path or default_onnx_path()
+  if not weights_present(path):
+    return False
+  try:
+    return sha256_file(path).lower() in {h.lower() for h in COMPATIBLE_SHA256}
   except OSError:
     return False
 
@@ -148,7 +162,18 @@ def fetch_and_install(
 ) -> str:
   """Download the published ONNX (checksum) onto dest."""
   dest = dest or default_onnx_path()
+  default_src = url is None and not os.environ.get("NAP_SPEED_SIGN_ONNX_URL") and sha256 == ASSET_SHA256
   url = url or os.environ.get("NAP_SPEED_SIGN_ONNX_URL") or release_asset_url()
+  try:
+    return _fetch_verify(dest, url, sha256)
+  except Exception:
+    if not default_src:
+      raise
+    # v3 asset unreachable or bad: fall back to the class-compatible v2 asset.
+    return _fetch_verify(dest, release_asset_url(tag=FALLBACK_RELEASE_TAG), FALLBACK_SHA256)
+
+
+def _fetch_verify(dest: str, url: str, sha256: str | None) -> str:
   parent = os.path.dirname(os.path.abspath(dest)) or "."
   os.makedirs(parent, exist_ok=True)
   tmp = dest + ".download"

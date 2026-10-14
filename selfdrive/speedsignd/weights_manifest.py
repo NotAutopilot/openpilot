@@ -7,15 +7,17 @@ Weights stay off git. Clone/flash stays small;
 Source model: YOLOv8n, imgsz 320, opset 12. Trained on 640×640 native
 crops resized to 320 (scale 0.5), which matches the 628×320 road window
 letterboxed at 320/628 ≈ 0.51. Output `[1, 17, 2100]` (xywh + 13 classes).
-Do not commit the ONNX. Release: speed-sign-onnx-v2 / speed_sign.onnx.
+v3 (speed-sign-onnx-v3) is fine-tuned from v2 on capture-style crops
+(sign ~1/3 of a 240-480 px crop), same class order and output shape.
+Do not commit the ONNX. Release: speed-sign-onnx-v3 / speed_sign.onnx.
 """
 from __future__ import annotations
 
 # Host + tag for the pre-exported ONNX. Bump when republishing.
 GITHUB_REPO = "jmbrunick/openpilot"
-RELEASE_TAG = "speed-sign-onnx-v2"
+RELEASE_TAG = "speed-sign-onnx-v3"
 ASSET_NAME = "speed_sign.onnx"
-RELEASE_REVISION = "2"
+RELEASE_REVISION = "3"
 
 # HuggingFace checkpoint used by scripts.nap.export_speed_sign_onnx.
 # The shipped detector is the v2 Release asset, not a fresh export of this pt.
@@ -23,9 +25,17 @@ HF_REPO = "cvtechniques/JC-Traffic-Sign-Detection"
 HF_PT_PATH = "trainv8/weights/best.pt"
 HF_PT_SHA256 = "74089754755d904d724e07ec9d74488427decc11c1c8af323e2b4524664575ae"
 
-# SHA-256 of speed-sign-onnx-v2 / speed_sign.onnx (opset 12, 320²).
-ASSET_SHA256 = "1131200b7fe2d400596e09d7680fc3a26a08dcd8952acfdf261170bdb22d3d28"
-ASSET_BYTES = 12658953
+# SHA-256 of speed-sign-onnx-v3 / speed_sign.onnx (opset 12, 320²).
+ASSET_SHA256 = "45e8d444df547a1c9176fd904991e39c2ab8ae1a7624213178ce215b1ec6fb13"
+ASSET_BYTES = 12658971
+
+# v2 fallback: same 13-class order and [1, 17, 2100] output, so an
+# already-installed v2 file still loads, and Install falls back to the v2
+# asset if the v3 asset can't be downloaded.
+FALLBACK_RELEASE_TAG = "speed-sign-onnx-v2"
+FALLBACK_SHA256 = "1131200b7fe2d400596e09d7680fc3a26a08dcd8952acfdf261170bdb22d3d28"
+FALLBACK_BYTES = 12658953
+COMPATIBLE_SHA256 = (ASSET_SHA256, FALLBACK_SHA256)
 
 # CPU onnxruntime for the stock 3X. The image has neither onnxruntime nor
 # cv2.dnn (route 00000180: onnxruntime-absent(ModuleNotFoundError),
@@ -54,7 +64,7 @@ YOLO_IMGSZ = 320
 YOLO_INPUT_NAME = "images"
 YOLO_OUTPUT_LAYOUT = (1, 17, 2100)  # 4 + 13 classes, 2100 anchors
 
-# Class order from speed-sign-onnx-v2 metadata `names`.
+# Class order from speed-sign-onnx-v2/v3 metadata `names`.
 # 0 sl_25 … 9 sl_70, 10 sl_unreadable, 11 neg_yellow, 12 neg_other.
 # sl_unreadable may schedule the OCR second look. neg_* and sl_unreadable
 # are not mph.
