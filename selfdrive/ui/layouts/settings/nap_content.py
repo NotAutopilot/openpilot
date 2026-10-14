@@ -208,7 +208,7 @@ INSTALL_SPEED_SIGN_WEIGHTS_INSTRUCTIONS = """\
 Install speed-sign ONNX weights and the CPU runtime
 
 Downloads the published YOLOv8n ONNX (~12 MB) from GitHub Release
-speed-sign-onnx-v2 / speed_sign.onnx and writes
+speed-sign-onnx-v3 (v2 fallback) / speed_sign.onnx and writes
 /data/media/0/nap/speed_sign.onnx (SHA-256 checked). Replaces an older
 file at that path. Settings → Speed Sign Weights shows Out of date when
 the sha does not match — tap Install weights again. Do not keep the v1 file.

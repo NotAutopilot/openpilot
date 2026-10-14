@@ -1,4 +1,5 @@
 """Install-path helper: local copy and checksummed fetch onto /data."""
+import hashlib
 import os
 import zipfile
 from pathlib import Path
@@ -82,9 +83,9 @@ def test_cli_download_file_url(tmp_path):
 
 def test_manifest_points_at_github_release():
   url = release_asset_url()
-  assert "speed-sign-onnx-v2" in url
+  assert "speed-sign-onnx-v3" in url
   assert url.endswith("speed_sign.onnx")
-  assert ASSET_SHA256 == "1131200b7fe2d400596e09d7680fc3a26a08dcd8952acfdf261170bdb22d3d28"
+  assert ASSET_SHA256 == "45e8d444df547a1c9176fd904991e39c2ab8ae1a7624213178ce215b1ec6fb13"
 
 
 def test_weights_status_missing_and_installed(tmp_path):
@@ -325,3 +326,43 @@ def test_cli_also_installs_runtime(tmp_path, monkeypatch):
   assert main([str(src), "--out", str(dest)]) == 0
   assert called["yes"] is True
   assert called["sha"] == ORT_SHA256
+
+
+def test_v2_file_still_loadable_but_out_of_date(tmp_path, monkeypatch):
+  from openpilot.selfdrive.speedsignd import install as inst
+  p = tmp_path / "speed_sign.onnx"
+  p.write_bytes(b"v2" * 600_000)
+  digest = hashlib.sha256(p.read_bytes()).hexdigest()
+  monkeypatch.setattr(inst, "COMPATIBLE_SHA256", ("0" * 64, digest))
+  assert inst.weights_loadable(str(p))
+  assert not inst.weights_sha_matches(str(p))
+  assert inst.weights_status_summary(str(p)) == "Out of date"
+
+
+def test_fetch_falls_back_to_v2_when_v3_missing(tmp_path, monkeypatch):
+  from openpilot.selfdrive.speedsignd import install as inst
+  body = b"v2-bytes"
+  calls = []
+
+  def fake_download(url, dst):
+    calls.append(url)
+    if "speed-sign-onnx-v3" in url:
+      raise OSError("404")
+    with open(dst, "wb") as f:
+      f.write(body)
+    return len(body)
+
+  monkeypatch.delenv("NAP_SPEED_SIGN_ONNX_URL", raising=False)
+  monkeypatch.setattr(inst, "download_url", fake_download)
+  monkeypatch.setattr(inst, "FALLBACK_SHA256", hashlib.sha256(body).hexdigest())
+  dest = tmp_path / "speed_sign.onnx"
+  inst.fetch_and_install(dest=str(dest))
+  assert dest.read_bytes() == body
+  assert "speed-sign-onnx-v3" in calls[0] and "speed-sign-onnx-v2" in calls[1]
+
+
+def test_fetch_no_fallback_for_explicit_url(tmp_path, monkeypatch):
+  from openpilot.selfdrive.speedsignd import install as inst
+  monkeypatch.setattr(inst, "download_url", lambda u, d: (_ for _ in ()).throw(OSError("x")))
+  with pytest.raises(OSError):
+    inst.fetch_and_install(dest=str(tmp_path / "o.onnx"), url="file:///nope")
