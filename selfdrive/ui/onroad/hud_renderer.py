@@ -1,7 +1,10 @@
+import time
+
 import pyray as rl
 from dataclasses import dataclass
 from openpilot.common.constants import CV
 from openpilot.selfdrive.ui.onroad.exp_button import ExpButton
+from openpilot.selfdrive.ui.onroad.stoplight_chip import StoplightChip, chip_from_sm
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.multilang import tr
@@ -65,6 +68,8 @@ class HudRenderer(Widget):
     self.set_speed: float = SET_SPEED_NA
     self.speed: float = 0.0
     self.v_ego_cluster_seen: bool = False
+    self._stoplight = StoplightChip()
+    self.stoplight_chip: tuple[str, tuple[int, int, int, int]] | None = None
 
     self._font_semi_bold: rl.Font = gui_app.font(FontWeight.SEMI_BOLD)
     self._font_bold: rl.Font = gui_app.font(FontWeight.BOLD)
@@ -75,6 +80,7 @@ class HudRenderer(Widget):
   def _update_state(self) -> None:
     """Update HUD state based on car state and controls state."""
     sm = ui_state.sm
+    self.stoplight_chip = chip_from_sm(self._stoplight, sm, time.monotonic())
     if sm.recv_frame["carState"] < ui_state.started_frame:
       self.is_cruise_set = False
       self.set_speed = SET_SPEED_NA
@@ -114,6 +120,7 @@ class HudRenderer(Widget):
 
     if self.is_cruise_available:
       self._draw_set_speed(rect)
+    self._draw_stoplight(rect)
 
     self._draw_current_speed(rect)
 
@@ -165,6 +172,35 @@ class HudRenderer(Widget):
       FONT_SIZES.set_speed,
       0,
       set_speed_color,
+    )
+
+  def _draw_stoplight(self, rect: rl.Rectangle) -> None:
+    """RED LIGHT / GREEN - GO chip under the MAX box while stopped in Drive."""
+    if not self.stoplight_chip:
+      return
+    text, rgba = self.stoplight_chip
+    color = rl.Color(*rgba)
+    set_speed_width = UI_CONFIG.set_speed_width_metric if ui_state.is_metric else UI_CONFIG.set_speed_width_imperial
+    x = rect.x + 60 + (UI_CONFIG.set_speed_width_imperial - set_speed_width) // 2
+    y = rect.y + 45
+    if self.is_cruise_available:
+      y += UI_CONFIG.set_speed_height + 14
+    font_size = 36
+    text_size = measure_text_cached(self._font_bold, text, font_size)
+    h = 58
+    dot_r = 13
+    w = max(float(set_speed_width), text_size.x + 28 + dot_r * 2 + 12)
+    chip = rl.Rectangle(x, y, w, h)
+    rl.draw_rectangle_rounded(chip, 0.35, 8, COLORS.BLACK_TRANSLUCENT)
+    rl.draw_rectangle_rounded_lines_ex(chip, 0.35, 8, 4, color)
+    rl.draw_circle(int(x + 14 + dot_r), int(y + h / 2), dot_r, color)
+    rl.draw_text_ex(
+      self._font_bold,
+      text,
+      rl.Vector2(x + 14 + dot_r * 2 + 12, y + (h - text_size.y) / 2),
+      font_size,
+      0,
+      color,
     )
 
   def _draw_current_speed(self, rect: rl.Rectangle) -> None:

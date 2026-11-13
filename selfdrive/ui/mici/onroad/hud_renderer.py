@@ -1,7 +1,10 @@
+import time
+
 import pyray as rl
 from dataclasses import dataclass
 from openpilot.common.constants import CV
 from openpilot.selfdrive.ui.mici.onroad.torque_bar import TorqueBar
+from openpilot.selfdrive.ui.onroad.stoplight_chip import StoplightChip, chip_from_sm
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.multilang import tr
@@ -106,6 +109,8 @@ class HudRenderer(Widget):
     self.speed: float = 0.0
     self.v_ego_cluster_seen: bool = False
     self._engaged: bool = False
+    self._stoplight = StoplightChip()
+    self.stoplight_chip: tuple[str, tuple[int, int, int, int]] | None = None
 
     self._can_draw_top_icons = True
     self._show_wheel_critical = False
@@ -142,6 +147,7 @@ class HudRenderer(Widget):
   def _update_state(self) -> None:
     """Update HUD state based on car state and controls state."""
     sm = ui_state.sm
+    self.stoplight_chip = chip_from_sm(self._stoplight, sm, time.monotonic())
     if sm.recv_frame["carState"] < ui_state.started_frame:
       self.is_cruise_set = False
       self.set_speed = SET_SPEED_NA
@@ -176,6 +182,7 @@ class HudRenderer(Widget):
 
     if self.is_cruise_set:
       self._draw_set_speed(rect)
+    self._draw_stoplight(rect)
 
     self._draw_steering_wheel(rect)
 
@@ -262,6 +269,26 @@ class HudRenderer(Widget):
       0,
       max_color,
     )
+
+  def _draw_stoplight(self, rect: rl.Rectangle) -> None:
+    """RED LIGHT / GREEN - GO chip in the top-right corner while stopped in Drive.
+
+    MAX sits top-left and the wheel sits bottom-left, so this corner stays clear.
+    """
+    if not self.stoplight_chip:
+      return
+    text, rgba = self.stoplight_chip
+    color = rl.Color(*rgba)
+    size = 22
+    pad_x, pad_y = 10.0, 6.0
+    w = min(measure_text_cached(self._font_semi_bold, text, size).x + pad_x * 2, max(40.0, rect.width - 16.0))
+    h = size + pad_y * 2
+    x = rect.x + rect.width - w - 8
+    y = rect.y + 8
+    chip = rl.Rectangle(x, y, w, h)
+    rl.draw_rectangle_rounded(chip, 0.25, 6, rl.Color(0, 0, 0, 170))
+    rl.draw_rectangle_rounded_lines_ex(chip, 0.25, 6, 2, color)
+    rl.draw_text_ex(self._font_semi_bold, text, rl.Vector2(x + pad_x, y + pad_y), size, 0, color)
 
   def _draw_current_speed(self, rect: rl.Rectangle) -> None:
     """Draw the current vehicle speed and unit."""

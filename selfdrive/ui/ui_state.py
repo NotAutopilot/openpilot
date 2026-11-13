@@ -57,6 +57,7 @@ class UIState:
         "carOutput",
         "carControl",
         "liveParameters",
+        "stoplightNAP",
         "testJoystick",
         "rawAudioData",
         "liveTracks",

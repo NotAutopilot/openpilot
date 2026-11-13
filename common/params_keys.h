@@ -157,6 +157,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"NAPRadarUpsideDown", {PERSISTENT, BOOL}},
     {"NAPRadarVinReadStatus", {CLEAR_ON_MANAGER_START, STRING}},
     {"NAPScriptRunning", {CLEAR_ON_MANAGER_START, BOOL}},
+    // Ding when a red light turns green while stopped in Drive (stoplightd,
+    // road camera only). The HUD also flags the red. Default Off. Does not
+    // brake, steer, or change engagement. Off stops the camera reads.
+    {"NAPStoplightChime", {PERSISTENT, BOOL, "0"}},
     {"TermsVersion", {PERSISTENT, STRING}},
     {"TrainingVersion", {PERSISTENT, STRING}},
 };

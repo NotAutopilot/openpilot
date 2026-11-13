@@ -92,6 +92,9 @@ _services: dict[str, tuple] = {
   "livestreamWideRoadEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "livestreamRoadEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "livestreamDriverEncodeData": (False, 20., None, QueueSize.MEDIUM),
+  # Stoplight-green chime. ~4 Hz while stopped in Drive, 1 Hz otherwise.
+  # Frequency 0 is not health-checked; decimation 1 keeps it all in the qlog.
+  "stoplightNAP": (True, 0., 1),
   "customReservedRawData0": (True, 0.),
 }
 SERVICE_LIST = {name: Service(*vals) for

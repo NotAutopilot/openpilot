@@ -105,6 +105,10 @@ procs = [
   PythonProcess("maneuversd", "tools.longitudinal_maneuvers.maneuversd", long_maneuver),
   PythonProcess("lateral_maneuversd", "tools.lateral_maneuvers.lateral_maneuversd", lat_maneuver),
   PythonProcess("radard", "selfdrive.controls.radard", only_onroad),
+  # Stoplight-green ding (camera only, reads frames only while stopped in Drive).
+  # restart_if_crash so a daemon crash is retried rather than left down.
+  # Toggle Off (default) keeps it from starting at all.
+  PythonProcess("stoplightd", "selfdrive.stoplightd.stoplightd", and_(only_onroad, lambda s, p, cp: p.get_bool("NAPStoplightChime")), restart_if_crash=True),
   PythonProcess("hardwared", "system.hardware.hardwared", always_run),
   PythonProcess("modem", "system.hardware.tici.modem", always_run, enabled=TICI),
   PythonProcess("tombstoned", "system.tombstoned", always_run, enabled=not PC),

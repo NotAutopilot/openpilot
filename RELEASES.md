@@ -1,3 +1,7 @@
+NAP 2026-11-12
+========================
+* Optional green-light chime (default Off): while stopped in Drive, ding once when a red signal turns green, and show RED LIGHT / GREEN - GO on the HUD. Camera only; never brakes or steers.
+
 NAP 2026-09-02
 ========================
 * Fix card crash on clean Comma install (Tesla radar DBC)

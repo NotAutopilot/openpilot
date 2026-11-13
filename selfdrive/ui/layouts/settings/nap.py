@@ -25,6 +25,15 @@ from openpilot.selfdrive.ui.layouts.settings.nap_content import (
   pedal_calibration_entry_enabled,
 )
 from opendbc.car.tesla.preap.nap_params import NAPParamKeys, DEFAULTS
+
+# Not in opendbc NAPParamKeys; declared in common/params_keys.h. Default Off.
+NAP_STOPLIGHT_CHIME = "NAPStoplightChime"
+STOPLIGHT_CHIME_DESCRIPTION = (
+  "Default Off. While you are stopped in Drive, the road camera watches "
+  + "for the signal ahead. A red light shows a red flag on the screen; "
+  + "when that red turns green you hear a ding, once per stop. Camera "
+  + "only: it never brakes, steers, or changes engagement."
+)
 from openpilot.selfdrive.ui.radar.radar_view import RadarMonitorDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
 
@@ -208,6 +217,12 @@ class NAPLayout(Widget):
       "Force Pre-AP Mode",
       "Force the system to treat this vehicle as a Pre-Autopilot Tesla.",
       enabled=False,
+    )
+
+    self._add_toggle(
+      NAP_STOPLIGHT_CHIME,
+      "Green Light Chime",
+      STOPLIGHT_CHIME_DESCRIPTION,
     )
 
     # ── Section 6: Actions ──
@@ -621,6 +636,8 @@ class NAPLayout(Widget):
     # for non-UI consumers. Re-apply the lock after the wholesale loop
     # so reset doesn't silently flip the invariant.
     self._params.put_bool(NAPParamKeys.FORCE_PRE_AP, True)
+    # Not in opendbc DEFAULTS (no submodule bump). Factory reset restores Off.
+    self._params.put_bool(NAP_STOPLIGHT_CHIME, False)
 
   # ── Render / lifecycle ──
 

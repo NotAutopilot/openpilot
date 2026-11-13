@@ -11,6 +11,12 @@ from openpilot.common.realtime import Ratekeeper
 from openpilot.common.utils import retry
 from openpilot.common.swaglog import cloudlog
 
+from openpilot.selfdrive.ui.stoplight_chime import (
+  STOPLIGHT_CHIME_FILE,
+  STOPLIGHT_CHIME_ID,
+  floor_volume as stoplight_floor_volume,
+  should_ding as stoplight_should_ding,
+)
 from openpilot.system import micd
 from openpilot.system.hardware import HARDWARE
 
@@ -51,6 +57,8 @@ if HARDWARE.get_device_type() == "tizi":
     AudibleAlert.engage: ("engage_tizi.wav", 1, MAX_VOLUME),
     AudibleAlert.disengage: ("disengage_tizi.wav", 1, MAX_VOLUME),
   })
+# Stoplight-green ding. Played from stoplightNAP.chime, not from an alert.
+sound_list[STOPLIGHT_CHIME_ID] = (STOPLIGHT_CHIME_FILE, 1, MAX_VOLUME)
 
 def check_selfdrive_timeout_alert(sm):
   ss_missing = time.monotonic() - sm.recv_time['selfdriveState']
@@ -84,13 +92,19 @@ class Soundd:
     for sound in sound_list:
       filename, play_count, volume = sound_list[sound]
 
-      with wave.open(BASEDIR + "/selfdrive/assets/sounds/" + filename, 'r') as wavefile:
-        assert wavefile.getnchannels() == 1
-        assert wavefile.getsampwidth() == 2
-        assert wavefile.getframerate() == SAMPLE_RATE
+      try:
+        with wave.open(BASEDIR + "/selfdrive/assets/sounds/" + filename, 'r') as wavefile:
+          assert wavefile.getnchannels() == 1
+          assert wavefile.getsampwidth() == 2
+          assert wavefile.getframerate() == SAMPLE_RATE
 
-        length = wavefile.getnframes()
-        self.loaded_sounds[sound] = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
+          length = wavefile.getnframes()
+          self.loaded_sounds[sound] = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
+      except Exception:
+        if sound == STOPLIGHT_CHIME_ID:
+          cloudlog.exception("stoplight ding wav failed to load")
+          continue
+        raise
 
   def get_sound_data(self, frames): # get "frames" worth of data from the current alert sound, looping when required
 
@@ -138,6 +152,14 @@ class Soundd:
       self.update_alert(AudibleAlert.none)
       self.selfdrive_timeout_alert = False
 
+    # Stoplight green: one ding, only when no selfdrived sound is playing.
+    # A later AudibleAlert.none cannot cut it short (update_alert waits for
+    # one full play); a real alert sound still takes over.
+    if sm.updated.get('stoplightNAP', False) and stoplight_should_ding(sm['stoplightNAP']):
+      if self.current_alert == AudibleAlert.none or self.current_alert == STOPLIGHT_CHIME_ID:
+        self.current_alert = STOPLIGHT_CHIME_ID
+        self.current_sound_frame = 0
+
   def calculate_volume(self, weighted_db):
     volume = ((weighted_db - AMBIENT_DB) / DB_SCALE) * (MAX_VOLUME - MIN_VOLUME) + MIN_VOLUME
     return math.pow(VOLUME_BASE, (np.clip(volume, MIN_VOLUME, MAX_VOLUME) - 1))
@@ -153,7 +175,7 @@ class Soundd:
     # sounddevice must be imported after forking processes
     import sounddevice as sd
 
-    sm = messaging.SubMaster(['selfdriveState', 'soundPressure'])
+    sm = messaging.SubMaster(['selfdriveState', 'soundPressure', 'stoplightNAP'])
 
     with self.get_stream(sd) as stream:
       rk = Ratekeeper(20)
@@ -174,6 +196,8 @@ class Soundd:
           elapsed = time.monotonic() - self.ramp_start_time
           ramp_vol = float(np.interp(elapsed, [0, ALERT_RAMP_TIME], [self.ramp_start_volume, MAX_VOLUME]))
           self.current_volume = max(self.current_volume, ramp_vol)
+
+        self.current_volume = stoplight_floor_volume(self.current_alert, self.current_volume)
 
         rk.keep_time()
 

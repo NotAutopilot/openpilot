@@ -239,6 +239,9 @@ class NAPLayoutMici(NavScroller):
     force_pre_ap = BigParamControl("force pre-ap mode", NAPParamKeys.FORCE_PRE_AP)
     force_pre_ap.set_enabled(False)
 
+    stoplight_chime = BigParamControl("green light chime", "NAPStoplightChime")
+    stoplight_chime.set_value("Off default — ding when the red turns green while stopped")
+
     # ── Actions ──────────────────────────────────────
     backup_epas_btn = BigButton("backup epas", "extract")
     backup_epas_btn.set_click_callback(
@@ -272,6 +275,7 @@ class NAPLayoutMici(NavScroller):
       radar_settings_btn,
       ibooster_enabled,
       force_pre_ap,
+      stoplight_chime,
       backup_epas_btn,
       flash_epas_btn,
       restore_epas_btn,
