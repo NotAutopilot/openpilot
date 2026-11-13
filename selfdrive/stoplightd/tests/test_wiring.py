@@ -22,16 +22,17 @@ def text(rel):
 
 def test_message_and_service():
   log = text("cereal/log.capnp")
-  assert re.search(r"stoplightNAP @113 :Custom\.StoplightNAP;", log)
+  assert re.search(r"napVision @113 :Custom\.NapVision;", log)
   assert "customReserved6" not in log
   custom = text("cereal/custom.capnp")
-  assert "struct StoplightNAP @0xf98d843bfd7004a3" in custom
-  body = custom.split("struct StoplightNAP", 1)[1].split("\n}", 1)[0]
-  ords = [int(n) for n in re.findall(r"@(\d+)\s*:", body)]
-  assert ords == list(range(len(ords)))
+  assert "struct NapVision @0xf98d843bfd7004a3" in custom
+  assert "stoplight :group" in custom
+  group = custom.split("stoplight :group", 1)[1].split("\n  }", 1)[0]
+  ords = [int(n) for n in re.findall(r"@(\d+)\s*:", group)]
+  assert ords == list(range(14))
   for field in ("chime", "chimeCount", "redLight", "green", "gated", "enabled"):
-    assert re.search(rf"\b{field} @\d+", body), field
-  assert '"stoplightNAP": (True, 0., 1)' in text("cereal/services.py")
+    assert re.search(rf"\b{field} @\d+", group), field
+  assert '"napVision": (True, 0., 1)' in text("cereal/services.py")
 
 
 def test_process_and_param():
@@ -57,13 +58,14 @@ def test_no_carstate_reader():
 def test_soundd_plays_ding():
   sound = text("selfdrive/ui/soundd.py")
   assert "sound_list[STOPLIGHT_CHIME_ID] = (STOPLIGHT_CHIME_FILE, 1, MAX_VOLUME)" in sound
-  assert "'stoplightNAP'" in sound.split("def soundd_thread", 1)[0] or "'stoplightNAP'" in sound
+  assert "'napVision'" in sound.split("def soundd_thread", 1)[0] or "'napVision'" in sound
   alert = sound.split("def get_audible_alert", 1)[1].split("\n  def ", 1)[0]
   # The ding is checked after selfdriveState and never preempts a playing alert.
-  assert alert.index("selfdriveState") < alert.index("stoplightNAP")
+  assert alert.index("selfdriveState") < alert.index("napVision")
+  assert "sm['napVision'].stoplight" in alert
   assert "self.current_alert == AudibleAlert.none or self.current_alert == STOPLIGHT_CHIME_ID" in alert
   assert "stoplight_floor_volume(self.current_alert" in sound
-  assert '"stoplightNAP"' in text("selfdrive/ui/ui_state.py")
+  assert '"napVision"' in text("selfdrive/ui/ui_state.py")
 
 
 def test_chime_helpers():
@@ -114,7 +116,7 @@ def test_chip_states():
   assert chip.update(msg, 0.1, 5.0) is None
   msg.gated, msg.green, msg.redLight = True, False, True
   assert chip.update(msg, 9.0, 6.0) is None  # stale
-  sm = SimpleNamespace(seen={"stoplightNAP": False}, recv_time={}, __getitem__=None)
+  sm = SimpleNamespace(seen={"napVision": False}, recv_time={}, __getitem__=None)
   assert chip_from_sm(chip, sm, 1.0) is None
 
 

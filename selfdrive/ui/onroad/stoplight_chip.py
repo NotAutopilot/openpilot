@@ -1,10 +1,10 @@
-"""HUD chip for the stoplight-green chime (stoplightNAP). No raylib here.
+"""HUD chip for the stoplight-green chime (napVision.stoplight). No raylib here.
 
   RED LIGHT   while stoplightd sees a confirmed red ahead and the car is
               stopped in Drive.
   GREEN - GO  for GREEN_FLASH_S after the red turned green (the ding).
 
-Nothing shows while moving, with the toggle Off, or when stoplightNAP has
+Nothing shows while moving, with the toggle Off, or when napVision has
 gone quiet for STALE_S (stoplightd not running).
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ class StoplightChip:
     self._green_since: float | None = None
 
   def update(self, msg, age_s: float, now: float) -> tuple[str, tuple[int, int, int, int]] | None:
-    """(text, rgba) to draw, or None. age_s: seconds since the last stoplightNAP."""
+    """(text, rgba) to draw, or None. age_s: seconds since the last napVision."""
     try:
       live = msg is not None and age_s <= STALE_S and bool(msg.enabled) and bool(msg.gated)
       green = live and bool(msg.green)
@@ -45,11 +45,13 @@ class StoplightChip:
 
 
 def chip_from_sm(chip: StoplightChip, sm, now: float):
-  """Read stoplightNAP from a SubMaster. now is time.monotonic() (SubMaster recv_time clock)."""
+  """Read napVision.stoplight from a SubMaster. now is time.monotonic() (SubMaster recv_time clock)."""
   try:
-    if not sm.seen.get("stoplightNAP", False):
+    if not sm.seen.get("napVision", False):
       return chip.update(None, 1e9, now)
-    age = now - float(sm.recv_time["stoplightNAP"])
-    return chip.update(sm["stoplightNAP"], age, now)
+    age = now - float(sm.recv_time["napVision"])
+    vision = sm["napVision"]
+    light = None if vision is None else vision.stoplight
+    return chip.update(light, age, now)
   except Exception:
     return None

@@ -1,7 +1,7 @@
 """Sound id for the stoplight-green ding.
 
 Kept out of soundd so tests can import it without cereal. stoplightd sets
-stoplightNAP.chime on the one message where a red signal turned green
+napVision.stoplight.chime on the one message where a red signal turned green
 while the car sat stopped in Drive; soundd plays light_green.wav once.
 It never interrupts a selfdrived alert sound that is still playing.
 """
@@ -16,7 +16,7 @@ STOPLIGHT_CHIME_MIN_VOLUME = 0.7
 
 
 def should_ding(msg) -> bool:
-  """True for a stoplightNAP message that carries the ding."""
+  """True for a napVision.stoplight group that carries the ding."""
   try:
     return bool(msg.enabled) and bool(msg.chime)
   except Exception:
