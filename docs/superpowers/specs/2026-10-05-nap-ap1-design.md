@@ -245,3 +245,40 @@ Implementation order (each step independently testable):
 - **Stock Autosteer interaction** (§4.6): may produce IC warnings; acceptable for this milestone.
 - **Jerk ramp after gas override:** ported as Lukas runs it; if braking feels late after a gas override on AP1, revisit `JERK_RAMP_RATE`.
 - **Detection window:** the existing CAN fingerprint stops after ~1 s once no candidates remain; `0x2B9` at ~25 Hz and `0x488` at 50 Hz arrive well within that.
+
+## 11. Addendum (2026-11-13): the AP1 car is a Model X
+
+The assumption in §10 was wrong: the AP1 car is a Model X. On the first on-car attempt `nap-ap1` identified it as `TESLA_MODEL_S_HW1` (Lukas' build identifies it correctly) and showed an unrecorded error shortly after driving off. This addendum supersedes §5.1–5.3 and §6 where they differ.
+
+### 11.1 Root cause
+
+- `nap_detect` returned `TESLA_MODEL_S_HW1` for every AP1 car, auto-detected or forced.
+- `car_helpers.fingerprint()` set `skip_fw_query = True` whenever `NAPCarType` was set, so the EPAS firmware fingerprint that stock fingerprinting (and xnor) uses to tell a Model X from a Model S was never consulted. The data itself is intact: NAP's `fingerprints.py` has the same `TESLA_MODEL_X_HW1` EPAS version as xnor (`1057658-00-00B`) and `match_fw_to_car` resolves it.
+- `nap_profiles` and the Car Type UI had no Model X entry.
+
+### 11.2 Detection (replaces the table in §5.2)
+
+| `NAPCarType` | Behavior | `fingerprintSource` |
+|---|---|---|
+| `1` Pre-AP | Pin `TESLA_MODEL_S_PREAP`, no FW query | `fixed` |
+| `2` AP1 Model S | Pin `TESLA_MODEL_S_HW1`, no FW query | `fixed` |
+| `3` AP1 Model X | Pin `TESLA_MODEL_X_HW1`, no FW query | `fixed` |
+| `0` Auto | Run the CAN fingerprint window first. No AP ECU → Pre-AP, no FW query. AP ECU present → run the stock VIN/FW query, then `detect_legacy_platform(finger, fw_candidates)` | `fw` when the EPAS firmware decided, else `can` |
+
+`detect_legacy_platform`, with the AP ECU present: exactly one of the two AP1 platforms among the FW candidates → that platform; otherwise fall back to the seatbelt message: `SDM1` (`0x201`) seen on bus 0/2 → Model S, absent → Model X (Tesla Unity reads `SDM1` on S and `RCM_status` on X, and its AP1 fingerprints differ the same way). `SKIP_FW_QUERY` in the environment is still respected.
+
+In Auto the CAN window now runs before the FW query (stock order is the reverse) because the FW query must never run on Pre-AP; the window's result is reused instead of running a second one. `set_obd_multiplexing(False)` is called before it, as before the stock CAN window.
+
+The `nap_car_detect` log event gains `decided_by` (`epas_fw` / `sdm1` / `no_ap_ecu`) and `fw_versions`, so an unrecognised EPAS version can be read from a log and added to `fingerprints.py`.
+
+### 11.3 Profiles, label, UI
+
+- `PROFILE_FOR_PLATFORM["TESLA_MODEL_X_HW1"] = "ap1x"`, label `"AP1 Model X"`. `"ap1"` remains the AP1 Model S profile. A device that drove the X while it was misidentified has that data in `"ap1"`; the X starts fresh in `"ap1x"` (one recalibration).
+- `car_label`: `"(forced)"` only when `fingerprintSource == "fixed"`, otherwise `"(auto)"`.
+- Car Type options: `Auto` / `Pre-AP` / `AP1 S` / `AP1 X` (values 0–3) in both panels. A device previously set to `2` now reads "AP1 S".
+
+### 11.4 Still unverified on the Model X
+
+- Lukas has a recorded test route for Model S HW1 but lists `TESLA_MODEL_X_HW1` under `non_tested_cars`.
+- The error seen on the first attempt was not recorded. Differences from Lukas' build that remain on the X path: openpilot sends `DAS_bodyControls` at 10 Hz while engaged and the panda blocks the AP ECU's copy then (§4.1, §4.4); a first visit to a new profile clears calibration, so engagement is refused until calibration completes.
+- `GTW_carConfig.GTW_chassisType` could identify the chassis passively, but no value table exists in the DBC or its history, so it is not used.

@@ -1,6 +1,6 @@
 """NAP per-car profiles: each car keeps its own learned state and driving prefs.
 
-One comma moves between a Pre-AP and an AP1 Model S. card calls switch_profile()
+One comma moves between a Pre-AP Model S and an AP1 car. card calls switch_profile()
 right after fingerprinting and before it writes CarParams. calibrationd, paramsd,
 torqued, and lagd all block on CarParams before loading their saved values, so
 they always load the incoming car's.
@@ -15,10 +15,12 @@ ACTIVE_PROFILE_KEY = "NAPActiveProfile"
 PROFILE_FOR_PLATFORM = {
   "TESLA_MODEL_S_PREAP": "preap",
   "TESLA_MODEL_S_HW1": "ap1",
+  "TESLA_MODEL_X_HW1": "ap1x",
 }
 PROFILE_LABELS = {
   "preap": "Pre-AP Model S",
   "ap1": "AP1 Model S",
+  "ap1x": "AP1 Model X",
 }
 
 # Learned per car. Removed when the incoming car has none saved, so its learners start fresh.
@@ -39,7 +41,8 @@ def car_label(CP) -> str:
   profile = profile_for_platform(CP.carFingerprint)
   if profile is None:
     return ""
-  mode = "auto" if CP.fingerprintSource == "can" else "forced"
+  # Auto decides from CAN (AP ECU, seatbelt message) or from the EPAS firmware; only a forced type is "fixed"
+  mode = "forced" if CP.fingerprintSource == "fixed" else "auto"
   return f"{PROFILE_LABELS[profile]} ({mode})"
 
 

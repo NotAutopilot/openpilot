@@ -110,8 +110,8 @@ class NAPLayout(Widget):
 
     self._car_type_buttons = multiple_button_item(
       "Car Type",
-      "Auto picks AP1 when the Autopilot computer is on the harness, otherwise Pre-AP. "
-      + "Takes effect at the next ignition.",
+      "Auto picks AP1 when the Autopilot computer is on the harness (Model S or Model X from the "
+      + "steering firmware), otherwise Pre-AP. Takes effect at the next ignition.",
       buttons=CAR_TYPE_LABELS,
       button_width=170,
       selected_index=car_type_index(self._params.get(NAPParamKeys.CAR_TYPE, return_default=True)),

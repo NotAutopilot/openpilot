@@ -23,8 +23,8 @@ RADAR_OFFSET_MIN = -2.0
 RADAR_OFFSET_MAX = 2.0
 
 # NAPCarType options (see opendbc/car/tesla/nap_detect.py)
-CAR_TYPE_VALUES = [0, 1, 2]
-CAR_TYPE_LABELS = ["Auto", "Pre-AP", "AP1"]
+CAR_TYPE_VALUES = [0, 1, 2, 3]
+CAR_TYPE_LABELS = ["Auto", "Pre-AP", "AP1 S", "AP1 X"]
 
 
 def car_type_index(value) -> int:

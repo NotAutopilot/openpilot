@@ -9,6 +9,7 @@ from openpilot.selfdrive.car.nap_profiles import car_label, switch_profile
 
 PREAP = "TESLA_MODEL_S_PREAP"
 HW1 = "TESLA_MODEL_S_HW1"
+HW1_X = "TESLA_MODEL_X_HW1"
 
 
 def car_params_bytes(platform: str) -> bytes:
@@ -110,8 +111,34 @@ def test_active_profile_written_before_restore(live, root, monkeypatch):
   assert Params(os.path.join(root, "preap")).get("CalibrationParams") == b"preap-calib"
 
 
+def test_preap_model_s_and_ap1_model_x_keep_separate_state(live, root):
+  live.put("NAPActiveProfile", "preap", block=True)
+  live.put("CalibrationParams", b"preap-calib", block=True)
+
+  assert switch_profile(live, HW1_X, root) == "ap1x"
+  assert live.get("CalibrationParams") is None  # Model X seen for the first time
+  live.put("CalibrationParams", b"model-x-calib", block=True)
+
+  assert switch_profile(live, PREAP, root) == "preap"
+  assert live.get("CalibrationParams") == b"preap-calib"
+
+  assert switch_profile(live, HW1_X, root) == "ap1x"
+  assert live.get("CalibrationParams") == b"model-x-calib"
+
+
+def test_ap1_model_s_and_model_x_are_different_profiles(live, root):
+  live.put("NAPActiveProfile", "ap1", block=True)
+  live.put("CalibrationParams", b"model-s-calib", block=True)
+
+  assert switch_profile(live, HW1_X, root) == "ap1x"
+  assert live.get("CalibrationParams") is None
+  assert Params(os.path.join(root, "ap1")).get("CalibrationParams") == b"model-s-calib"
+
+
 @pytest.mark.parametrize("platform, source, expected", [
   (HW1, "can", "AP1 Model S (auto)"),
+  (HW1_X, "fw", "AP1 Model X (auto)"),  # Auto decided from the EPAS firmware
+  (HW1_X, "fixed", "AP1 Model X (forced)"),
   (PREAP, "fixed", "Pre-AP Model S (forced)"),
   ("HONDA_CIVIC", "fw", ""),
 ])
